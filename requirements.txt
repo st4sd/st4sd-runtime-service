@@ -1,0 +1,11 @@
+flask<=2.1.2
+flask-restx
+werkzeug<=2.1.2
+flask-cors
+tinydb
+kubernetes
+stream_zip
+six
+pytest
+pydantic
+gunicorn

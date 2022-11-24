@@ -1,0 +1,1464 @@
+swagger: '2.0'
+basePath: /
+paths:
+  /authorisation/token:
+    get:
+      responses:
+        '200':
+          description: Success
+        '401':
+          description: Unauthorised
+        '500':
+          description: Internal error while retrieving token
+      summary: Returns a token that can be used to authenticate to the service
+      operationId: get_authorisation_token
+      tags:
+        - authorisation
+  /datasets/:
+    get:
+      responses:
+        '400':
+          description: Unable to list Dataset resource - ensure that Dataset Lifecycle Framework is installed
+      operationId: get_dataset_list
+      tags:
+        - datasets
+  /datasets/s3/{id}:
+    parameters:
+      - in: path
+        description: The Dataset identifier
+        name: id
+        required: true
+        type: string
+    post:
+      responses:
+        '400':
+          description: Unable to create dataset - ensure that the Dataset Lifecycle Framework is installed
+        '409':
+          description: Dataset already exists
+      operationId: post_dataset
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/dataset-s3-configuration'
+      tags:
+        - datasets
+  /experiments/:
+    post:
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Experiment ID is invalid
+        '409':
+          description: Experiment ID already exists
+      summary: Add an experiment
+      operationId: post_experiment_list
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/virtual-experiment'
+      tags:
+        - experiments
+    get:
+      responses:
+        '200':
+          description: Success
+      summary: List all experiments
+      operationId: get_experiment_list
+      parameters:
+        - name: outputFormat
+          in: query
+          type: string
+          description: Output format
+          default: json
+          enum:
+            - json
+            - python
+            - python-pretty
+        - name: hideMetadataRegistry
+          in: query
+          type: string
+          description: Whether to hide hte registry metadata or not
+          default: 'n'
+          enum:
+            - 'y'
+            - 'n'
+        - name: hideNone
+          in: query
+          type: string
+          description: Whether to hide fields whose value is None
+          default: 'y'
+          enum:
+            - 'y'
+            - 'n'
+        - name: hideBeta
+          in: query
+          type: string
+          description: Whether to hide Beta fields
+          default: 'y'
+          enum:
+            - 'y'
+            - 'n'
+      tags:
+        - experiments
+  /experiments/lambda/start:
+    post:
+      responses:
+        '200':
+          description: <id_of_new_experiment_instance>
+        '400':
+          description: Malformed experiment creation request
+        '500':
+          description: Internal error while creating experiment
+      summary: Start a lambda experiment
+      operationId: post_lambda_experiment_start
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/experiment-lambda-start'
+      tags:
+        - experiments
+  /experiments/{identifier}:
+    parameters:
+      - in: path
+        description: The package identifier. It must contain a $packageName and may include either a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`). If both suffixes are missing then the identifier implies the `:latest` tag suffix.
+        name: identifier
+        required: true
+        type: string
+    delete:
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: Unknown experiment
+        '500':
+          description: Internal error
+      summary: Delete an experiment
+      operationId: delete_experiment
+      tags:
+        - experiments
+    get:
+      responses:
+        '404':
+          description: Unknown experiment
+      summary: Fetch an experiment given its identifier
+      operationId: get_experiment
+      parameters:
+        - name: outputFormat
+          in: query
+          type: string
+          description: Output format
+          default: json
+          enum:
+            - json
+            - python
+            - python-pretty
+        - name: hideMetadataRegistry
+          in: query
+          type: string
+          description: Whether to hide hte registry metadata or not
+          default: 'n'
+          enum:
+            - 'y'
+            - 'n'
+        - name: hideNone
+          in: query
+          type: string
+          description: Whether to hide fields whose value is None
+          default: 'y'
+          enum:
+            - 'y'
+            - 'n'
+        - name: hideBeta
+          in: query
+          type: string
+          description: Whether to hide Beta fields
+          default: 'y'
+          enum:
+            - 'y'
+            - 'n'
+      tags:
+        - experiments
+  /experiments/{identifier}/start:
+    parameters:
+      - in: path
+        description: The package identifier. It must contain a $packageName and may include either a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`). If both suffixes are missing then the identifier implies the `:latest` tag suffix.
+        name: identifier
+        required: true
+        type: string
+    post:
+      responses:
+        '200':
+          description: <rest_uid_of_new_experiment_instance>
+        '400':
+          description: Malformed experiment creation request
+        '404':
+          description: Experiment not found
+        '500':
+          description: Internal error while creating experiment
+      summary: Start an experiment given its identifier
+      operationId: post_experiment_start
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/experiment-start'
+      tags:
+        - experiments
+  /experiments/{identifier}/tag:
+    parameters:
+      - in: path
+        description: The package identifier. It must contain a $packageName and may include either a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`). If both suffixes are missing then the identifier implies the `:latest` tag suffix.
+        name: identifier
+        required: true
+        type: string
+    put:
+      responses:
+        '404':
+          description: No matching parameterised package
+        '500':
+          description: Internal error while updating tags of parameterised package
+      summary: Updates the tags associated with the parameterised package that matches the identifier
+      operationId: put_experiment_package_tag
+      parameters:
+        - name: newTags
+          in: query
+          type: string
+          required: true
+          description: 'Comma separated tags to replace those associated with the $identifier. Each tag must contain lowercase letters, numbers, and -. characters. Each tag must start and end with a lowercase letter or a number. The service will untag other parameterised packages with the same `metadata.package.name` to ensure that the $newTags are only associated with the parameterised package $identifier. If the definition of the $identifier contains the `latest` tag then $newTags must also contain the `latest` tag. '
+      tags:
+        - experiments
+  /experiments/{package_name}/history:
+    parameters:
+      - in: path
+        description: The package name. It must not include a tag (:${tag}) or a digest (@${digest})
+        name: package_name
+        required: true
+        type: string
+    get:
+      responses:
+        '200':
+          description: Success
+          schema:
+            $ref: '#/definitions/package-history'
+        '400':
+          description: Malformed experiment creation request
+        '404':
+          description: No matching experiments found
+        '500':
+          description: Internal error while creating experiment
+      summary: Returns the history of tags and digests for this package
+      operationId: get_experiment_package_history
+      tags:
+        - experiments
+  /image-pull-secrets/:
+    get:
+      responses:
+        '200':
+          description: Success
+          schema:
+            type: object
+            default: { }
+            example:
+              k8s-secret-name:
+                - url-docker-registry1
+                - url-docker-registry2
+      summary: List all imagePullSecrets, returns a Dictionary whose keys are names of Secrets and values lists of docker
+      description: registry urls.
+      operationId: get_image_pull_secrets_list
+      tags:
+        - image-pull-secrets
+  /image-pull-secrets/{id}:
+    parameters:
+      - in: path
+        description: The imagePullSecret identifier
+        name: id
+        required: true
+        type: string
+    put:
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: imagePullSecret not found
+        '500':
+          description: Internal error while retrieving imagePullSecret details
+      summary: Update an existing imagePullSecret
+      description: |-
+        This method does not check whether the contents of the Secret object are correct. In the remainder of this
+        text @configuration IS the contents of the `config.json` key of the `consumable-computing-config` ConfigMap
+        (or the ConfigMap object that the environment variable `CONSUMABLE_COMPUTING_CONFIGMAP_NAME` points to)
+
+        if imagePullSecret is already defined in in the @configuration this method returns 422
+        (imagePullSecret already exists).
+
+        if the imagePullSecret is not defined in the @configuration BUT the associated kubernetes object exists
+        this method will NOT override the contents of the Secret object with the contents of the request. It will
+        return 409 (imagePullSecret conflict with existing Secret object with the same name)
+
+        if the imagePullSecret is successfully created it will be available to use within a couple of minutes after
+        Kubernetes asynchronously refreshes the file whose contents are the @configuration.
+      operationId: put_image_pull_secret
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/imagepullsecret'
+      tags:
+        - image-pull-secrets
+    post:
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: imagePullSecret not found
+        '409':
+          description: imagePullSecret already exists
+        '422':
+          description: imagePullSecret conflicts with existing Secret object with the same name
+        '500':
+          description: Internal error while retrieving imagePullSecret details
+      summary: Create a new imagePullSecret
+      description: |-
+        This method does not check whether the contents of the Secret object are correct. In the remainder of this
+        text @configuration IS the contents of the `config.json` key of the `consumable-computing-config` ConfigMap
+        (or the ConfigMap object that the environment variable `CONSUMABLE_COMPUTING_CONFIGMAP_NAME` points to)
+
+        if imagePullSecret is already defined in in the @configuration this method returns 422
+        (imagePullSecret already exists).
+
+        if the imagePullSecret is not defined in the @configuration BUT the associated kubernetes object exists
+        this method will NOT override the contents of the Secret object with the contents of the request. It will
+        return 409 (imagePullSecret conflict with existing Secret object with the same name)
+
+        if the imagePullSecret is successfully created it will be available to use within a couple of minutes after
+        Kubernetes asynchronously refreshes the file whose contents are the @configuration.
+      operationId: post_image_pull_secret
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/imagepullsecret'
+      tags:
+        - image-pull-secrets
+    get:
+      responses:
+        '200':
+          description: Success
+          schema:
+            type: array
+            description: GET model for imagePullSecret with a given id
+            example:
+              - url-docker-registry1
+              - url-docker-registry2
+            items:
+              type: string
+              description: docker registry, e.g. res-drl-hpc-docker-local.artifactory.swg-devops.com
+              example: url-docker-registry
+        '404':
+          description: imagePullSecret not found
+        '500':
+          description: Internal error while retrieving imagePullSecret details
+      summary: Get imagePullSecret, returns a list of strings, each of which is a docker registry that the specified
+      description: imagePullSecret has pull access to
+      operationId: get_image_pull_secret
+      tags:
+        - image-pull-secrets
+  /instances/:
+    get:
+      responses:
+        '200':
+          description: Success
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/experiment-instance'
+      summary: List all instances of experiments
+      operationId: get_instance_experiment_list
+      parameters:
+        - name: X-Fields
+          in: header
+          type: string
+          format: mask
+          description: An optional fields mask
+      tags:
+        - instances
+  /instances/{id}:
+    parameters:
+      - in: path
+        description: The instance identifier
+        name: id
+        required: true
+        type: string
+    delete:
+      responses:
+        '404':
+          description: Instance not found
+      operationId: delete_instance
+      tags:
+        - instances
+    get:
+      responses:
+        '404':
+          description: Instance not found
+      summary: Fetch an instance given its name
+      operationId: get_instance
+      parameters:
+        - name: includeProperties
+          in: query
+          type: string
+          description: Comma separated columns found in the properties dataframe, or empty string, or `*` which is translated to "all columns in properties dataframe". Column query is case insensitive and returned DataFrame has columns with lowercase names Method silently discards columns that do not exist in DataFrame. When this argument exists, this method inserts
+      tags:
+        - instances
+  /instances/{id}/outputs:
+    parameters:
+      - in: path
+        description: The instance identifier
+        name: id
+        required: true
+        type: string
+    get:
+      responses:
+        '404':
+          description: Instance not found
+      summary: Fetch outputs of an instance given its identifier
+      operationId: get_instance_outputs
+      tags:
+        - instances
+  /instances/{id}/outputs/{key}:
+    parameters:
+      - in: path
+        description: The output key identifier
+        name: key
+        required: true
+        type: string
+      - in: path
+        description: The instance identifier
+        name: id
+        required: true
+        type: string
+    get:
+      responses:
+        '400':
+          description: Treated a file output as a folder OR asked for a file that is contained outside the tree of a folder key-output (look for field isFolder OR fileInFolder to differentiate)
+        '404':
+          description: Instance OR key-output OR output-path not found (look for field unknownInstance OR outputsReady OR missingPath to differentiate)
+        '500':
+          description: Internal exception while handling request
+      summary: Fetch outputs of an instance given its identifier
+      operationId: get_instance_outputs_key
+      tags:
+        - instances
+  /instances/{id}/properties:
+    parameters:
+      - in: path
+        description: The instance identifier
+        name: id
+        required: true
+        type: string
+    get:
+      responses:
+        '400':
+          description: Instance has not finished measuring properties yet, or there was a problem loading the properties
+        '404':
+          description: Instance not found
+      summary: Fetch columns from the measured properties of an instance given its identifier
+      operationId: get_instance_properties
+      parameters:
+        - name: includeProperties
+          in: query
+          type: string
+          description: Comma separated columns found in the properties dataframe, or empty string, or `*` which is translated to "all columns in properties dataframe". Column query is case insensitive and returned DataFrame has columns with lowercase names Method silently discards columns that do not exist in DataFrame.
+          default: '*'
+      tags:
+        - instances
+  /instances/{id}/status:
+    parameters:
+      - in: path
+        description: The instance identifier
+        name: id
+        required: true
+        type: string
+    get:
+      responses:
+        '404':
+          description: Instance not found
+      summary: Fetch status of an instance given its identifier
+      description: |-
+        The status field contains:
+        - `exit-status`: The status of the completed experiment. This receives its final value *after* `experiment-state` transitions to either `finished` or `failed`. Value is one of `["Success", "Failed", "Stopped", ""]`. Value may be empty while Kubernetes initializes opbjects.
+        - `experiment-state`: Indicates the state of the orchestrator that is executing the experiment tasks. **Not** to be confused with status of experiment (`exit-status`). For example, an experiment status can have `experiment-state=finished` with `exit-status=failed`. This means that the experiment completed with a failure. The value of `experiment-state` is one of `["unscheduled", "running", "finished", "failed", "unschedulable", ""]`. Value may be empty while Kubernetes initializes opbjects.
+        - `stage-state`: Indicates the state of the active stage in the experiment with the lowest stage index. Value is one of `["Initializing", "finished", "waiting_on_resource","running", "component_shutdown", "failed"]`
+        - `error-description`: A string, which when printed is a human readable description that explains why `exit-status` is `Failed`.
+        - `total-progress`: A number in [0.0, 1.0] indicating the progress of the experiment. Note that workflow developers may decide to control this value.
+        - `stage-progress`: A number in [0.0, 1.0] indicating the progress of the active stage with the lowest stage index. Note that workflow developers may decide to control this value.
+        - `stages`: A list of human-readable stage names
+        - `current-stage`: UID of stage (e.g. `stage0`)
+        - `meta`: This is a nested dictionary
+          - `arguments`: The command-line of the orchestrator
+          - `data`: The list of files that override data files
+          - `input`: The list of input files
+          - `pid`: The process ID of the st4sd orchestrator
+          - `platform`: The name of the platform that the virtual experiment instance executes
+          - `userVariables`: User provided variables, the schema is  `{'global':{name:value}, 'stages':{index:{name:value}}}`
+          - `variables`: Global and stage variables active in the `platform`-scope that the virtual experiment executes. The schema is `{'global':{name:value}, 'stages':{index:{name:value}}}`
+          - `hybridPlatform`: Name of hybrid-platform for communicating with LSF (can be None),
+          - `userMetadata`: A dictionary with `key(str): Any` value pairs that users can provide
+          - `instanceName`: The name of the directory containing the virtual experiment instance.
+          - `version`: The version of the st4sd orchestrator
+      operationId: get_instance_status
+      tags:
+        - instances
+  /query/experiments/:
+    post:
+      responses:
+        '200':
+          description: Success
+      operationId: post_query_experiments
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/query-experiments'
+      tags:
+        - query
+  /relationships/:
+    post:
+      responses:
+        '200':
+          description: Success
+      operationId: post_relationships
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/relationship'
+      tags:
+        - relationships
+    get:
+      responses:
+        '200':
+          description: Success
+      operationId: get_relationships
+      parameters:
+        - name: outputFormat
+          in: query
+          type: string
+          description: Output format
+          default: json
+          enum:
+            - json
+            - python
+            - python-pretty
+        - name: hideNone
+          in: query
+          type: string
+          description: Whether to hide fields whose value is None
+          default: 'y'
+          enum:
+            - 'y'
+            - 'n'
+      tags:
+        - relationships
+  /relationships/{identifier}:
+    parameters:
+      - name: identifier
+        in: path
+        required: true
+        type: string
+    delete:
+      responses:
+        '200':
+          description: Success
+      operationId: delete_relationship
+      tags:
+        - relationships
+    get:
+      responses:
+        '200':
+          description: Success
+      operationId: get_relationship
+      tags:
+        - relationships
+  /relationships/{identifier}/synthesize/{new_package_name}:
+    parameters:
+      - name: identifier
+        in: path
+        required: true
+        type: string
+      - name: new_package_name
+        in: path
+        required: true
+        type: string
+    post:
+      responses:
+        '200':
+          description: Success
+      operationId: post_transform_synthesize
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/relationship'
+      tags:
+        - relationships
+  /url-map/:
+    get:
+      responses:
+        '200':
+          description: Success
+        '401':
+          description: Unauthorised
+        '500':
+          description: Internal error while generating url-map
+      summary: 'Returns a dictionary containing the URL of each of the keys:'
+      description: |-
+        - consumable-computing
+        - cdb-rest
+        - cdb-gateway-registry
+
+        FIXME: The above names are deprecated and should change to:
+        - st4sd-runtime-service
+        - st4sd-datastore-mongodb-proxy
+        - st4sd-datastore-registry
+
+        Prioritizes global Datastore routes (if available).
+      operationId: get_url_map_all
+      tags:
+        - url-map
+  /url-map/{service}:
+    parameters:
+      - in: path
+        description: Service identifier (i.e consumable-computing, cdb-rest, cdb-gateway-registry)
+        name: service
+        required: true
+        type: string
+    get:
+      responses:
+        '200':
+          description: Success
+        '401':
+          description: Unauthorised
+        '404':
+          description: Unknown service
+        '500':
+          description: Internal error while generating url-map
+      summary: 'Returns the URL of one of the services:'
+      description: |-
+        - consumable-computing
+        - cdb-rest
+        - cdb-gateway-registry
+
+        FIXME: The above names are deprecated and should change to:
+        - st4sd-runtime-service
+        - st4sd-datastore-mongodb-proxy
+        - st4sd-datastore-registry
+
+        Prioritizes global Datastore routes (if available).
+      operationId: get_url_service
+      tags:
+        - url-map
+info:
+  title: Runtime Service of the Simulation Toolkit for Scientific Discovery (ST4SD)
+  version: '1.0'
+  description: Launch/Monitor/Stop experiments
+produces:
+  - application/json
+consumes:
+  - application/json
+tags:
+  - name: authorisation
+    description: Operations to interact with authorization token(s)
+  - name: datasets
+    description: Datashim related operations
+  - name: experiments
+    description: Experiments related operations
+  - name: image-pull-secrets
+    description: Operations to view/create/edit imagePullSecrets
+  - name: instances
+    description: Instances of Experiments related operations
+  - name: query
+    description: Query operations
+  - name: relationships
+  - name: url-map
+    description: Operations to interact with workflow software stack URLs
+definitions:
+  dataset-s3-configuration:
+    required:
+      - accessKeyID
+      - bucket
+      - endpoint
+      - secretAccessKey
+    properties:
+      accessKeyID:
+        type: string
+        description: Access key id
+        default: ''
+      secretAccessKey:
+        type: string
+        description: Secret access key
+        default: ''
+      bucket:
+        type: string
+        description: Name of bucket
+        default: ''
+      endpoint:
+        type: string
+        description: Endpoint URL (e.g. https://s3.eu-gb.cloud-object-storage.appdomain.cloud)
+        default: ''
+      region:
+        type: string
+        description: Region (optional)
+        default: ''
+    type: object
+  virtual-experiment:
+    properties:
+      base:
+        $ref: '#/definitions/base'
+      parameterisation:
+        $ref: '#/definitions/registry-entry-parameterisation'
+      metadata:
+        $ref: '#/definitions/registry-entry-metadata'
+    type: object
+  base:
+    properties:
+      packages:
+        type: array
+        items:
+          $ref: '#/definitions/base-package'
+    type: object
+  base-package:
+    properties:
+      name:
+        type: string
+        description: Unique name of base package in this virtual experiment entry. Defaults to "main"
+        default: main
+      source:
+        $ref: '#/definitions/base-source'
+      config:
+        $ref: '#/definitions/base-source-config'
+      dependencies:
+        type: array
+        items:
+          $ref: '#/definitions/base-dependencies'
+    type: object
+  base-source:
+    properties:
+      git:
+        $ref: '#/definitions/base-source-git'
+      s3:
+        $ref: '#/definitions/base-source-s3'
+      dataset:
+        $ref: '#/definitions/base-source-dataset'
+    type: object
+  base-source-git:
+    properties:
+      security:
+        $ref: '#/definitions/base-source-git-security'
+      location:
+        $ref: '#/definitions/base-source-git-location'
+    type: object
+  base-source-git-security:
+    properties:
+      oauth:
+        $ref: '#/definitions/base-source-git-security-oauth'
+    type: object
+  base-source-git-security-oauth:
+    properties:
+      valueFrom:
+        $ref: '#/definitions/base-source-git-security-oauth-valueFrom'
+    type: object
+  base-source-git-security-oauth-valueFrom:
+    properties:
+      secretKeyRef:
+        $ref: '#/definitions/base-source-git-security-oauth-valuefrom-secret'
+      value:
+        type: string
+        description: An OAuth token
+    type: object
+  base-source-git-security-oauth-valuefrom-secret:
+    properties:
+      name:
+        type: string
+        description: Name of Secret object
+      key:
+        type: string
+        description: Key in Secret object that holds token
+    type: object
+  base-source-git-location:
+    properties:
+      branch:
+        type: string
+        description: Git branch name
+      tag:
+        type: string
+        description: Git tag name
+      commit:
+        type: string
+        description: Git commit digest
+    type: object
+  base-source-s3:
+    properties:
+      security:
+        $ref: '#/definitions/base-source-s3-security'
+      location:
+        $ref: '#/definitions/base-source-s3-location'
+    type: object
+  base-source-s3-security:
+    properties:
+      valueFrom:
+        $ref: '#/definitions/base-source-s3-security'
+    type: object
+  base-source-s3-location:
+    properties:
+      region:
+        type: string
+        description: S3 region identifier
+      endpoint:
+        type: string
+        description: S3 endpoint
+      bucket:
+        type: string
+        description: Name of bucket
+    type: object
+  base-source-dataset:
+    properties:
+      security:
+        $ref: '#/definitions/base-source-dataset-security'
+    type: object
+  base-source-dataset-security:
+    properties:
+      fromValue:
+        $ref: '#/definitions/base-source-dataset-security-fromvalue'
+    type: object
+  base-source-dataset-security-fromvalue:
+    properties:
+      datasetRef:
+        $ref: '#/definitions/base-source-dataset-security-from-value-dataset'
+    type: object
+  base-source-dataset-security-from-value-dataset:
+    properties:
+      name:
+        type: string
+        description: Name of dataset object
+    type: object
+  base-source-config:
+    properties:
+      path:
+        type: string
+        description: Path relative to location specified by source of package
+      manifestPath:
+        type: string
+        description: The manifest path. relative to location specified by source of package
+    type: object
+  base-dependencies:
+    properties:
+      imageRegistries:
+        type: array
+        items:
+          $ref: '#/definitions/base-dependencies-imageregistry'
+    type: object
+  base-dependencies-imageregistry:
+    properties:
+      url:
+        type: string
+        default: Url of image registry
+      security:
+        $ref: '#/definitions/base-dependencies-imageregistry-security'
+    type: object
+  base-dependencies-imageregistry-security:
+    properties:
+      secretKeyRef:
+        $ref: '#/definitions/base-dependencies-imageregistry-security-secret'
+      usernamePassword:
+        $ref: '#/definitions/base-dependencies-imageregistry-security-value'
+    type: object
+  base-dependencies-imageregistry-security-secret:
+    properties:
+      name:
+        type: string
+        description: Name of Kubernetes Secret
+      key:
+        type: string
+        description: Name of key containing authentication information
+        default: .dockerconfigjson
+    type: object
+  base-dependencies-imageregistry-security-value:
+    properties:
+      username:
+        type: string
+        description: Username for container registry
+      password:
+        type: string
+        description: Password for container registry
+    type: object
+  registry-entry-parameterisation:
+    properties:
+      presets:
+        description: Specifies preset parameterisation which cannot be overridden by executionOptions or virtual experiment payload
+        allOf:
+          - $ref: '#/definitions/presets'
+      executionOptions:
+        description: Specifies which virtual experiment options can be configured by virtual experiment start payload
+        allOf:
+          - $ref: '#/definitions/execution-options'
+    type: object
+  presets:
+    properties:
+      variables:
+        type: array
+        description: Values of virtual experiment variables.
+        items:
+          $ref: '#/definitions/option'
+      data:
+        type: array
+        description: Contents of data files, name is the filename inside the data directory.
+        items:
+          $ref: '#/definitions/option'
+      runtime:
+        type: array
+        items:
+          $ref: '#/definitions/runtime-configuration'
+      environmentVariables:
+        type: array
+        items:
+          description: Environment variables to inject in the runtime orchestrator process.
+          allOf:
+            - $ref: '#/definitions/option'
+      platform:
+        type: string
+        default: Name of virtual experiment platform to use. If provided, the platform name cannot be overridden inside executionOptions or payload to start virtual experiment.
+    type: object
+  option:
+    properties:
+      name:
+        type: string
+        description: Name of option
+      valueFrom:
+        $ref: '#/definitions/option-definition-from'
+    type: object
+  option-definition-from:
+    properties:
+      value:
+        type: string
+        description: A constant value
+    type: object
+  runtime-configuration:
+    properties:
+      args:
+        type: array
+        items:
+          type: string
+          description: command line argument to runtime. These arguments cannot be overridden inside executionOptions or payload to start virtual experiment
+      orchestratorResources:
+        $ref: '#/definitions/orchestrator-resources'
+    type: object
+  orchestrator-resources:
+    properties:
+      cpu:
+        type: string
+        description: How much cpu to request for the elaunch container between (0.0, 1.0]
+      memory:
+        type: string
+        description: How much memory to request for the elaunch container specified inkubernetes format e.g. 5Gi
+    type: object
+  execution-options:
+    properties:
+      variables:
+        type: array
+        items:
+          $ref: '#/definitions/execution-option-choices'
+      data:
+        type: array
+        items:
+          $ref: '#/definitions/execution-data-choices'
+      runtime:
+        $ref: '#/definitions/execution-options-runtime'
+      platform:
+        type: array
+        items:
+          type: string
+          description: Name of virtual experiment platform
+    type: object
+  execution-option-choices:
+    properties:
+      name:
+        type: string
+        description: Name of option
+      valueFrom:
+        type: array
+        description: Array of possible values (default is 1st item in array)
+        items:
+          $ref: '#/definitions/option-definition-from'
+    type: object
+  execution-data-choices:
+    properties:
+      name:
+        type: string
+        description: Filename in data directory
+    type: object
+  execution-options-runtime:
+    properties:
+      args:
+        type: array
+        items:
+          type: string
+          description: Command line argument to runtime. Cannot override arguments in presets.runtime.args
+    type: object
+  registry-entry-metadata:
+    properties:
+      package:
+        $ref: '#/definitions/registry-entry-metadata-package'
+      registry:
+        $ref: '#/definitions/registry-entry-metadata-registry'
+    type: object
+  registry-entry-metadata-package:
+    properties:
+      name:
+        type: string
+        description: Name of virtual experiment
+      tags:
+        type: array
+        items:
+          type: string
+          description: An optional user-provided string to associate with virtual experiment digest
+          default: latest
+      maintainer:
+        type: string
+        description: String containing comma separated e-mails of maintainers
+      license:
+        type: string
+        description: String containing the license
+      labels:
+        type: object
+        description: 'Labels in the form of key: value pairs'
+    type: object
+  registry-entry-metadata-registry:
+    properties:
+      digest:
+        type: string
+        description: Unique digest identification of this experiment registry
+      tags:
+        type: array
+        items:
+          type: string
+          description: This field is automatically managed by the registry
+      createdOn:
+        type: string
+        description: UTC Datetime that this entry was created, datetime string format is %Y-%m-%dT%H%M%S.%f%z
+    type: object
+  experiment-lambda-start:
+    properties:
+      volumes:
+        type: array
+        items:
+          $ref: '#/definitions/mount-volume'
+      data:
+        type: array
+        items:
+          $ref: '#/definitions/file-content'
+      scripts:
+        type: array
+        description: Scripts to placed under the `bin` directory of the experiment
+        items:
+          $ref: '#/definitions/file-content'
+      variables:
+        type: object
+        example:
+          startIndex: 10
+          numberMolecules: 2
+          functional: B3LYPV3
+      additionalOptions:
+        type: array
+        items:
+          type: string
+          description: Additional options to elaunch.py
+          example: '--registerWorkflow=True'
+      environmentVariables:
+        type: object
+        example:
+          RUNTIME_SECRET_TOKEN: <token>
+      orchestrator_resources:
+        description: Hardware resource limits for the container that is hosting the workflow orchestrator
+        allOf:
+          - $ref: '#/definitions/container-resources'
+      metadata:
+        type: object
+        example:
+          exp-label: no-spaces-allowed
+      lambdaFlowIR:
+        type: object
+        description: JSON representation of FlowIR
+        example:
+          flowir key: flowir value
+      s3:
+        description: S3 configuration (read the description of the Filename-Content pair model too)
+        allOf:
+          - $ref: '#/definitions/s3'
+      s3Store:
+        description: Configuration to store outputs of workflow instance to a S3 bucket. Mutually exclusive with datasetStoreURI
+        allOf:
+          - $ref: '#/definitions/s3-output'
+      datasetStoreURI:
+        type: string
+        description: Dataset URI to store outputs (uses github.com/datashim-io/datashim) i.e. dataset://<dataset-name>/path/in/dataset/to/upload/outputs/to. Mutually exclusive with s3Store.
+    type: object
+  mount-volume:
+    properties:
+      type:
+        description: Volume type definition
+        default: {}
+        allOf:
+          - $ref: '#/definitions/volume-type'
+      applicationDependency:
+        type: string
+        description: Application dependency for which flow will create a link that points to the mount-path of this volume (optional). This is expected to be an entry under the list of strings defined by the application-dependencies.<platform-name> field within the FlowIR of the workflow.
+      subPath:
+        type: string
+        description: Path within the volume from which the container's volume should be mounted. Defaults to "" (volume's root).
+    type: object
+  volume-type:
+    properties:
+      persistentVolumeClaim:
+        type: string
+        description: (VOLUME_TYPE) name of PersistentVolumeClaim to mount, incompatible with other VOLUME_TYPE fields
+      configMap:
+        type: string
+        description: (VOLUME_TYPE) name of ConfigMap to mount, incompatible with other VOLUME_TYPE fields
+      dataset:
+        type: string
+        description: (VOLUME_TYPE) name of Dataset object to mount, incompatible with other VOLUME_TYPE fields
+      secret:
+        type: string
+        description: (VOLUME_TYPE) name of Secret object to mount, incompatible with other VOLUME_TYPE fields
+    type: object
+  file-content:
+    required:
+      - content
+      - filename
+    properties:
+      filename:
+        type: string
+        description: Filename
+        example: field.conf
+      content:
+        type: string
+        description: Content of file
+        example: mole:capb,slampd,smlta conc:4.2,1.4,0.5 salt:2.8
+    type: object
+  container-resources:
+    properties:
+      cpu:
+        type: string
+        description: Cpu units to as a limit for the container (e.g. 0.1, 1)
+        example: '1'
+      memory:
+        type: string
+        description: Memory defined as either bytes, mebibytes (e.g. 100Mi which is 104857600 bytes), or gibibytes (100Gi)
+        example: 500Mi
+    type: object
+  s3:
+    required:
+      - accessKeyID
+      - bucket
+      - endpoint
+      - secretAccessKey
+    properties:
+      dataset:
+        type: string
+        description: Identifier of Dataset to use (uses https://github.com/datashim-io/datashim). If set, remaining S3 information will not be used
+      accessKeyID:
+        type: string
+        description: Access key id
+        default: ''
+      secretAccessKey:
+        type: string
+        description: Secret access key
+        default: ''
+      bucket:
+        type: string
+        description: Name of bucket
+        default: ''
+      endpoint:
+        type: string
+        description: Endpoint URL (e.g. https://s3.eu-gb.cloud-object-storage.appdomain.cloud)
+        default: ''
+      region:
+        type: string
+        description: Region (optional)
+        default: ''
+    type: object
+  s3-output:
+    required:
+      - bucketPath
+      - credentials
+    properties:
+      credentials:
+        description: S3 Configuration
+        allOf:
+          - $ref: '#/definitions/s3-credentials'
+      bucketPath:
+        type: string
+        description: The ST4SD runtime core will upload the workflow outputs under this path
+        default: workflow_instances/
+    type: object
+  s3-credentials:
+    required:
+      - accessKeyID
+      - bucket
+      - endpoint
+      - secretAccessKey
+    properties:
+      accessKeyID:
+        type: string
+        description: Access key id
+        default: ''
+      secretAccessKey:
+        type: string
+        description: Secret access key
+        default: ''
+      bucket:
+        type: string
+        description: Name of bucket
+        default: ''
+      endpoint:
+        type: string
+        description: Endpoint URL (e.g. https://s3.eu-gb.cloud-object-storage.appdomain.cloud)
+        default: ''
+      region:
+        type: string
+        description: Region (optional)
+        default: ''
+    type: object
+  package-history:
+    properties:
+      tags:
+        type: array
+        items:
+          $ref: '#/definitions/package-history-tag'
+      untagged:
+        type: array
+        items:
+          $ref: '#/definitions/package-history-untagged'
+    type: object
+  package-history-tag:
+    properties:
+      tag:
+        type: string
+        description: The tag e.g. latest
+        example: latest
+      head:
+        type: string
+        description: The digest that the tag points to
+        example: sha256x67357eeed694e4f954fda270d6adba7b2399823c1b30dd1513d9e8c08d919399
+    type: object
+  package-history-untagged:
+    properties:
+      digest:
+        type: string
+        description: A digest which is no longer the head of any of the tags
+        example: sha256xd5067fc65aa4b569348caf347ca76983f6ecd2e45cc708410ba806f3835905ef
+    type: object
+  experiment-start:
+    properties:
+      inputs:
+        type: array
+        items:
+          $ref: '#/definitions/file-content'
+      data:
+        type: array
+        items:
+          $ref: '#/definitions/file-content'
+      volumes:
+        type: array
+        items:
+          $ref: '#/definitions/mount-volume'
+      variables:
+        type: object
+        example:
+          startIndex: 10
+          numberMolecules: 2
+          functional: B3LYPV3
+      additionalOptions:
+        type: array
+        items:
+          type: string
+          description: Additional options to elaunch.py
+          example: '--registerWorkflow=True'
+      environmentVariables:
+        type: object
+        example:
+          RUNTIME_SECRET_TOKEN: <token>
+      orchestrator_resources:
+        description: Hardware resource limits for the container that is hosting the workflow orchestrator
+        allOf:
+          - $ref: '#/definitions/container-resources'
+      metadata:
+        type: object
+        example:
+          exp-label: no-spaces-allowed
+      s3:
+        description: S3 configuration (read the description of the Filename-Content pair model too)
+        allOf:
+          - $ref: '#/definitions/s3'
+      s3Store:
+        description: Configuration to store outputs of workflow instance to a S3 bucket. Mutually exclusive with datasetStoreURI
+        default: { }
+        allOf:
+          - $ref: '#/definitions/s3-output'
+      datasetStoreURI:
+        type: string
+        description: Dataset URI to store outputs (uses github.com/datashim-io/datashim) i.e. dataset://<dataset-name>/path/in/dataset/to/upload/outputs/to. Mutually exclusive with s3Store.
+      runtimePolicy:
+        $ref: '#/definitions/experiment-start-policy'
+    type: object
+  experiment-start-policy:
+    properties:
+      name:
+        type: string
+        description: Nane of runtime policy
+      config:
+        type: object
+        description: Configuration options for runtime policy
+        example: { }
+    type: object
+  imagepullsecret:
+    required:
+      - password
+      - server
+      - username
+    properties:
+      server:
+        type: string
+        description: docker registry, e.g. res-drl-hpc-docker-local.artifactory.swg-devops.com
+        example: url-docker-registry
+      username:
+        type: string
+        description: username to use when authenticating to docker registry
+      password:
+        type: string
+    type: object
+  experiment-instance:
+    required:
+      - id
+    properties:
+      id:
+        type: string
+      experiment:
+        $ref: '#/definitions/virtual-experiment'
+      status:
+        $ref: '#/definitions/experiment-status'
+      k8s-labels:
+        type: object
+        example:
+          rest-uid: ionisation-energy-z3u2c
+      outputs:
+        type: object
+        example:
+          AnionResults:
+            creationtime: '2019-12-04 19:00:54.993316'
+            description: Anion homo/lumo results
+            filename: energies.csv
+            filepath: /tmp/workdir/ionisation-energy-2019-12-04T181218.613966.instance/output/energies.csv
+            final: 'no'
+            production: 'yes'
+            type: csv
+            version: '14'
+    type: object
+  experiment-status:
+    required:
+      - experiment-state
+      - stage-progress
+      - stage-state
+      - total-progress
+    properties:
+      experiment-state:
+        type: string
+        example: running
+      stage-state:
+        type: string
+        example: running
+      stages:
+        type: array
+        items:
+          type: string
+      current-stage:
+        type: string
+      meta:
+        type: object
+      exit-status:
+        type: string
+      total-progress:
+        type: number
+      stage-progress:
+        type: number
+      error-description:
+        type: string
+    type: object
+  query-experiments:
+    properties:
+      package:
+        $ref: '#/definitions/query-experiments-package'
+      relationship:
+        $ref: '#/definitions/query-experiments-relationship'
+      common:
+        $ref: '#/definitions/query-experiment-common'
+    type: object
+  query-experiments-package:
+    properties:
+      definition:
+        $ref: '#/definitions/base-package'
+    type: object
+  query-experiments-relationship:
+    properties:
+      identifier:
+        type: string
+        description: The identifier of the relationship
+      transform:
+        $ref: '#/definitions/query-experiments-relationship-transform'
+    type: object
+  query-experiments-relationship-transform:
+    properties:
+      matchInputGraph:
+        type: boolean
+        description: Whether to query using the package of the inputGraph
+        default: false
+      matchOutputGraph:
+        type: boolean
+        description: Whether to query using the package of the inputGraph
+        default: false
+    type: object
+  query-experiment-common:
+    properties:
+      matchPackageVersion:
+        type: boolean
+        description: Whether to match the version of packages
+        default: false
+      mustHaveOnePackage:
+        type: boolean
+        description: Match only parameterised virtual experiment packages with just one base package
+        default: true
+    type: object
+  relationship:
+    properties:
+      parameterisation:
+        $ref: '#/definitions/registry-entry-parameterisation'
+    type: object
+responses:
+  ParseError:
+    description: When a mask can't be parsed
+  MaskError:
+    description: When any error occurs on mask
+host: localhost

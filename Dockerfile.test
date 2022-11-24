@@ -1,0 +1,12 @@
+
+# Copyright IBM Inc. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+# Authors:
+#   Vassilis Vassiliadis
+
+ARG base_image=quay.io/st4sd/official-base/st4sd-runtime-service:latest
+FROM $base_image
+
+COPY tests /tests
+
+RUN python -m pytest /tests
