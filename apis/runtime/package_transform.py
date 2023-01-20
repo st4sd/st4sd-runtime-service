@@ -10,7 +10,7 @@ import logging
 from typing import List
 from typing import Optional
 from typing import Set
-from typing import Dict
+
 from typing import Callable
 
 import experiment.model.errors
@@ -26,6 +26,7 @@ import apis.models.relationships
 import apis.models.virtual_experiment
 import apis.runtime.package_derived
 import apis.storage
+
 
 def get_parameters_of_component(
         component: experiment.model.frontends.flowir.DictFlowIRComponent
@@ -53,6 +54,26 @@ def get_workflow_parameter_names(
         ret.update(parameters)
 
     return ret
+
+
+def references_cmp(ref1: str, ref2: str) -> int:
+    """Returns how much the @ref1 references matches @ref2 - references may be in different graphs
+
+    Arguments:
+        ref1: An absolute reference
+        ref2: Another absolute reference
+
+    Returns:
+        0 if references do not match at all, 1 if the producers match, 2 if they are identical
+    """
+
+    if ref1 == ref2:
+        return 2
+
+    d1 = apis.models.from_core.DataReference(ref1)
+    d2 = apis.models.from_core.DataReference(ref2)
+
+    return 1 if d1.producerIdentifier.identifier == d2.producerIdentifier.identifier else 0
 
 
 class TransformRelationship:
@@ -154,10 +175,10 @@ class TransformRelationship:
 
             return filter_out_components
 
-        surrogate_cids = concrete_surr.get_component_identifiers(recompute=False)
+        cids_surr = concrete_surr.get_component_identifiers(recompute=False)
         not_in_inputgraph = []
 
-        for cid in surrogate_cids:
+        for cid in cids_surr:
             ref = experiment.model.graph.ComponentIdentifier(cid[1], cid[0]).identifier
             if ref not in transform.inputGraph.components:
                 not_in_inputgraph.append(ref)
@@ -165,13 +186,9 @@ class TransformRelationship:
         # VV: Foundation (i.e. output) and Surrogate (i.e. input) parameters
         p_found = get_workflow_parameter_names(
             concrete_found, cb_filter=exclude_components(transform.outputGraph.components))
-        p_surr = get_workflow_parameter_names(concrete_surr, cb_filter=exclude_components(not_in_inputgraph))
-
         parameters_found = [apis.models.from_core.DataReference(ref) for ref in p_found]
-        parameters_surr = [apis.models.from_core.DataReference(ref) for ref in p_surr]
 
         self._log.info(f"Parameters Foundation {parameters_found}")
-        self._log.info(f"Parameters Surrogate {parameters_surr}")
 
         known_mappings = set()
         for m in transform.relationship.graphParameters:
@@ -218,6 +235,52 @@ class TransformRelationship:
                             apis.models.relationships.RelationshipParameters(
                                 inputGraphParameter=apis.models.relationships.GraphValue(name=ref_surr),
                                 outputGraphParameter=apis.models.relationships.GraphValue(name=ref_found)))
+
+        # VV: We can do something similar for graphResults
+        # - If there is a parameter in the outputGraph referencing a component that the transformation removes, AND
+        # - there is no graphResult mapping for this parameter, AND
+        # - there is a component in the inputGraph with the same name, THEN
+        # Generate a graphResults mapping between the 2 components - we could just use graphParameters here.
+        # In the upcoming refresh of the schema we should get rid of the graphResults field completely
+
+        known_mappings = set()
+        for m in transform.relationship.graphResults:
+            if m.outputGraphResult.name and (m.inputGraphResult.default or m.inputGraphResult.name):
+                known_mappings.update(m.outputGraphResult.name)
+
+        cids_found = concrete_found.get_component_identifiers(recompute=True, include_documents=False)
+
+        for cid in cids_found:
+            comp_id = experiment.model.graph.ComponentIdentifier(cid[1], cid[0])
+
+            if comp_id.identifier in transform.outputGraph.components:
+                print(cid)
+                continue
+
+            # VV: This component will stick around after the transformation. Let's check its parameters, and apply the
+            # logic above to generate a new graphResults entry
+            comp = concrete_found.get_component(cid)
+            params = get_parameters_of_component(comp)
+
+            for p in params:
+                dref = apis.models.from_core.DataReference(p)
+                if dref.externalProducerName or \
+                        (dref.producerIdentifier.identifier in transform.outputGraph.components):
+                    continue
+
+                for cs in transform.inputGraph.components:
+                    stage, name, _ = experiment.model.frontends.flowir.FlowIR.ParseProducerReference(cs)
+                    cref = apis.models.from_core.DataReference.from_parts(stage, name, "", "ref")
+
+                    if references_cmp(cref.absoluteReference, dref.absoluteReference) > 0:
+                        self._log.info(
+                            f"   Matching graphResult {dref.absoluteReference} with "
+                            f"{cref.absoluteReference} on pathRef= {dref.pathRef}")
+                        rel = apis.models.relationships.RelationshipResults(
+                            outputGraphResult=apis.models.relationships.GraphValue(name=dref.absoluteReference),
+                            inputGraphResult=apis.models.relationships.GraphValue(name=cref.absoluteReference)
+                        )
+                        transform.relationship.graphResults.append(rel)
 
     def _infer_relationship_single_component_graphs(
             self,
