@@ -9,6 +9,9 @@ from __future__ import annotations
 import logging
 from typing import List
 from typing import Optional
+from typing import Set
+from typing import Dict
+from typing import Callable
 
 import experiment.model.errors
 import experiment.model.frontends.flowir
@@ -30,6 +33,27 @@ def get_parameters_of_component(
 ) -> List[str]:
     """Let's assume that `references` are graphParameters"""
     return sorted(component.get('references', []))
+
+
+def get_workflow_parameter_names(
+        concrete: experiment.model.frontends.flowir.FlowIRConcrete,
+        cb_filter: Callable[[str], bool] | None = None
+) -> Set[str]:
+    """Extracts the top-level parameters in the workflow (assumes that references are the only parameters)"""
+    ret = set()
+
+    comp_ids = concrete.get_component_identifiers(recompute=False)
+
+    for cid in comp_ids:
+        comp = concrete.get_component(cid)
+        parameters = get_parameters_of_component(comp)
+
+        if cb_filter is not None:
+            parameters = [p for p in parameters if cb_filter(p)]
+
+        ret.update(parameters)
+
+    return ret
 
 
 class TransformRelationship:
@@ -67,7 +91,6 @@ class TransformRelationship:
                 self._transform.inputGraph.package = pvep.base.packages[0]
             else:
                 self._transform.outputGraph.package = pvep.base.packages[0]
-
 
     def guess_parameter_of_surrogate(
             self,
@@ -177,7 +200,9 @@ class TransformRelationship:
             #  component each
             if len(transform.outputGraph.components) == 1 \
                     and len(transform.inputGraph.components) == 1:
+                self._log.info("Inferring parameter mappings for 1-to-1 transform")
                 self._infer_relationship_single_component_graphs(packages_metadata)
+                self._log.info(f"Parameter Mappings (after 1-to-1): {self._transform.json(indent=2)}")
 
                 self._log.info(f"New relationships after inference: {self._transform.json(indent=2)}")
             else:
@@ -188,6 +213,8 @@ class TransformRelationship:
             packages_metadata: apis.storage.PackageMetadataCollection,
     ):
         transform = self._transform
+
+        problems = []
 
         concrete_surrogate = packages_metadata.get_concrete_of_package(transform.inputGraph.identifier)
 
@@ -202,8 +229,19 @@ class TransformRelationship:
                 try:
                     _value = transform.relationship.get_parameter_relationship_by_name_input(param)
                 except KeyError:
-                    raise apis.models.errors.ApiError(f"Unknown parameter {param} for surrogate component "
-                                                      f"{ref_surrogate} in {transform.inputGraph.identifier}")
+                    ref = apis.models.from_core.DataReference(param)
+                    # VV: There was no need to specify this parameter mapping because it points to a
+                    # component inside the inputGraph
+                    if ref.producerIdentifier.identifier in transform.inputGraph.components:
+                        continue
+
+                    problem = (f"Unknown parameter {param} for surrogate component "
+                               f"{ref_surrogate} in {transform.inputGraph.identifier}")
+                    if problem not in problems:
+                        problems.append(problem)
+
+        if problems:
+            raise apis.models.errors.ApiError(f"Run into {len(problems)} problems:\n" + "\n".join(problems))
 
     def try_infer(
             self,
