@@ -19,6 +19,7 @@ from typing import Dict
 from typing import List
 from typing import NamedTuple
 
+import experiment.model.frontends.flowir
 import six
 import yaml
 
@@ -1214,6 +1215,45 @@ def validate_adapt_and_store_experiment_to_database(
             )
 
             merged.inherit_defaults(ve.parameterisation)
+
+            # VV: Now look at the global variables of all platforms in `concrete` and fill in any missing
+            # default values (i.e. values for which there's no mention in ve.parameterisation)
+
+            known_platforms_and_default = list(known_platforms or [])
+            if experiment.model.frontends.flowir.FlowIR.LabelDefault not in known_platforms_and_default:
+                known_platforms_and_default.append('default')
+
+            default_values = concrete.get_default_global_variables()
+
+            for p in known_platforms_and_default:
+                p_vars = concrete.get_platform_global_variables(p)
+                full_context = copy.deepcopy(default_values)
+                full_context.update(p_vars or {})
+
+                for key in p_vars or {}:
+                    try:
+                        p_value = experiment.model.frontends.flowir.FlowIR.fill_in(
+                            str(p_vars[key]), full_context, ignore_errors=True, label=None, is_primitive=True)
+                    except Exception as e:
+                        logger.warning(f"Unable to expand variable {key}={p_vars[key]} due to {e} - "
+                                       f"will assume that this is not a problem")
+                        p_value = str(p_vars[key])
+
+                    for x in merged.executionOptionsDefaults.variables:
+                        if x.name == key:
+                            for pv in x.valueFrom:
+                                if pv.platform == p:
+                                    break
+                                else:
+                                    x.valueFrom.append(apis.models.virtual_experiment.ValueInPlatform(
+                                        value=p_value, platform=p))
+                            break
+                    else:
+                        merged.executionOptionsDefaults.variables.append(
+                            apis.models.virtual_experiment.VariableWithDefaultValues(name=key, valueFrom=[
+                                apis.models.virtual_experiment.ValueInPlatform(value=p_value, platform=p)
+                            ])
+                        )
 
             ve.metadata.registry.inputs = merged.inputs
             ve.metadata.registry.data = merged.data

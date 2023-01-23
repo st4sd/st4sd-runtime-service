@@ -7,10 +7,14 @@
 from __future__ import annotations
 
 import base64
+import json
+import logging
 import os
 import tempfile
 import time
+
 from typing import Dict
+from typing import List
 
 import pytest
 import yaml
@@ -26,6 +30,7 @@ import tests.conftest
 
 package_from_files = tests.conftest.package_from_files
 
+logger = logging.getLogger('trp')
 
 def b64_str(value: str) -> str:
     return base64.b64encode(value.encode('utf-8')).decode('utf-8')
@@ -1583,7 +1588,7 @@ def test_extract_all_variables_during_validate(
         assert values[0] == str(vars_openshift[name])
 
 
-def test_extract_all_variables_during_validate(
+def test_extract_all_variables_during_validate_missing_variable(
         flowir_psi4: str,
         ve_psi4: apis.models.virtual_experiment.ParameterisedPackage,
         output_dir: str
