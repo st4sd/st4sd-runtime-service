@@ -1220,17 +1220,21 @@ def validate_adapt_and_store_experiment_to_database(
             ve.metadata.registry.containerImages = merged.containerImages
             ve.metadata.registry.executionOptionsDefaults = merged.executionOptionsDefaults
             ve.metadata.registry.interface = concrete.get_interface() or {}
+        except apis.models.errors.ApiError as e:
+            logger.warning(f"Could not extract registry metadata due to {e}. "
+                           f"Traceback: {traceback.format_exc()}")
+            raise e from e
         except Exception as e:
             logger.warning(f"Could not extract registry metadata due to {e}. "
                            f"Traceback: {traceback.format_exc()}")
-            raise apis.models.errors.ApiError(f"Unable to extract registry metadata")
+            raise apis.models.errors.ApiError(f"Unable to extract registry metadata") from e
     try:
         logger.info(f"Discovered registry metadata: {ve.metadata.registry}")
         ve.test()
     except Exception as e:
         logger.warning(f"Run into {e} while testing new parameterised package. "
                        f"Traceback: {traceback.format_exc()}")
-        raise apis.models.errors.ApiError(f"Invalid parameterised package due to {e}")
+        raise apis.models.errors.ApiError(f"Invalid parameterised package due to {e}") from e
 
     try:
         ve.update_digest()

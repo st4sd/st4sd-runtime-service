@@ -820,7 +820,7 @@ class MetadataRegistry(apis.models.common.Digestable):
                     try:
                         value = default_platform_vars[v]
                     except KeyError:
-                        raise ValueError(f"There is no {v} variable in platform {platform}")
+                        raise apis.models.errors.UnknownVariableError(v, platform)
 
                 var_defaults.append(VariableWithDefaultValues(
                     name=v, valueFrom=[ValueInPlatform(value=value, platform=platform)]))

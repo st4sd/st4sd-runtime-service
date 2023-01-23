@@ -25,6 +25,14 @@ class ApiError(Exception):
         return self.message
 
 
+class UnknownVariableError(ApiError):
+    def __init__(self, variable_name: str, platform: str):
+        self.variable_name = variable_name
+        self.platform = platform
+
+        super().__init__(f"There is no {variable_name} variable in platform {platform}")
+
+
 class CannotMergeMetadataRegistryError(ApiError):
     def __init__(
             self,

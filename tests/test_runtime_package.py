@@ -1501,3 +1501,114 @@ def test_validate_adapt_and_store_experiment_to_database(
         assert latest.metadata.registry.createdOn > x.metadata.registry.createdOn
 
         assert latest.registry_created_on > x.registry_created_on
+
+
+def test_extract_all_variables_during_validate(
+        flowir_psi4: str,
+        ve_psi4: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str
+):
+    # VV: inject a brand new variable into the mix which.
+    # It exists in 3 platforms, `default`, `openshift`, and `dont-care`. The registry should only display its values
+    # for the `default` and `openshift` platforms.
+
+    raw_yaml = yaml.load(flowir_psi4, yaml.FullLoader)
+
+    raw_yaml['variables']['default']['global']['overrideme'] = 'default'
+    raw_yaml['variables']['openshift']['global']['overrideme'] = 'openshift'
+    raw_yaml['variables']['dont-care'] = {
+        'global': {
+            'overrideme': 'dont-care'
+        }
+    }
+
+    flowir_psi4 = yaml.dump(raw_yaml)
+
+    pkg_location = package_from_files(
+        location=os.path.join(output_dir, "psi4"),
+        files={
+            'bin/aggregate_energies.py': 'expensive',
+            'bin/optimize_ff.py': 'expensive',
+            'bin/optimize_psi4.py': 'expensive',
+
+            'conf/flowir_package.yaml': flowir_psi4,
+        }
+    )
+
+    StorageMetadata = apis.models.virtual_experiment.StorageMetadata
+    collection = apis.storage.PackageMetadataCollection({
+        ve_psi4.base.packages[0].name: StorageMetadata.from_config(
+            prefix_paths=pkg_location, config=apis.models.virtual_experiment.BasePackageConfig(),
+        )})
+
+    original_created_on = ve_psi4.metadata.registry.createdOn
+
+    ve_psi4.metadata.registry.digest = "invalid"
+
+    raw_yaml = yaml.load(flowir_psi4, yaml.FullLoader)
+
+    vars_default: Dict[str, str] = raw_yaml['variables']['default']['global']
+    vars_openshift: Dict[str, str] = raw_yaml['variables']['openshift']['global']
+
+    with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
+        db = apis.db.exp_packages.DatabaseExperiments(f.name)
+        apis.runtime.package.validate_adapt_and_store_experiment_to_database(ve_psi4, collection, db)
+
+    all_vars = ve_psi4.metadata.registry.executionOptionsDefaults.variables
+    logger.info(f"All executionOptionDefaults {ve_psi4.metadata.registry.executionOptionsDefaults.json(indent=2)}")
+    extracted: Dict[str, List[apis.models.virtual_experiment.ValueInPlatform]] = {x.name: x.valueFrom for x in all_vars}
+
+    assert 'overrideme' in extracted
+
+    x = sorted(extracted['overrideme'], key=lambda k: k.platform)
+
+    assert len(x) == 2
+
+    assert x[0].platform == 'default'
+    assert x[0].value == 'default'
+
+    assert x[1].platform == 'openshift'
+    assert x[1].value == 'openshift'
+
+    for name in vars_default:
+        assert name in extracted
+
+        values = [v.value for v in extracted[name] if v.platform == "default"]
+        assert values[0] == str(vars_default[name])
+
+    for name in vars_openshift:
+        assert name in extracted
+
+        values = [v.value for v in extracted[name] if v.platform == "openshift"]
+        assert values[0] == str(vars_openshift[name])
+
+
+def test_extract_all_variables_during_validate(
+        flowir_psi4: str,
+        ve_psi4: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str
+):
+    pkg_location = package_from_files(
+        location=os.path.join(output_dir, "psi4"),
+        files={'conf/flowir_package.yaml': flowir_psi4, }
+    )
+
+    StorageMetadata = apis.models.virtual_experiment.StorageMetadata
+    collection = apis.storage.PackageMetadataCollection({
+        ve_psi4.base.packages[0].name: StorageMetadata.from_config(
+            prefix_paths=pkg_location, config=apis.models.virtual_experiment.BasePackageConfig(),
+        )})
+
+    original_created_on = ve_psi4.metadata.registry.createdOn
+
+    unknown_variable = "I-am-confident-that-this-variable-does-not-exist"
+    ve_psi4.parameterisation.executionOptions.variables.append(
+        apis.models.common.OptionMany(name=unknown_variable)
+    )
+
+    with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
+        db = apis.db.exp_packages.DatabaseExperiments(f.name)
+        with pytest.raises(apis.models.errors.UnknownVariableError) as e:
+            apis.runtime.package.validate_adapt_and_store_experiment_to_database(ve_psi4, collection, db)
+
+    assert e.value.variable_name == unknown_variable
