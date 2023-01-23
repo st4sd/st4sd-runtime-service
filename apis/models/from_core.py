@@ -171,6 +171,9 @@ class DataReference(experiment.model.graph.DataReference):
     def trueProducer(self) -> str:
         return self.externalProducerName or self.producerName
 
+    def __repr__(self):
+        return self.absoluteReference
+
 
 class BetaExperimentRestAPI(experiment.service.db.ExperimentRestAPI):
 

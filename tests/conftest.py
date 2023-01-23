@@ -26,7 +26,6 @@ from apis.models.constants import *
 if TYPE_CHECKING:
     import experiment.model.data
 
-
 FORMAT = '%(levelname)-9s %(threadName)-30s %(name)-30s: %(funcName)-20s %(asctime)-15s: %(message)s'
 logging.basicConfig(format=FORMAT)
 rootLogger = logging.getLogger()
@@ -1478,6 +1477,398 @@ variables:
 
 
 @pytest.fixture(scope="function")
+def flowir_modular_band_gap() -> str:
+    return """
+interface:
+  description: "Measures band-gap and related properties of small molecules in gas-phase using DFT"
+  inputSpec:
+    namingScheme: "SMILES"
+    inputExtractionMethod:
+      hookGetInputIds:
+        source:
+          path: "input/smiles.csv"
+  propertiesSpec:
+    - name: "band-gap"
+      description: "The difference between homo and lumo in electron-volts"
+      propertyExtractionMethod:
+        hookGetProperties:
+          source:
+            keyOutput: "OptimisationResults"
+    - name: "homo"
+      description: "The energy of the highest occuppied molecular orbital in electron-volts"
+      propertyExtractionMethod:
+        hookGetProperties:
+          source:
+            keyOutput: "OptimisationResults"
+    - name: "lumo"
+      description: "The energy of the lowest unoccuppied molecular orbital in electron-volts"
+      propertyExtractionMethod:
+        hookGetProperties:
+          source:
+            keyOutput: "OptimisationResults"
+    - name: "electric-moments"
+      description: "The dipole moment in debyes"
+      propertyExtractionMethod:
+        hookGetProperties:
+          source:
+            keyOutput: "OptimisationResults"
+    - name: "total-energy"
+      description: "The total energy of the molecule in electron-volts"
+      propertyExtractionMethod:
+        hookGetProperties:
+          source:
+            keyOutput: "OptimisationResults"
+
+status-report:
+  0:
+    arguments: '1'
+    executable: echo
+    stage-weight: 0.1
+  1:
+    arguments: '1'
+    executable: echo
+    stage-weight: 0.9
+output:
+  OptimisationResults:
+    data-in: stage1.ExtractEnergies/energies.csv:ref
+    description: homo/lumo results
+    type: csv
+
+platforms:
+- default
+- openshift
+- openshift-kubeflux
+
+blueprint:
+  openshift-kubeflux:
+    global:
+      resourceManager:
+        kubernetes:
+          podSpec:
+            schedulerName: kubeflux
+
+environments:
+  # Platforms that do not override the environments, use the ones that default definess
+  default:
+    GAMESS:
+      GMSPATH: /gamess/
+      PATH: /gamess/:$PATH
+    PYTHON: {}
+
+components:
+
+  ## This component updates a general GAMESS US input file template to have a particular basis set
+- stage: 0
+  name: SetBasis
+  command:
+    arguments: sed -i'.bak' -e 's/#BASIS#/%(basis)s/g' input_molecule.txt
+    interpreter: bash
+  references:
+  - data/input_molecule.txt:copy
+
+  ## This component updates a general GAMESS US input file template to have a particular functional
+- stage: 0
+  name: SetFunctional
+  command:
+    arguments: sed -i'.bak' -e 's/#FUNCTIONAL#/%(functional)s/g' input_molecule.txt
+    interpreter: bash
+  references:
+  - SetBasis/input_molecule.txt:copy
+
+  ## This gets the row number index to read for each replica
+- stage: 0
+  name: GetMoleculeIndex
+  command:
+    arguments: -c \"print(%(startIndex)s + %(replica)s),\"
+    executable: python
+  workflowAttributes:
+    replicate: '%(numberMolecules)s'
+
+  ## Note row is used to name the output sdf and xyz files used later make the input files. This will give each one a unique name
+  ## over the replicas here
+- stage: 0
+  name: SMILESToXYZ
+  command:
+    arguments: --input smiles.csv --row GetMoleculeIndex:output
+    environment: python
+    executable: bin/rdkit_smiles2coordinates.py
+  references:
+  - input/smiles.csv:copy
+  - GetMoleculeIndex:output
+  resourceManager:
+    config:
+      backend: '%(backend)s'
+    kubernetes:
+      image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+
+  ## This component takes the path to xyz and sdf files (-xp and -sp) and the names of the files which in this case is the row number in both cases. '.xyz'
+  ## and '.sdf' are added in the code. The GAMESS input file is read from the updated template in SetFunctional. The output is a GAMESS US input file.
+- stage: 0
+  name: XYZToGAMESS
+  command:
+    arguments: -xp stage0.SMILESToXYZ:ref -xf GetMoleculeIndex:output 
+      -g stage0.SetFunctional:ref/input_molecule.txt -sp stage0.SMILESToXYZ:ref -sf GetMoleculeIndex:output
+    environment: python
+    executable: bin/rdkit_smiles2coordinates.py
+  references:
+  - stage0.SMILESToXYZ:ref
+  - stage0.SetFunctional:ref 
+  - GetMoleculeIndex:output
+  resourceManager:
+    config:
+      backend: '%(backend)s'
+    kubernetes:
+      image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+
+  ## This runs a geometry optimization using GAMESS US
+- stage: 1
+  name: GeometryOptimisation
+  command:
+    arguments: molecule.inp 00 %(number-processors)s
+    environment: gamess
+    executable: bin/run-gamess.sh
+  references:
+  - stage0.XYZToGAMESS/molecule.inp:copy
+  workflowAttributes:
+    restartHookFile: "%(gamess-restart-hook-file)s"
+    restartHookOn:
+    - KnownIssue
+    - Success
+    - ResourceExhausted
+    shutdownOn:
+    - KnownIssue
+  resourceManager:
+    config:
+      backend: '%(backend)s'
+      walltime: "%(gamess-walltime-minutes)s"
+    kubernetes:
+      gracePeriod: "%(gamess-grace-period-seconds)s"
+      image: nvcr.io/hpc/gamess:17.09-r2-libcchem
+
+  resourceRequest:
+    memory: '%(mem)s'
+    numberThreads: '%(number-processors)s'
+    threadsPerCore: 1
+
+  ## Gets the label given by users from the input csv file of smiles and puts it with the caluclation information
+- stage: 1
+  name: CreateLabels
+  command:
+    arguments: -c "import pandas;
+      input_file='input/smiles.csv:ref';
+      row_indices='stage0.GetMoleculeIndex:output';
+      m=pandas.read_csv(input_file, engine='python', sep=None);
+      print(','.join([str(m.iloc[int(index)]['%(collabel)s']) for index in row_indices.split()]))"
+    executable: python
+  references:
+  - stage0.GetMoleculeIndex:output
+  - input/smiles.csv:ref
+  workflowAttributes:
+    aggregate: true
+
+  ## This component get the energy terms of interest from a GAMESS US calculation
+- stage: 1
+  name: ExtractEnergies
+  command:
+    arguments: -l CreateLabels:output GeometryOptimisation:ref
+    environment: python
+    executable: bin/extract_gmsout_geo_opt.py 
+  references:
+  - GeometryOptimisation:ref
+  - CreateLabels:output
+  workflowAttributes:
+    aggregate: true
+  resourceManager:
+    config:
+      backend: '%(backend)s'
+    kubernetes:
+      image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+
+variables:
+  default:
+    global:
+      # VV: References python script in hooks directory to use for restartHook of GeometryOptimisation
+      gamess-restart-hook-file: dft_restart.py
+      mem: '4295000000'
+      backend: local
+      number-processors: '1'
+      startIndex: '0'
+      numberMolecules: '1'
+      gamess-version-number: '01'
+      basis: GBASIS=N31 NGAUSS=6 NDFUNC=2 NPFUNC=1 DIFFSP=.TRUE. DIFFS=.TRUE.
+      functional: B3LYP
+      collabel: label
+      # VV: how long k8s should let the pod run before it sends it a SIGTERM
+      gamess-walltime-minutes: 700
+      # VV: how long k8s should wait between SIGTERM and SIGKILL
+      gamess-grace-period-seconds: 1800
+    stages:
+      0:
+        stage-name: Read-Input
+      1:
+        stage-name: GeometryOptimisation
+  openshift:
+    global:
+      backend: kubernetes
+  openshift-kubeflux:
+    global:
+      backend: kubernetes
+"""
+
+
+@pytest.fixture(scope="function")
+def flowir_modular_ani() -> str:
+    return """
+status-report:
+  0:
+    arguments: '1'
+    executable: echo
+    stage-weight: 0.1
+  1:
+    arguments: '1'
+    executable: echo
+    stage-weight: 0.9
+
+
+platforms:
+- default
+- openshift
+- openshift-kubeflux
+
+blueprint:
+  openshift-kubeflux:
+    global:
+      resourceManager:
+        kubernetes:
+          podSpec:
+            schedulerName: kubeflux
+
+environments:
+  # Platforms that do not override the environments, use the ones that default defines
+  default:
+    PYTHON: {}
+
+components:
+  ## This component updates a general GAMESS US input file template to have a particular basis set
+- stage: 0
+  name: SetBasis
+  command:
+    arguments: sed -i'.bak' -e 's/#BASIS#/%(basis)s/g' input_molecule.txt
+    interpreter: bash
+  references:
+  - data/input_molecule.txt:copy
+
+  ## This component updates a general GAMESS US input file template to have a particular functional
+- stage: 0
+  name: SetFunctional
+  command:
+    arguments: sed -i'.bak' -e 's/#FUNCTIONAL#/%(functional)s/g' input_molecule.txt
+    interpreter: bash
+  references:
+  - SetBasis/input_molecule.txt:copy
+
+  ## This gets the row number index to read for each replica
+- stage: 0
+  name: GetMoleculeIndex
+  command:
+    arguments: -c \"print(%(startIndex)s + %(replica)s),\"
+    executable: python
+  workflowAttributes:
+    replicate: '%(numberMolecules)s'
+
+  ## Note row is used to name the output sdf and xyz files used later make the input files. This will give each one a unique name
+  ## over the replicas here
+- stage: 0
+  name: SMILESToXYZ
+  command:
+    arguments: --input smiles.csv --row GetMoleculeIndex:output
+    environment: python
+    executable: bin/rdkit_smiles2coordinates.py
+  references:
+  - input/smiles.csv:copy
+  - GetMoleculeIndex:output
+  resourceManager:
+    config:
+      backend: '%(backend)s'
+    kubernetes:
+      image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+
+  ## This runs a geometry optimization using ANI
+- stage: 0
+  name: GeometryOptimisationANI
+  command:
+    arguments: --xyz_path stage0.SMILESToXYZ:ref -xyz stage0.GetMoleculeIndex:output  
+      --ani_model %(ani-model)s -o bfgs -i %(iterations)s --temperature %(T)s 
+      --pressure %(P)s --force_tolerance %(force-tol)s --outname stage0.GetMoleculeIndex:output
+    environment: python
+    executable: bin/optimize_ani.py
+  references:
+    - stage0.SMILESToXYZ:ref
+    - stage0.GetMoleculeIndex:output
+  workflowAttributes:
+    shutdownOn:
+    - KnownIssue
+  resourceManager:
+    config:
+      backend: '%(backend)s'
+      walltime: 700.0
+    kubernetes:
+      gracePeriod: 1800
+      image: quay.io/st4sd/community-applications/ani-torch-st4sd:2.2.2
+  resourceRequest:
+    memory: '%(mem)s'
+    numberThreads: '%(number-processors)s'
+    threadsPerCore: 1
+
+- stage: 0
+  name: XYZToGAMESS
+  command:
+    arguments: -xp stage0.GeometryOptimisationANI:ref -xf stage0.GetMoleculeIndex:output 
+      -g stage0.SetFunctional:ref/input_molecule.txt -sp stage0.SMILESToXYZ:ref -sf stage0.GetMoleculeIndex:output
+    environment: python
+    executable: bin/rdkit_smiles2coordinates.py
+  references:
+  - stage0.GeometryOptimisationANI:ref
+  - stage0.SetFunctional:ref
+  - stage0.SMILESToXYZ:ref
+  - stage0.GetMoleculeIndex:output
+  resourceManager:
+    config:
+      backend: '%(backend)s'
+    kubernetes:
+      image: quay.io/st4sd/community-applications/rdkit-st4sd:2019.09.1
+
+
+variables:
+  default:
+    global:
+      # VV: References python script in hooks directory to use for restartHook of GeometryOptimisation
+      mem: '4295000000'
+      backend: local
+      number-processors: '1'
+      startIndex: '0'
+      numberMolecules: '1'
+      basis: GBASIS=N31 NGAUSS=6 NDFUNC=2 NPFUNC=1 DIFFSP=.TRUE. DIFFS=.TRUE.
+      functional: B3LYP
+      ani-model: "ani2x"
+      force-tol: 0.005
+      iterations: 1000
+      # For thermochemistry
+      T: 298.15
+      P: 101325.0
+    stages:
+      0:
+        stage-name: Read-Input
+  openshift:
+    global:
+      backend: kubernetes
+  openshift-kubeflux:
+    global:
+      backend: kubernetes
+"""
+
+
+@pytest.fixture(scope="function")
 def derived_ve_gamess_homo_dft_ani():
     package = definition = {
         "metadata": {
@@ -1793,7 +2184,7 @@ def derived_ve_gamess_homo_dft_ani():
 
 
 @pytest.fixture(scope="function")
-def ve_homo_lumo_dft_gamess_us():
+def ve_homo_lumo_dft_gamess_us() -> apis.models.virtual_experiment.ParameterisedPackage:
     package = {
         "base": {
             "packages": [
@@ -2118,7 +2509,7 @@ def ve_homo_lumo_dft_gamess_us():
 
 
 @pytest.fixture(scope="function")
-def ve_psi4():
+def ve_psi4() -> apis.models.virtual_experiment.ParameterisedPackage:
     package = {
         "base": {
             "packages": [
@@ -2154,7 +2545,7 @@ def ve_psi4():
 
 
 @pytest.fixture(scope="function")
-def ve_neural_potential():
+def ve_neural_potential() -> apis.models.virtual_experiment.ParameterisedPackage:
     package = {
         "base": {
             "packages": [
@@ -2179,6 +2570,192 @@ def ve_neural_potential():
         "parameterisation": {
             "presets": {
                 "platform": "openshift"
+            }
+        }
+    }
+    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve.update_digest()
+
+    assert ve.metadata.registry.digest is not None
+    return ve
+
+
+@pytest.fixture(scope="function")
+def ve_modular_ani() -> apis.models.virtual_experiment.ParameterisedPackage:
+    package = {
+        "metadata": {
+            "package": {
+                "description": "Uses the DFT functional and basis set B3LYP/6-31G(d,p) with Grimme et al's D3 correction to perform geometry optimization and HOMO-LUMO band gap calculation",
+                "keywords": [
+                    "smiles",
+                    "computational chemistry",
+                    "homo-lumo",
+                    "semi-empirical",
+                    "kubeflux"
+                ],
+                "maintainer": "https://github.com/michael-johnston",
+                "name": "ani-geometry-optimisation",
+                "tags": [
+                    "latest",
+                    "1.0.0"
+                ]
+            }
+        },
+        "base": {
+            "packages": [
+                {
+                    "config": {
+                        "manifestPath": "ani-geometry-optimisation/manifest.yaml",
+                        "path": "ani-geometry-optimisation/ani-geometry-optimisation.yaml"
+                    },
+                    "name": "main",
+                    "source": {
+                        "git": {
+                            "location": {
+                                "tag": "main",
+                                "url": "https://github.com/st4sd/temp-wire-ani.git"
+                            }
+                        }
+                    }
+                }
+            ]
+        },
+        "parameterisation": {
+            "executionOptions": {
+                "data": [],
+                "platform": [
+                    "openshift",
+                    "openshift-kubeflux"
+                ],
+                "variables": [
+                    {
+                        "name": "numberMolecules"
+                    },
+                    {
+                        "name": "startIndex"
+                    },
+                    {
+                        "name": "mem"
+                    },
+                    {
+                        "name": "number-processors"
+                    }
+                ]
+            },
+            "presets": {
+                "environmentVariables": [],
+                "runtime": {
+                    "args": [
+                        "--failSafeDelays=no",
+                        "--registerWorkflow=yes"
+                    ]
+                },
+                "variables": [
+                    {
+                        "name": "functional",
+                        "value": "B3LYP"
+                    },
+                    {
+                        "name": "basis",
+                        "value": "GBASIS=N31 NGAUSS=6 NDFUNC=2 NPFUNC=1 DIFFSP=.TRUE. DIFFS=.TRUE."
+                    }
+                ]
+            }
+        }
+    }
+    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve.update_digest()
+
+    assert ve.metadata.registry.digest is not None
+    return ve
+
+
+@pytest.fixture(scope="function")
+def ve_modular_band_gap_gamess() -> apis.models.virtual_experiment.ParameterisedPackage:
+    package = {
+        "metadata": {
+            "package": {
+                "description": "Uses the DFT functional and basis set B3LYP/6-31G(d,p) with Grimme et al's D3 correction to perform geometry optimization and HOMO-LUMO band gap calculation",
+                "keywords": [
+                    "smiles",
+                    "computational chemistry",
+                    "homo-lumo",
+                    "semi-empirical",
+                    "kubeflux"
+                ],
+                "maintainer": "https://github.com/michael-johnston",
+                "name": "band-gap-dft-gamess-us",
+                "tags": [
+                    "latest",
+                    "1.0.0"
+                ]
+            }
+        },
+        "base": {
+            "packages": [
+                {
+                    "config": {
+                        "manifestPath": "band-gap-gamess/manifest.yaml",
+                        "path": "band-gap-gamess/band-gap-gamess.yaml"
+                    },
+                    "name": "main",
+                    "source": {
+                        "git": {
+                            "location": {
+                                "tag": "main",
+                                "url": "https://github.com/st4sd/temp-wire-ani.git"
+                            }
+                        }
+                    }
+                }
+            ]
+        },
+        "parameterisation": {
+            "executionOptions": {
+                "data": [],
+                "platform": [
+                    "openshift",
+                    "openshift-kubeflux"
+                ],
+                "variables": [
+                    {
+                        "name": "numberMolecules"
+                    },
+                    {
+                        "name": "startIndex"
+                    },
+                    {
+                        "name": "mem"
+                    },
+                    {
+                        "name": "gamess-walltime-minutes"
+                    },
+                    {
+                        "name": "gamess-grace-period-seconds"
+                    },
+                    {
+                        "name": "number-processors"
+                    }
+                ]
+            },
+            "presets": {
+                "environmentVariables": [],
+                "runtime": {
+                    "args": [
+                        "--failSafeDelays=no",
+                        "--registerWorkflow=yes"
+                    ]
+                },
+                "variables": [
+                    {
+                        "name": "functional",
+                        "value": "B3LYP"
+                    },
+                    {
+                        "name": "basis",
+                        "value": "GBASIS=N31 NGAUSS=6 NDFUNC=2 NPFUNC=1 DIFFSP=.TRUE. DIFFS=.TRUE."
+                    }
+                ]
             }
         }
     }
@@ -2465,6 +3042,65 @@ def package_metadata_psi4_neural_potential(
         ),
         'neural-potential:latest': StorageMetadata.from_config(
             prefix_paths=surrogate_location, config=apis.models.virtual_experiment.BasePackageConfig(),
+        )
+    })
+
+    return packages_metadata
+
+
+@pytest.fixture()
+def package_metadata_modular_ani_band_gap_gamess(
+        flowir_modular_ani: str,
+        flowir_modular_band_gap: str,
+        output_dir: str,
+) -> apis.storage.PackageMetadataCollection:
+    expensive_name = "band-gap-dft-gamess-us"
+    surrogate_name = "ani-geometry-optimisation"
+
+    files = {os.path.join('component-scripts', f): "#expensive" for f in [
+        "rdkit_smiles2coordinates.py", "run-gamess.sh", "extract_gmsout_geo_opt.py"]}
+    # VV: Both VEs use the rdkit_smiles2coordinates.py script
+    files.update({os.path.join('component-scripts', f): "#surrogate" for f in [
+        "rdkit_smiles2coordinates.py", "optimize_ani.py"]})
+    files.update({os.path.join('hooks', f): "# hooks" for f in [
+        "__init__.py", "dft_restart.py", "interface.py", "semi_empirical_restart.py"]})
+
+    files[os.path.join(expensive_name, f'{expensive_name}.yaml')] = flowir_modular_band_gap
+    files[os.path.join(expensive_name, 'manifest.yaml')] = """
+    bin: ../component-scripts:copy
+    data: data-dft:copy
+    hooks: ../hooks:copy
+    """
+    files[os.path.join(surrogate_name, f'{surrogate_name}.yaml')] = flowir_modular_ani
+    files[os.path.join(surrogate_name, 'manifest.yaml')] = """
+    bin: ../component-scripts:copy
+    data: data-ani:copy
+    hooks: ../hooks:copy
+    """
+
+    data_files = ["input_anion.txt", "input_cation.txt", "input_molecule.txt", "input_neutral.txt"]
+    files.update({os.path.join(expensive_name, 'data-dft', f): 'expensive' for f in data_files})
+    files.update({os.path.join(surrogate_name, 'data-ani', f): 'surrogate' for f in data_files})
+
+    multi_package = package_from_files(location=output_dir, files=files)
+
+    StorageMetadata = apis.models.virtual_experiment.StorageMetadata
+
+    expensive_location = os.path.join(multi_package, expensive_name)
+    surrogagate_location = os.path.join(multi_package, surrogate_name)
+
+    packages_metadata = apis.storage.PackageMetadataCollection({
+        f'{expensive_name}:latest': StorageMetadata.from_config(
+            prefix_paths=multi_package, config=apis.models.virtual_experiment.BasePackageConfig(
+                path=os.path.join(expensive_name, f'{expensive_name}.yaml'),
+                manifestPath=os.path.join(expensive_name, 'manifest.yaml')
+            ),
+        ),
+        f'{surrogate_name}:latest': StorageMetadata.from_config(
+            prefix_paths=multi_package, config=apis.models.virtual_experiment.BasePackageConfig(
+                path=os.path.join(surrogate_name, f'{surrogate_name}.yaml'),
+                manifestPath=os.path.join(surrogate_name, 'manifest.yaml')
+            ),
         )
     })
 

@@ -9,6 +9,9 @@ from __future__ import annotations
 import logging
 from typing import List
 from typing import Optional
+from typing import Set
+
+from typing import Callable
 
 import experiment.model.errors
 import experiment.model.frontends.flowir
@@ -30,6 +33,47 @@ def get_parameters_of_component(
 ) -> List[str]:
     """Let's assume that `references` are graphParameters"""
     return sorted(component.get('references', []))
+
+
+def get_workflow_parameter_names(
+        concrete: experiment.model.frontends.flowir.FlowIRConcrete,
+        cb_filter: Callable[[str], bool] | None = None
+) -> Set[str]:
+    """Extracts the top-level parameters in the workflow (assumes that references are the only parameters)"""
+    ret = set()
+
+    comp_ids = concrete.get_component_identifiers(recompute=False)
+
+    for cid in comp_ids:
+        comp = concrete.get_component(cid)
+        parameters = get_parameters_of_component(comp)
+
+        if cb_filter is not None:
+            parameters = [p for p in parameters if cb_filter(p)]
+
+        ret.update(parameters)
+
+    return ret
+
+
+def references_cmp(ref1: str, ref2: str) -> int:
+    """Returns how much the @ref1 references matches @ref2 - references may be in different graphs
+
+    Arguments:
+        ref1: An absolute reference
+        ref2: Another absolute reference
+
+    Returns:
+        0 if references do not match at all, 1 if the producers match, 2 if they are identical
+    """
+
+    if ref1 == ref2:
+        return 2
+
+    d1 = apis.models.from_core.DataReference(ref1)
+    d2 = apis.models.from_core.DataReference(ref2)
+
+    return 1 if d1.producerIdentifier.identifier == d2.producerIdentifier.identifier else 0
 
 
 class TransformRelationship:
@@ -68,7 +112,6 @@ class TransformRelationship:
             else:
                 self._transform.outputGraph.package = pvep.base.packages[0]
 
-
     def guess_parameter_of_surrogate(
             self,
             foundation: experiment.model.frontends.flowir.DictFlowIRComponent,
@@ -102,6 +145,142 @@ class TransformRelationship:
                            f"for surrogate {surrogate_name}. Possible values are {matching}, "
                            f"candidates were {foundation_params}, surrogate file reference was "
                            f"{surrogate_pathref}")
+
+    def _infer_relationship_identical_parameter_names(
+            self,
+            packages_metadata: apis.storage.PackageMetadataCollection,
+    ):
+        """Infers relationships between 2 components in outputGraph and inputGraph when they have the same name
+
+        The relationships can be either graphParameters-type or graphResults-type.
+        """
+        transform = self._transform
+        self._log.info("Inferring $in->$out parameter mappings for parameters with identical names")
+
+        # VV: Foundation (i.e. output) and Surrogate (i.e. input) FlowIRConcrete instances
+        concrete_found = packages_metadata.get_concrete_of_package(transform.outputGraph.identifier)
+        concrete_surr = packages_metadata.get_concrete_of_package(transform.inputGraph.identifier)
+
+        def exclude_components(components: List[str]):
+            """Generates a filter that rejects certain components AND references to external data
+            such as input, application dependencies, etc
+            """
+            excl_components = list(components or [])
+
+            def filter_out_components(parameter: str) -> bool:
+                dref = apis.models.from_core.DataReference(parameter)
+
+                return dref.externalProducerName is None and \
+                    (dref.producerIdentifier.identifier not in excl_components)
+
+            return filter_out_components
+
+        cids_surr = concrete_surr.get_component_identifiers(recompute=False)
+        not_in_inputgraph = []
+
+        for cid in cids_surr:
+            ref = experiment.model.graph.ComponentIdentifier(cid[1], cid[0]).identifier
+            if ref not in transform.inputGraph.components:
+                not_in_inputgraph.append(ref)
+
+        # VV: Foundation (i.e. output) and Surrogate (i.e. input) parameters
+        p_found = get_workflow_parameter_names(
+            concrete_found, cb_filter=exclude_components(transform.outputGraph.components))
+        parameters_found = [apis.models.from_core.DataReference(ref) for ref in p_found]
+
+        self._log.info(f"Parameters Foundation {parameters_found}")
+
+        known_mappings = set()
+        for m in transform.relationship.graphParameters:
+            if m.inputGraphParameter.name and (m.outputGraphParameter.default or m.outputGraphParameter.name):
+                known_mappings.update(m.inputGraphParameter.name)
+
+        # VV: First prepare the mappings between graph parameters. If we find an inputGraph parameter for which
+        # there is no mapping to an outputGraph then try to find if there's an outputGraph component which:
+        # 1. does not get removed by transform
+        # 2. has the same name as the inputGraph parameter
+        # If there's such an outputGraph then generate a graphParameters mapping between the 2 components
+        for surrogate in transform.inputGraph.components:
+            cid = experiment.model.graph.ComponentIdentifier(surrogate)
+            comp_params = get_parameters_of_component(concrete_surr.get_component((cid.stageIndex, cid.componentName)))
+
+            for p in filter(lambda x: x not in known_mappings, comp_params):
+                dref_surr = apis.models.from_core.DataReference(p)
+                # VV: External dependencies (e.g. input, or  application dependency) are special,
+                # we don't need to care for them at all. They will just point to a directory under $INSTANCE_DIR
+                # We also don't care about parameters which are satisfied by components in the inputGraph
+                if dref_surr.externalProducerName \
+                        or dref_surr.producerIdentifier.identifier in transform.inputGraph.components:
+                    continue
+
+                for dref_found in parameters_found:
+                    if dref_found.producerIdentifier == dref_surr.producerIdentifier:
+                        # VV: There's a component in the outputGraph that the relationship does not remove
+                        # it has the same name as a component that was satisfying the dependency in inputGraph
+                        # let's infer that the 2 components are equal
+
+                        # VV: Here we use the foundation stage/index and the expected reference method (from surrogate)
+                        ref_surr = apis.models.from_core.DataReference.from_parts(
+                            stage=dref_surr.stageIndex, producer=dref_surr.producerName, fileRef='',
+                            method=dref_surr.method).absoluteReference
+                        ref_found = apis.models.from_core.DataReference.from_parts(
+                            stage=dref_found.stageIndex, producer=dref_found.producerName, fileRef='',
+                            method=dref_surr.method).absoluteReference
+
+                        self._log.info(
+                            f"   Matching {dref_found.absoluteReference} with "
+                            f"{dref_surr.absoluteReference} on pathRef= {dref_surr.pathRef}")
+
+                        transform.relationship.graphParameters.append(
+                            apis.models.relationships.RelationshipParameters(
+                                inputGraphParameter=apis.models.relationships.GraphValue(name=ref_surr),
+                                outputGraphParameter=apis.models.relationships.GraphValue(name=ref_found)))
+
+        # VV: We can do something similar for graphResults
+        # - If there is a parameter in the outputGraph referencing a component that the transformation removes, AND
+        # - there is no graphResult mapping for this parameter, AND
+        # - there is a component in the inputGraph with the same name, THEN
+        # Generate a graphResults mapping between the 2 components - we could just use graphParameters here.
+        # In the upcoming refresh of the schema we should get rid of the graphResults field completely
+
+        known_mappings = set()
+        for m in transform.relationship.graphResults:
+            if m.outputGraphResult.name and (m.inputGraphResult.default or m.inputGraphResult.name):
+                known_mappings.update(m.outputGraphResult.name)
+
+        cids_found = concrete_found.get_component_identifiers(recompute=True, include_documents=False)
+
+        for cid in cids_found:
+            comp_id = experiment.model.graph.ComponentIdentifier(cid[1], cid[0])
+
+            if comp_id.identifier in transform.outputGraph.components:
+                print(cid)
+                continue
+
+            # VV: This component will stick around after the transformation. Let's check its parameters, and apply the
+            # logic above to generate a new graphResults entry
+            comp = concrete_found.get_component(cid)
+            params = get_parameters_of_component(comp)
+
+            for p in params:
+                dref = apis.models.from_core.DataReference(p)
+                if dref.externalProducerName or \
+                        (dref.producerIdentifier.identifier in transform.outputGraph.components):
+                    continue
+
+                for cs in transform.inputGraph.components:
+                    stage, name, _ = experiment.model.frontends.flowir.FlowIR.ParseProducerReference(cs)
+                    cref = apis.models.from_core.DataReference.from_parts(stage, name, "", "ref")
+
+                    if references_cmp(cref.absoluteReference, dref.absoluteReference) > 0:
+                        self._log.info(
+                            f"   Matching graphResult {dref.absoluteReference} with "
+                            f"{cref.absoluteReference} on pathRef= {dref.pathRef}")
+                        rel = apis.models.relationships.RelationshipResults(
+                            outputGraphResult=apis.models.relationships.GraphValue(name=dref.absoluteReference),
+                            inputGraphResult=apis.models.relationships.GraphValue(name=cref.absoluteReference)
+                        )
+                        transform.relationship.graphResults.append(rel)
 
     def _infer_relationship_single_component_graphs(
             self,
@@ -177,17 +356,21 @@ class TransformRelationship:
             #  component each
             if len(transform.outputGraph.components) == 1 \
                     and len(transform.inputGraph.components) == 1:
+                self._log.info("Inferring parameter mappings for 1-to-1 transform")
                 self._infer_relationship_single_component_graphs(packages_metadata)
+                self._log.info(f"Parameter Mappings (after 1-to-1): {self._transform.json(indent=2)}")
 
-                self._log.info(f"New relationships after inference: {self._transform.json(indent=2)}")
-            else:
-                self._log.info("Cannot infer parameter relationship of graphs")
+            # VV: After we've handled all the "special" cases, we can assume that if 2 parameters have the same name
+            # in the 2 graphs, then they are "equivalent"
+            self._infer_relationship_identical_parameter_names(packages_metadata)
 
     def _test_graph_relationship(
             self,
             packages_metadata: apis.storage.PackageMetadataCollection,
     ):
         transform = self._transform
+
+        problems = []
 
         concrete_surrogate = packages_metadata.get_concrete_of_package(transform.inputGraph.identifier)
 
@@ -202,8 +385,19 @@ class TransformRelationship:
                 try:
                     _value = transform.relationship.get_parameter_relationship_by_name_input(param)
                 except KeyError:
-                    raise apis.models.errors.ApiError(f"Unknown parameter {param} for surrogate component "
-                                                      f"{ref_surrogate} in {transform.inputGraph.identifier}")
+                    ref = apis.models.from_core.DataReference(param)
+                    # VV: There was no need to specify this parameter mapping because it points to a
+                    # component inside the inputGraph
+                    if ref.producerIdentifier.identifier in transform.inputGraph.components:
+                        continue
+
+                    problem = (f"Unknown parameter {param} for surrogate component "
+                               f"{ref_surrogate} in {transform.inputGraph.identifier}")
+                    if problem not in problems:
+                        problems.append(problem)
+
+        if problems:
+            raise apis.models.errors.ApiError(f"Run into {len(problems)} problems:\n" + "\n".join(problems))
 
     def try_infer(
             self,
