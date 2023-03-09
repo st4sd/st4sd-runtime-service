@@ -18,7 +18,7 @@ import pandas
 import werkzeug.exceptions
 import yaml
 from flask import current_app, Response
-from flask_restx import Resource, reqparse
+from flask_restx import Resource, reqparse, inputs
 from kubernetes import client
 
 import apis.models
@@ -424,6 +424,13 @@ class Instance(Resource):
         # GET /rs/instances/homo-lumo-dft-interface-eabpbk/properties b''
         #       b'{"message": "The browser (or proxy) sent a request that this server could not understand."}\n'
         location='args')
+    _parser_properties.add_argument(
+        'stringifyNaN',
+        type=inputs.boolean,
+        default=False,
+        help='A boolean flag that allows converting NaN and infinite values to strings.',
+        location='args'
+    )
 
     @api.expect(_parser_properties)
     def get(self, id):
@@ -438,6 +445,7 @@ class Instance(Resource):
 
             args = self._parser_properties.parse_args()
             comma_separated_names = args.includeProperties
+            stringify_nan = args.stringifyNaN
             if comma_separated_names is not None:
                 comma_separated_names = (comma_separated_names or '*').lower()
 
@@ -459,7 +467,8 @@ class Instance(Resource):
                                                f"Traceback: {traceback.format_exc()}")
 
                 try:
-                    properties = load_measured_properties_of_instance(instance_dir, comma_separated_names)
+                    properties = load_measured_properties_of_instance(instance_dir, comma_separated_names,
+                                                                      stringify_nan)
                 except FileNotFoundError:
                     if instance['status'].get('experiment-state', '').lower() in ["finished", "failed"]:
                         api.abort(404, message=f"Instance {id} has no properties",
@@ -555,7 +564,8 @@ def load_interface_of_virtual_experiment_instance(
     return yaml.load(open(path, 'r'), Loader=yaml.Loader).get('interface', {})
 
 
-def load_measured_properties_of_instance(instance_dir: str, comma_separated_names: str) -> Dict[str, Any]:
+def load_measured_properties_of_instance(instance_dir: str, comma_separated_names: str, stringify_nan: bool) -> Dict[
+    str, Any]:
     """Reads the properties of an instance and returns a Dictionary representation of the dataframe
 
     Args:
@@ -563,6 +573,7 @@ def load_measured_properties_of_instance(instance_dir: str, comma_separated_name
             which is translated to "all columns in properties dataframe". Column query is case insensitive and
             returned DataFrame has columns with lowercase names.
             Method silently discards columns that do not exist in DataFrame.
+        stringify_nan: A boolean flag that allows converting NaN and infinite values to strings.
         instance_dir: Path to instance dir
 
     Returns:
@@ -592,6 +603,9 @@ def load_measured_properties_of_instance(instance_dir: str, comma_separated_name
         columns = [x for x in column_names if x in df.columns]
         df = df[columns]
 
+    if stringify_nan:
+        df.fillna('NaN', inplace=True)
+
     return df.to_dict(orient="list")
 
 
@@ -613,6 +627,13 @@ class InstanceProperties(Resource):
         # GET /rs/instances/homo-lumo-dft-interface-eabpbk/properties b''
         #       b'{"message": "The browser (or proxy) sent a request that this server could not understand."}\n'
         location='args')
+    _parser_properties.add_argument(
+        'stringifyNaN',
+        type=inputs.boolean,
+        default=False,
+        help='A boolean flag that allows converting NaN and infinite values to strings.',
+        location='args'
+    )
 
     @api.expect(_parser_properties)
     def get(self, id):
@@ -633,9 +654,10 @@ class InstanceProperties(Resource):
 
             args = self._parser_properties.parse_args()
             comma_separated_names = (args.includeProperties or "*").lower()
+            stringify_nan = args.stringifyNaN
 
             try:
-                return load_measured_properties_of_instance(instance_dir, comma_separated_names)
+                return load_measured_properties_of_instance(instance_dir, comma_separated_names, stringify_nan)
             except FileNotFoundError:
                 if instance['status'].get('experiment-state', '').lower() in ["finished", "failed"]:
                     api.abort(404, message=f"Instance {id} has no properties",

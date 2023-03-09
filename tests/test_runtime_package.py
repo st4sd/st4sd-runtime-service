@@ -1588,7 +1588,7 @@ def test_extract_all_variables_during_validate(
         assert values[0] == str(vars_openshift[name])
 
 
-def test_extract_all_variables_during_validate_missing_variable(
+def test_extract_all_variables_during_validate(
         flowir_psi4: str,
         ve_psi4: apis.models.virtual_experiment.ParameterisedPackage,
         output_dir: str
