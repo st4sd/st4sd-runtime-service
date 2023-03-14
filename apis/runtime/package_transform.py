@@ -391,6 +391,9 @@ class TransformRelationship:
                     if ref.producerIdentifier.identifier in transform.inputGraph.components:
                         continue
 
+                    if ref.externalProducerName:
+                        continue
+
                     problem = (f"Unknown parameter {param} for surrogate component "
                                f"{ref_surrogate} in {transform.inputGraph.identifier}")
                     if problem not in problems:

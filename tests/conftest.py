@@ -302,6 +302,52 @@ version: 0.2.0
 """
 
 
+@pytest.fixture()
+def flowir_optimizer() -> str:
+    return """
+components:
+  - name: GetMoleculeIndex
+    command:
+      executable: bin/molecule-index
+    workflowAttributes:
+      replicate: "%(numberMolecules)s"
+    
+  - name: SMILESToXYZ
+    command:
+      executable: bin/smiles-to-xyz
+      arguments: GetMoleculeIndex:output 
+    references:
+    - input/input_smiles.csv:copy
+    - GetMoleculeIndex:output
+
+  - name: Optimizer
+    command:
+      executable: bin/optimizer
+      arguments: stage0.SMILESToXYZ:ref GetMoleculeIndex:output data/model-weights.checkpoint:ref
+    references:
+    - stage0.SMILESToXYZ:ref
+    - GetMoleculeIndex:output
+    - data/model-weights.checkpoint:ref
+  
+  - name: XYZToGAMESS
+    command:
+      executable: bin/generate-gamess
+      arguments: stage0.Optimizer/optimized.xyz:ref input/input_molecule.txt:ref stage0.SMILESToXYZ:ref
+        stage0.GetMoleculeIndex:output
+    references:
+      - stage0.Optimizer/optimized.xyz:ref
+      - input/input_molecule.txt:ref
+      - stage0.SMILESToXYZ:ref
+      - stage0.GetMoleculeIndex:output
+  
+variables:
+  default:
+    global:
+      numberMolecules: 1
+      startIndex: 1
+"""
+
+
 @pytest.fixture(scope="function")
 def output_dir() -> str:
     path = tempfile.mkdtemp()
@@ -325,8 +371,12 @@ def populate_files(location: str, extra_files: Dict[str, str]):
             os.makedirs(os.path.join(location, sub_folder))
         except Exception as e:
             pass
-        with open(os.path.join(location, path), 'w') as f:
-            f.write(extra_files[path])
+
+        try:
+            with open(os.path.join(location, path), 'w') as f:
+                f.write(extra_files[path])
+        except Exception as e:
+            raise ValueError(f"Problem with {path}") from e
 
 
 def package_from_files(
@@ -2581,6 +2631,47 @@ def ve_neural_potential() -> apis.models.virtual_experiment.ParameterisedPackage
 
 
 @pytest.fixture(scope="function")
+def ve_modular_optimizer() -> apis.models.virtual_experiment.ParameterisedPackage:
+    package = {
+        "metadata": {
+            "package": {"name": "optimizer-modular", "description": "Optimizer for band-gap-dft-modular"}
+        },
+        "base": {
+            "packages": [
+                {
+                    "config": {
+                        "manifestPath": "manifest.yaml",
+                        "path": "optimizer-modular.yaml"
+                    },
+                    "source": {
+                        "git": {
+                            "location": {
+                                "tag": "main",
+                                "url": "https://github.com/st4sd/optimizer-modular.git"
+                            }
+                        }
+                    }
+                }
+            ]
+        },
+        "parameterisation": {
+            "executionOptions": {
+                "platform": ["openshift"],
+                "variables": [
+                    {"name": "numberMolecules"},
+                    {"name": "startIndex"},
+                ]
+            }
+        }
+    }
+    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve.update_digest()
+
+    assert ve.metadata.registry.digest is not None
+    return ve
+
+
+@pytest.fixture(scope="function")
 def ve_modular_ani() -> apis.models.virtual_experiment.ParameterisedPackage:
     package = {
         "metadata": {
@@ -2675,7 +2766,7 @@ def ve_modular_band_gap_gamess() -> apis.models.virtual_experiment.Parameterised
     package = {
         "metadata": {
             "package": {
-                "description": "Uses the DFT functional and basis set B3LYP/6-31G(d,p) with Grimme et al's D3 correction to perform geometry optimization and HOMO-LUMO band gap calculation",
+                "description": "",
                 "keywords": [
                     "smiles",
                     "computational chemistry",
@@ -3081,6 +3172,67 @@ def package_metadata_modular_ani_band_gap_gamess(
     data_files = ["input_anion.txt", "input_cation.txt", "input_molecule.txt", "input_neutral.txt"]
     files.update({os.path.join(expensive_name, 'data-dft', f): 'expensive' for f in data_files})
     files.update({os.path.join(surrogate_name, 'data-ani', f): 'surrogate' for f in data_files})
+
+    multi_package = package_from_files(location=output_dir, files=files)
+
+    StorageMetadata = apis.models.virtual_experiment.StorageMetadata
+
+    expensive_location = os.path.join(multi_package, expensive_name)
+    surrogagate_location = os.path.join(multi_package, surrogate_name)
+
+    packages_metadata = apis.storage.PackageMetadataCollection({
+        f'{expensive_name}:latest': StorageMetadata.from_config(
+            prefix_paths=multi_package, config=apis.models.virtual_experiment.BasePackageConfig(
+                path=os.path.join(expensive_name, f'{expensive_name}.yaml'),
+                manifestPath=os.path.join(expensive_name, 'manifest.yaml')
+            ),
+        ),
+        f'{surrogate_name}:latest': StorageMetadata.from_config(
+            prefix_paths=multi_package, config=apis.models.virtual_experiment.BasePackageConfig(
+                path=os.path.join(surrogate_name, f'{surrogate_name}.yaml'),
+                manifestPath=os.path.join(surrogate_name, 'manifest.yaml')
+            ),
+        )
+    })
+
+    return packages_metadata
+
+
+@pytest.fixture()
+def package_metadata_modular_optimizer_band_gap_gamess(
+        flowir_optimizer: str,
+        flowir_modular_band_gap: str,
+        output_dir: str,
+) -> apis.storage.PackageMetadataCollection:
+    expensive_name = "band-gap-dft-gamess-us"
+    surrogate_name = "optimizer-modular"
+
+    files = {os.path.join('component-scripts', f): "#expensive" for f in [
+        "rdkit_smiles2coordinates.py", "run-gamess.sh", "extract_gmsout_geo_opt.py"]}
+    # VV: Both VEs use the rdkit_smiles2coordinates.py script
+    files.update({os.path.join('component-scripts', f): "#surrogate" for f in [
+        "smiles-to-xyz", "molecule-index", "optimizer", "generate-gamess"]})
+    files.update({os.path.join('hooks', f): "# hooks" for f in [
+        "__init__.py", "dft_restart.py", "interface.py", "semi_empirical_restart.py"]})
+
+    files[os.path.join(expensive_name, f'{expensive_name}.yaml')] = flowir_modular_band_gap
+    files[os.path.join(expensive_name, 'manifest.yaml')] = """
+    bin: ../component-scripts:copy
+    data: data-dft:copy
+    hooks: ../hooks:copy
+    """
+    files[os.path.join(surrogate_name, f'{surrogate_name}.yaml')] = flowir_optimizer
+    files[os.path.join(surrogate_name, 'manifest.yaml')] = """
+    bin: ../component-scripts:copy
+    data: data-ani:copy
+    hooks: ../hooks:copy
+    """
+
+    data_files = ["input_anion.txt", "input_cation.txt", "input_molecule.txt", "input_neutral.txt"]
+
+    data_files_surrogate = ["model-weights.checkpoint"]
+    files.update({os.path.join(expensive_name, 'data-dft', f): 'expensive' for f in data_files})
+    files.update({os.path.join(surrogate_name, 'data-ani', f): 'surrogate' for f in data_files_surrogate})
 
     multi_package = package_from_files(location=output_dir, files=files)
 

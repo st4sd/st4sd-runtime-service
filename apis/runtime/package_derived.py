@@ -392,11 +392,24 @@ class DerivedPackage:
                             if not b.valueFrom.graph.binding.name:
                                 raise NotImplementedError(
                                     f"Expected input binding to contain a name but it is {b.dict()}")
-                            binding = other_graph_template.bindings.get_output_binding(b.valueFrom.graph.binding.name)
-                            rule_replace = binding.reference
-                            if not rule_replace:
-                                raise NotImplementedError(f"Binding {b.name} of graph {b.valueFrom.graph.name} "
-                                                          f"does not point to a reference")
+                            try:
+                                binding = other_graph_template.bindings.get_output_binding(
+                                    b.valueFrom.graph.binding.name)
+                                rule_replace = binding.reference
+                                if not rule_replace:
+                                    raise NotImplementedError(f"Binding {b.name} of graph {b.valueFrom.graph.name} "
+                                                              f"does not point to a reference")
+                            except KeyError:
+                                # VV: The outputGraph parameter does not exist, this is problematic if the producer
+                                # of the reference is a component. However, if the producer is an application-dependency
+                                # or an input, data file then this is fine because the synthesized virtual experiment
+                                # will contain the producer
+                                dref = apis.models.from_core.DataReference(b.valueFrom.graph.binding.name)
+                                if dref.externalProducerName:
+                                    continue
+                                else:
+                                    raise
+
                         elif b.valueFrom.applicationDependency:
                             rule_replace = b.valueFrom.applicationDependency.reference
                         else:

@@ -370,3 +370,61 @@ def test_modular_ani_band_gap_gamess_persist(
 
     for x in ["input_anion.txt", "input_cation.txt", "input_molecule.txt", "input_neutral.txt"]:
         open(os.path.join(dir_persist, 'data', x)).close()
+
+
+def test_modular_optimizer_band_gap_reference_data(
+        ve_modular_optimizer: apis.models.virtual_experiment.ParameterisedPackage,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        output_dir: str,
+):
+    relationship = {"identifier": "maul-to-band-gap-dft-modular", "transform": {
+        "inputGraph": {"identifier": "optimizer-modular:latest",
+                       "components": ["stage0.Optimizer", "stage0.XYZToGAMESS"]},
+        "outputGraph": {"identifier": "band-gap-dft-gamess-us:latest", "components": ["stage0.XYZToGAMESS"]},
+        "relationship": {"graphParameters": [{"inputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"},
+                                              "outputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"}},
+                                             {"inputGraphParameter": {"name": "stage0.XYZToGAMESS:ref"},
+                                              "outputGraphParameter": {"name": "stage0.SMILESToGAMESSInput:ref"}},
+                                             {"inputGraphParameter": {"name": "data/ref_bnn_ani_checkpoint.pt:ref"},
+                                              "outputGraphParameter": {"name": "data/ref_bnn_ani_checkpoint.pt:ref"}},
+                                             {"inputGraphParameter": {"name": "input/input_molecule.txt:ref"},
+                                              "outputGraphParameter": {
+                                                  "name": "stage0.SetFunctional/input_molecule.txt:ref"}}],
+                         "graphResults": [{"inputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"},
+                                           "outputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"}}]}}}
+    packages_metadata = package_metadata_modular_optimizer_band_gap_gamess
+
+    rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(relationship)
+
+    rel.transform.inputGraph.package = ve_modular_optimizer.base.packages[0]
+    rel.transform.outputGraph.package = ve_modular_band_gap_gamess.base.packages[0]
+
+    logger.info(f"Relationship: {rel.json(exclude_none=True, exclude_unset=True, indent=2)}")
+
+    transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
+
+    derived_ve = transform.prepare_derived_package(
+        "hello", parameterisation=apis.models.virtual_experiment.Parameterisation())
+    transform.synthesize_derived_package(packages_metadata, derived_ve)
+    logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
+
+    dir_persist = os.path.join(output_dir, "persist")
+    package = apis.runtime.package_derived.DerivedPackage(
+        derived_ve, directory_to_place_derived=output_dir)
+    package.synthesize(package_metadata=packages_metadata, platforms=None)
+    package.persist_to_directory(dir_persist, packages_metadata)
+
+    # VV: Ensure paths exist
+    open(os.path.join(dir_persist, "conf", "flowir_package.yaml")).close()
+
+    for x in [
+        "rdkit_smiles2coordinates.py", "run-gamess.sh", "extract_gmsout_geo_opt.py",
+        # VV: Surrogate binaries go here
+        "smiles-to-xyz", "molecule-index", "optimizer", "generate-gamess"
+    ]:
+        open(os.path.join(dir_persist, 'bin', x)).close()
+
+    for x in ["input_anion.txt", "input_cation.txt", "input_molecule.txt", "input_neutral.txt",
+              "model-weights.checkpoint"]:
+        open(os.path.join(dir_persist, 'data', x)).close()
