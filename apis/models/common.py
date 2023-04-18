@@ -125,13 +125,18 @@ class OptionFromS3Values(Digestable):
     bucket: Optional[str]
     endpoint: Optional[str]
     path: Optional[str]
+    rename: Optional[str] = pydantic.Field(
+        None, description="If set, and path is not None then this means that the path filename should be renamed "
+                          "to match @rename")
     region: Optional[str]
 
 
 class OptionFromDatasetRef(Digestable):
     name: str
     path: Optional[str]
-
+    rename: Optional[str] = pydantic.Field(
+        None, description="If set, and path is not None then this means that the path filename should be renamed "
+                          "to match @rename")
 
 class OptionFromUsernamePassword(Digestable):
     username: Optional[str]

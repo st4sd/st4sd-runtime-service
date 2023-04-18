@@ -821,6 +821,10 @@ class NamedPackage:
             if path.startswith(os.path.sep):
                 # VV: joining ("hello" with "/hi there") produces "/hi there"
                 path = path[1:]
+
+            if value.rename:
+                path = ':'.join((path, value.rename))
+
             return os.path.join(ROOT_S3_FILES, file_type, path)
         else:
             raise NotImplementedError(f"Cannot construct filename of data {x.dict()}")

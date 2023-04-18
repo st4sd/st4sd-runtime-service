@@ -25,6 +25,7 @@ import experiment.model.frontends.flowir
 import experiment.model.graph
 import experiment.model.storage
 import pydantic
+import six
 from pydantic import validator
 
 import apis.models.common
@@ -361,8 +362,36 @@ class PayloadSecurity(apis.models.common.Digestable):
 
 
 class OldFileContent(apis.models.common.Digestable):
-    filename: str
+    filename: Optional[str] = None
     content: Optional[str] = None
+    sourceFilename: Optional[str] = None
+    targetFilename: Optional[str] = None
+
+    @pydantic.validator("targetFilename")
+    def no_directories_in_target(cls, value: Optional[str]) -> str:
+        if value is None:
+            return value
+
+        if isinstance(value, six.string_types):
+            if '/' in value:
+                raise ValueError("Cannot contain / character")
+
+        return value
+
+    @pydantic.root_validator()
+    def mutually_exclusive_fields(cls, value: Dict[str, Optional[str]]) -> Dict[str, Optional[str]]:
+        if isinstance(value, dict) is False:
+            raise ValueError("Not a dictionary")
+
+        if (value.get('filename') is not None or value.get('content') is not None) and \
+                (value.get('sourceFilename') is not None or value.get('targetFilename') is not None):
+            raise ValueError("filename/content are mutually exclusive with sourceFilename/targetFilename")
+
+        if (value.get('sourceFilename') is not None and value.get('targetFilename') is None) or \
+                (value.get('targetFilename') is not None and value.get('sourceFilename') is None):
+            raise ValueError("If either targetFilename and sourceFilename is set, then both must be set")
+
+        return value
 
 
 class OldVolumeType(apis.models.common.Digestable):
@@ -536,24 +565,57 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                 datasetRef=apis.models.common.OptionFromDatasetRef(name=name, path=path)
             )
 
-        def parse_old_file_contents(fc: OldFileContent) -> apis.models.common.Option:
+        def parse_old_file_contents(fc: OldFileContent, kind: str) -> apis.models.common.Option:
             if fc.content:
                 # VV: This is an "embedded" file - it contains the contents of the file
+                if not fc.filename:
+                    raise apis.models.errors.InvalidPayloadExperimentStartError(
+                        f"payload configuration for {kind} file {fc.dict()} is invalid because .filename is empty")
                 ret = apis.models.common.Option(name=fc.filename, value=fc.content)
             else:
                 # VV: This file is retrieved from old.s3 (either dataset, or S3) - we will reuse the credentials from
                 # config.security - here we just record path to the files to download
-                ret = apis.models.common.Option(
-                    name=os.path.basename(fc.filename),
-                    valueFrom=apis.models.common.OptionValueFrom())
-                if config.security.s3Input.valueFrom.s3Ref:
-                    ret.valueFrom.s3Ref = apis.models.common.OptionFromS3Values(path=fc.filename)
+
+                if fc.filename:
+                    filename_source = fc.filename
+                    filename_target = None
+                    name_of_file_in_experiment = os.path.basename(filename_source)
                 else:
-                    ret.valueFrom.datasetRef = apis.models.common.OptionFromDatasetRef(path=fc.filename)
+                    filename_source = fc.sourceFilename
+                    filename_target = fc.targetFilename
+
+                    name_of_file_in_experiment = filename_target
+
+                    if filename_source and not filename_target:
+                        raise apis.models.errors.InvalidPayloadExperimentStartError(
+                            f"payload configuration for {kind} file {fc.dict()} is invalid. "
+                            f".sourceFilename is set but .targetFilename is empty")
+
+                if not name_of_file_in_experiment:
+                    raise apis.models.errors.InvalidPayloadExperimentStartError(
+                        f"payload configuration for {kind} file {fc.dict()} is invalid. Could not "
+                        f"determine the name of the {kind} file in the experiment scope")
+
+                ret = apis.models.common.Option(
+                    name=name_of_file_in_experiment,
+                    valueFrom=apis.models.common.OptionValueFrom())
+
+                if config.security.s3Input.valueFrom is None:
+                    raise apis.models.errors.InvalidPayloadExperimentStartError(
+                        f"payload configuration for {kind} file {fc.dict()} is invalid because there is "
+                        f"no S3/Dataset security configuration")
+                else:
+                    if config.security.s3Input.valueFrom.s3Ref:
+                        ret.valueFrom.s3Ref = apis.models.common.OptionFromS3Values(
+                            path=filename_source, rename=filename_target)
+                    else:
+                        ret.valueFrom.datasetRef = apis.models.common.OptionFromDatasetRef(
+                            name=config.security.s3Input.valueFrom.datasetRef.name, path=filename_source,
+                            rename=filename_target)
             return ret
 
-        config.inputs = [parse_old_file_contents(x) for x in old.inputs]
-        config.data = [parse_old_file_contents(x) for x in old.data]
+        config.inputs = [parse_old_file_contents(x, "inputs") for x in old.inputs]
+        config.data = [parse_old_file_contents(x, "data") for x in old.data]
 
         return config
 

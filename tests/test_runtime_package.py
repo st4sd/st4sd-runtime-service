@@ -19,6 +19,8 @@ from typing import List
 import pytest
 import yaml
 
+import pydantic
+
 import apis.db.exp_packages
 import apis.models.common
 import apis.models.constants
@@ -27,6 +29,8 @@ import apis.models.virtual_experiment
 import apis.runtime.package
 import apis.storage
 import tests.conftest
+
+
 
 package_from_files = tests.conftest.package_from_files
 
@@ -1185,6 +1189,116 @@ def test_package_store_outputs_s3(ve_sum_numbers: apis.models.virtual_experiment
 
     _ = runtime_args.index("--s3AuthWithEnvVars")
     _ = runtime_args.index("--s3StoreToURI=s3://my-bucket/location")
+
+
+def test_read_s3_files_rename(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+        'inputs': [
+            {
+                'sourceFilename': '/dir/file.txt',
+                'targetFilename': 'renamed.txt'
+            }
+        ],
+        's3': {
+            'accessKeyID': "accessKeyID",
+            'secretAccessKey': "secretAccessKey",
+            'bucket': "bucket",
+            'endpoint': "endpoint"
+        }
+    })
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+    package = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    wf = package.construct_k8s_workflow()
+
+    assert payload_config.inputs[0].name == "renamed.txt"
+
+    # VV: st4sd-runtime-k8s will ask st4sd-runtime-k8s-input-s3 to download
+    # the file "/dir/file.txt" from the S3 bucket and store it under "/tmp/s3-root-dir/input/".
+    # Then it will configure elaunch.py (st4sd-runtime-core) to:
+    # 1. load the input file /tmp/s3-root-dir/input/dir/file.txt
+    # 2. store it as ${INSTANCE_DIR}/input/renamed.txt
+    assert wf['spec']['inputs'] == ["/tmp/s3-root-dir/input/dir/file.txt:renamed.txt"]
+
+
+def test_read_dataset_files_rename(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+        'inputs': [
+            {
+                'sourceFilename': '/dir/file.txt',
+                'targetFilename': 'renamed.txt'
+            }
+        ],
+        's3': {
+            'dataset': "ds-foo"
+        }
+    })
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+    package = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    wf = package.construct_k8s_workflow()
+
+    assert payload_config.inputs[0].name == "renamed.txt"
+
+    # VV: st4sd-runtime-k8s will ask st4sd-runtime-k8s-input-s3 to download
+    # the file "/dir/file.txt" from the S3 bucket that the dataset object wraps.
+    # st4sd-runtime-k8s-input-s3 will store the file under "/tmp/s3-root-dir/input/".
+    # Then it will configure elaunch.py (st4sd-runtime-core) to:
+    # 1. load the input file /tmp/s3-root-dir/input/dir/file.txt
+    # 2. store it as ${INSTANCE_DIR}/input/renamed.txt
+    # This process is similar to test_read_s3_files_rename(), the difference is that
+    # st4sd-runtime-k8s will extract the s3 credentials from the Dataset object.
+    # i.e. it is not st4sd-runtime-service to provide the S3 credentials in the workflow definition.
+
+    assert wf['spec']['inputs'] == ["/tmp/s3-root-dir/input/dir/file.txt:renamed.txt"]
+
+
+def test_invalid_payload_s3_missing_target_filename():
+    with pytest.raises(pydantic.error_wrappers.ValidationError):
+        old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+            'inputs': [
+                {
+                    'sourceFilename': '/dir/file.txt',
+                }
+            ]
+        })
+
+
+def test_invalid_payload_s3_both_filename_and_target_filename():
+    with pytest.raises(pydantic.error_wrappers.ValidationError):
+        old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+            'inputs': [
+                {
+                    'sourceFilename': '/dir/file.txt',
+                    'filename': "other-file.txt"
+                }
+            ]
+        })
+
+
+def test_read_s3_files_simple(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+        'inputs': [
+            {'filename': '/dir/file.txt'}
+        ],
+        's3': {
+            'accessKeyID': "accessKeyID",
+            'secretAccessKey': "secretAccessKey",
+            'bucket': "bucket",
+            'endpoint': "endpoint"
+        }
+    })
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+    package = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    wf = package.construct_k8s_workflow()
+
+    assert payload_config.inputs[0].name == "file.txt"
+
+    assert wf['spec']['inputs'] == ["/tmp/s3-root-dir/input/dir/file.txt"]
 
 
 def test_experiment_id_usermetadata(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):

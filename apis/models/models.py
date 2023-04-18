@@ -339,10 +339,22 @@ mPackageHistory = api_experiments.model("package-history", {
 })
 
 mFileContent = api_experiments.model('file-content', {
-    'filename': fields.String(required=True, description='Filename', example="field.conf"),
-    'content': fields.String(required=True, description='Content of file', example='mole:capb,slampd,smlta '
-                                                                                   'conc:4.2,1.4,0.5 '
-                                                                                   'salt:2.8')
+    'filename': fields.String(
+        required=False,
+        description='Filename. Mutually exclusive with sourceFilename and targetFilename', example="field.conf"),
+    'sourceFilename': fields.String(
+        required=False,
+        description="path to the filename. Mutually exclusive with filename and content. "
+                    "If set, must also provide sourceFilename"),
+    'targetFilename': fields.String(
+        required=False,
+        description="How to rename sourceFilename. Mutually exclusive with filename and content. "
+                    "If set, must also provide targetFilename"),
+    'content': fields.String(
+        required=False, description='Content of file. Mutually exclusive with sourceFilename and targetFilename',
+        example="""mole:capb,slampd,smlta
+conc:4.2,1.4,0.5
+salt:2.8""")
 })
 
 # mDataContent = api_experiments.model('data-content', {

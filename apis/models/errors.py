@@ -105,6 +105,16 @@ class OverrideVariableError(ApiError):
         super(OverrideVariableError, self).__init__(msg)
 
 
+class InvalidPayloadError(ApiError):
+    def __init__(self, msg: str):
+        super(InvalidPayloadError, self).__init__(msg)
+
+
+class InvalidPayloadExperimentStartError(ApiError):
+    def __init__(self, msg: str):
+        super(InvalidPayloadExperimentStartError, self).__init__(msg)
+
+
 class OverrideDataFilesError(ApiError):
     def __init__(self, names: List[str], msg: str):
         self.names = names
