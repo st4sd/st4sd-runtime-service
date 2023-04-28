@@ -16,9 +16,11 @@ import json
 import os
 import pprint
 import random
+import re
 import string
 import traceback
 from typing import List, Dict, Optional, Any, Tuple
+from typing import Union
 
 import experiment.model.errors
 import experiment.model.frontends.flowir
@@ -56,6 +58,7 @@ import utils
 # from dummy_data import populate_from, append_to, update, delete_identifier, query_for_identifier
 from utils import setup_config, get_k8s_object, KubernetesObjectNotFound
 
+parser_formatting_dsl = apis.kernel.flask_utils.parser_formatting_dsl
 parser_formatting_parameterised_package = apis.kernel.flask_utils.parser_formatting_parameterised_package
 
 api = apis.models.api_experiments
@@ -1096,6 +1099,122 @@ class ExperimentList(Resource):
             current_app.logger.warning(f"Run into {e} while pushing new parameterised package. "
                                        f"Traceback: {traceback.format_exc()}")
             api.abort(500, f"Internal error pushing new parameterised package")
+
+
+@api.route('/<identifier>/dsl/', doc=False)
+@api.route('/<identifier>/dsl')
+@api.param('identifier', 'The package identifier. It must contain a $packageName and may include either '
+                         'a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`). If both suffixes are missing '
+                         'then the identifier implies the `:latest` tag suffix.')
+@api.response(404, 'Unknown experiment')
+class ExperimentDSL(Resource):
+    _my_parser = parser_formatting_dsl()
+
+    @api.expect(_my_parser)
+    def get(self, identifier: str):
+        '''Fetch an experiment given its identifier'''
+
+        try:
+            # VV: If identifier has neither @ or : it rewrites it to "${identifier}:latest}
+            identifier = apis.models.common.PackageIdentifier(identifier).identifier
+
+            with utils.database_experiments_open() as db:
+                docs = db.query_identifier(identifier)
+
+                if len(docs) == 0:
+                    api.abort(404, message=f"There is no entry in the experiment registry "
+                                           f"that matches {identifier}")
+
+                try:
+                    ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
+                        .parse_obj(docs[0])
+                except pydantic.error_wrappers.ValidationError as e:
+                    return {'problems': e.errors()}
+
+            platforms = ve.parameterisation.get_available_platforms()
+            platform_name = None
+
+            if platforms and len(platforms) > 0:
+                platform_name = platforms[0]
+
+            ve.parameterisation.get_available_platforms()
+
+            graph: Union[experiment.model.graph.WorkflowGraph, None] = None
+
+            if len(ve.base.packages) == 1:
+                download = apis.storage.PackagesDownloader(ve)
+
+                with download:
+                    metadata = download.get_metadata(ve.base.packages[0].name)
+                    concrete: experiment.model.frontends.flowir.FlowIRConcrete = metadata.concrete.copy()
+
+                    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(
+                        flowir=concrete.raw(), manifest=metadata.manifestData, platform=platform_name,
+                        variable_substitute=False)
+            elif len(ve.base.packages) > 1:
+                # VV: FIXME This is a hack, the derived packages currently live on a PVC
+
+                path = os.path.join(
+                    apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
+                    ve.metadata.package.name,
+                    ve.metadata.registry.digest
+                )
+                package = experiment.model.storage.ExperimentPackage.packageFromLocation(
+                    path, platform=platform_name, primitive=True, variable_substitute=False)
+                graph = experiment.model.graph.WorkflowGraph.graphFromPackage(
+                    experimentPackage=package,
+                    platform=platform_name,
+                )
+            else:
+                api.abort(400, "Parameterised virtual experiment package does not contain any base packages")
+
+            dsl = graph.to_dsl()
+
+            args = self._my_parser.parse_args()
+
+            # VV: Next, we should apply the presets/executionOptions rules to the parameters of the "main" workflow
+            # To this end, we should remove all items from entrypoint.execute[0].args that do not match
+            # param<Number> (those are special - they are references).
+            # Then we should pop in the values of variables in presets/executionOptions
+            ref_param_name = re.compile(r'param[0-9]+')
+            main_args = dsl['entrypoint']['execute'][0]['args']
+
+            updated_args = {
+                name: value for (name, value) in main_args.items() if ref_param_name.fullmatch(name)
+            }
+
+            # VV: re-use the logic that extracts values of variables when launching a virtual experiment
+            package = apis.runtime.package.NamedPackage(
+                ve,
+                apis.models.virtual_experiment.NamespacePresets(),
+                apis.models.virtual_experiment.PayloadExecutionOptions(),
+                apis.runtime.package.PackageExtraOptions()
+            )
+
+            updated_args.update(package.workflow_variables)
+
+            main_args.clear()
+            main_args.update(updated_args)
+
+            if args.outputFormat == "yaml":
+                dsl = experiment.model.frontends.flowir.yaml_dump(dsl)
+
+            return {
+                'dsl': dsl,
+                'problems': [],
+            }
+
+
+        except werkzeug.exceptions.HTTPException:
+            raise
+        except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while getting {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(500, str(e))
+        except Exception as e:
+            current_app.logger.warning(f"Run into {e} while getting {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(500, f"Run into internal error while querying for {identifier}")
 
 
 @api.route('/<identifier>/', doc=False)

@@ -13,6 +13,18 @@ import apis.kernel.experiments
 import apis.models.errors
 
 
+def parser_formatting_dsl() -> flask_restx.reqparse.RequestParser:
+    arg_parser = flask_restx.reqparse.RequestParser()
+    arg_parser.add_argument(
+        "outputFormat",
+        choices=["json", "yaml"],
+        default="json",
+        help='Output format',
+        location='args')
+
+    return arg_parser
+
+
 def parser_formatting_parameterised_package() -> flask_restx.reqparse.RequestParser:
     arg_parser = flask_restx.reqparse.RequestParser()
     arg_parser.add_argument(
