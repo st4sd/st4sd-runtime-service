@@ -1117,6 +1117,7 @@ def may_create_oauth_secret_and_update_base(base: apis.models.virtual_experiment
                                         data={'oauth-token': b64_encode(oauth_token)})
 
     api_instance_core.create_namespaced_secret(namespace=apis.models.constants.MONITORED_NAMESPACE, body=secret)
+    logger.warning(f"secret: {secret.metadata.name} created prior to git-token validation, use cautiously")
 
     source.security.oauth = apis.models.common.Option(
         valueFrom=apis.models.common.OptionValueFrom(

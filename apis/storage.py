@@ -160,7 +160,12 @@ class PackagesDownloader(PackageMetadataCollection):
         elif security.oauth is not None and security.oauth.valueFrom.secretKeyRef:
             secret = security.oauth.valueFrom.secretKeyRef
             oauth_token = apis.k8s.extract_git_oauth_token(secret.name, secret.key)
-            return download_with_token_and_extract_commit_id(oauth_token)
+
+            try:
+                return download_with_token_and_extract_commit_id(oauth_token)
+            except apis.runtime.errors.CannotDownloadGitError as e:
+                raise apis.runtime.errors.CannotDownloadGitError(e.message + f"\nDouble check whether the oauth-token credentials in the {secret.name} Kubernetes Secret are correct.")
+        
         else:
             raise apis.models.errors.ApiError("Currently only support extracting the "
                                               "interface of base packages with an oauth-token that is already stored "
