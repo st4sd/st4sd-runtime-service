@@ -1124,32 +1124,15 @@ def may_create_oauth_secret_and_update_base(base: apis.models.virtual_experiment
             secretKeyRef=apis.models.common.OptionFromSecretKeyRef(name=name, key="oauth-token")))
 
 
-def validate_adapt_and_store_experiment_to_database(
-        ve: apis.models.virtual_experiment.ParameterisedPackage,
-        package_metadata_collection: apis.storage.PackageMetadataCollection,
-        db: apis.db.exp_packages.DatabaseExperiments,
-):
-    """Validates a Parameterised Virtual Experiment Package modifies it (e.g. add createdOn and digest) and persists to
-    database
+def prepare_parameterised_package_for_download_definition(ve: apis.models.virtual_experiment.ParameterisedPackage):
+    """Processes parameterised package to securely use credentials for retrieving its definition
 
-    Notes: ::
-
-        - If PVEP is "derived" it also generated the concretized FlowIR definition on the filesystem.
-        - Database should not be already open, this method will open it and then close it right before it
-          needs to access it
+    For example, if the parameterised package lives on a Git server and contains an oauth-token, the PVEP will be
+    updated so that it references a secret which holds the git oauth-token.
 
     Arguments:
-        ve: the parameterised virtual experiment package (PVEP)
-        package_metadata_collection: The collection of the package metadata
-        db: The experiment Database. The db must not be open before calling this method. This method will open it
-            and close it when necessary
+        ve: The parameterised package to prepare.
     """
-    parser = apis.models.common.parser_important_elaunch_arguments()
-    try:
-        _ = parser.parse_known_args(ve.parameterisation.presets.runtime.args)
-    except BaseException as e:
-        raise apis.models.errors.ApiError(f"Invalid parameterisation.presets.runtime.args {e}")
-
     base_packages = ve.base.packages
     for bp in base_packages:
         try:
@@ -1158,6 +1141,29 @@ def validate_adapt_and_store_experiment_to_database(
             logger.warning(f"Cannot create OAuth secret for {ve.metadata.package.name}/{bp.name} due to {e}. "
                            f"Traceback {traceback.format_exc()}")
             raise apis.runtime.errors.CannotCreateOAuthSecretError(bp.name)
+
+
+def get_and_validate_parameterised_package(
+        ve: apis.models.virtual_experiment.ParameterisedPackage,
+        package_metadata_collection: apis.storage.PackageMetadataCollection,
+):
+    """Retrieves the files of a parameterised package and validates its definition
+
+    Notes: ::
+
+        - If PVEP is "derived" method also stores the concretised FlowIR definition on the filesystem.
+        - Database should not be already open
+
+    Arguments:
+        ve: the parameterised virtual experiment package (PVEP)
+        package_metadata_collection: The collection of the package metadata
+        db: The experiment Database. The db must not be open before calling this method.
+    """
+    parser = apis.models.common.parser_important_elaunch_arguments()
+    try:
+        _ = parser.parse_known_args(ve.parameterisation.presets.runtime.args)
+    except BaseException as e:
+        raise apis.models.errors.ApiError(f"Invalid parameterisation.presets.runtime.args {e}")
 
     # VV: Start with a fresh MetadataRegistry
     ve.metadata.registry = apis.models.virtual_experiment.MetadataRegistry()
@@ -1186,93 +1192,159 @@ def validate_adapt_and_store_experiment_to_database(
                     logger.warning(msg)
                     raise apis.models.errors.ApiError(msg)
 
-        if len(ve.base.packages) > 1 and ve.base.connections:
-            derived = apis.runtime.package_derived.DerivedPackage(ve)
 
-            derived.synthesize(package_metadata=package_metadata_collection, platforms=known_platforms)
-            ve.update_digest()
+def combine_multipackage_parameseterised_package(
+        ve: apis.models.virtual_experiment.ParameterisedPackage,
+        package_metadata_collection: apis.storage.PackageMetadataCollection
+) -> apis.runtime.package_derived.DerivedPackage:
+    """Combines the multiple base packages of a PVEP into a single DSL
+
+    Arguments:
+        ve: The parameterised virtual experiment package
+        package_metadata_collection: The collection of the package metadata
+
+    Returns a apis.runtime.package_derived.DerivedPackage which describes the resulting unified DSL
+    """
+    if len(ve.base.packages) > 1 and ve.base.connections:
+        derived = apis.runtime.package_derived.DerivedPackage(ve)
+        known_platforms = ve.get_known_platforms() or package_metadata_collection.get_common_platforms()
+        derived.synthesize(package_metadata=package_metadata_collection, platforms=known_platforms)
+        ve.update_digest()
+        return derived
+    elif len(ve.base.packages) != 1:
+        if ve.base.connections:
+            msg = "but it has base.connections"
+        else:
+            msg = "and does not have base.connections"
+        raise apis.models.errors.ApiError(f"Virtual experiments does not contain exactly 1 base package but "
+                                          f"{len(ve.base.packages)} {msg}")
+
+
+def update_registry_metadata_of_parameterised_package(
+        ve: apis.models.virtual_experiment.ParameterisedPackage,
+        concrete: experiment.model.frontends.flowir.FlowIRConcrete,
+        data_files: List[str],
+        platforms: List[str],
+):
+    """Inspects a virtual experiment and updates its .metadata.registry fields to reflect information about the PVEP
+
+    Arguments:
+        ve: The parameterised virtual experiment package (PVEP). The PVEP object is updated.
+        concrete: The virtual experiment definition
+        data_files: A list of files under the `data` directory of the virtual experiment.
+        platforms: The platforms that this PVEP can execute, these must be a subset of the platforms defined
+            in the virtual experiment definition that the PVEP points to
+    """
+    try:
+        merged = apis.models.virtual_experiment.MetadataRegistry \
+            .from_flowir_concrete_and_data(
+            concrete=concrete,
+            data_files=data_files,
+            platforms=ve.parameterisation.get_available_platforms(),
+            variable_names=ve.parameterisation.get_configurable_variable_names()
+        )
+
+        merged.inherit_defaults(ve.parameterisation)
+
+        # VV: Now look at the global variables of all platforms in `concrete` and fill in any missing
+        # default values (i.e. values for which there's no mention in ve.parameterisation)
+
+        known_platforms_and_default = list(platforms or [])
+        if experiment.model.frontends.flowir.FlowIR.LabelDefault not in known_platforms_and_default:
+            known_platforms_and_default.append('default')
+
+        default_values = concrete.get_default_global_variables()
+
+        for p in known_platforms_and_default:
+            p_vars = concrete.get_platform_global_variables(p)
+            full_context = copy.deepcopy(default_values)
+            full_context.update(p_vars or {})
+
+            for key in p_vars or {}:
+                try:
+                    p_value = experiment.model.frontends.flowir.FlowIR.fill_in(
+                        str(p_vars[key]), full_context, ignore_errors=True, label=None, is_primitive=True)
+                except Exception as e:
+                    logger.warning(f"Unable to expand variable {key}={p_vars[key]} due to {e} - "
+                                   f"will assume that this is not a problem")
+                    p_value = str(p_vars[key])
+
+                for x in merged.executionOptionsDefaults.variables:
+                    if x.name == key:
+                        for pv in x.valueFrom:
+                            if pv.platform == p:
+                                break
+                            else:
+                                x.valueFrom.append(apis.models.virtual_experiment.ValueInPlatform(
+                                    value=p_value, platform=p))
+                        break
+                else:
+                    merged.executionOptionsDefaults.variables.append(
+                        apis.models.virtual_experiment.VariableWithDefaultValues(name=key, valueFrom=[
+                            apis.models.virtual_experiment.ValueInPlatform(value=p_value, platform=p)
+                        ])
+                    )
+
+        ve.metadata.registry.inputs = merged.inputs
+        ve.metadata.registry.data = merged.data
+        ve.metadata.registry.containerImages = merged.containerImages
+        ve.metadata.registry.executionOptionsDefaults = merged.executionOptionsDefaults
+        ve.metadata.registry.interface = concrete.get_interface() or {}
+    except apis.models.errors.ApiError as e:
+        logger.warning(f"Could not extract registry metadata due to {e}. "
+                       f"Traceback: {traceback.format_exc()}")
+        raise e from e
+    except Exception as e:
+        logger.warning(f"Could not extract registry metadata due to {e}. "
+                       f"Traceback: {traceback.format_exc()}")
+        raise apis.models.errors.ApiError(f"Unable to extract registry metadata due to unexpected error") from e
+
+
+def validate_adapt_and_store_experiment_to_database(
+        ve: apis.models.virtual_experiment.ParameterisedPackage,
+        package_metadata_collection: apis.storage.PackageMetadataCollection,
+        db: apis.db.exp_packages.DatabaseExperiments,
+):
+    """Validates a Parameterised Virtual Experiment Package modifies it (e.g. add createdOn and digest) and persists to
+    database
+
+    Notes: ::
+
+        - If PVEP is "derived" method also stores the concretized FlowIR definition on the filesystem.
+
+    Arguments:
+        ve: the parameterised virtual experiment package (PVEP)
+        package_metadata_collection: The collection of the package metadata
+        db: The experiment Database
+    """
+
+    prepare_parameterised_package_for_download_definition(ve)
+
+    with package_metadata_collection:
+        get_and_validate_parameterised_package(ve, package_metadata_collection)
+
+        known_platforms = ve.get_known_platforms() or package_metadata_collection.get_common_platforms()
+
+        if len(ve.base.packages) == 1:
+            concrete = package_metadata_collection.get_concrete_of_package(ve.base.packages[0].name)
+            data_files = package_metadata_collection.get_datafiles_of_package(ve.base.packages[0].name)
+        else:
+            # VV: Anything that does not have exactly 1 base package is supposed to be a multi-base package
+            derived = combine_multipackage_parameseterised_package(ve, package_metadata_collection)
+
             # VV: HACK Store the derived package in the same PVC that contains the virtual experiment
             # instances till we decide how we will use the derived package instructions to build the
             # synthesized package.
             path = os.path.join(
                 apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
-                ve.metadata.package.name,
-                ve.metadata.registry.digest
-            )
+                ve.metadata.package.name, ve.metadata.registry.digest)
+
             derived.persist_to_directory(path, package_metadata_collection)
             concrete = derived.concrete_synthesized
             data_files = derived.data_files
-        elif len(ve.base.packages) > 1:
-            raise apis.models.errors.ApiError(f"Virtual experiments does not contain exactly 1 base package but "
-                                              f"{len(ve.base.packages)} and it does not have base.connections")
 
-        else:
-            concrete = package_metadata_collection.get_concrete_of_package(ve.base.packages[0].name)
-            data_files = package_metadata_collection.get_datafiles_of_package(ve.base.packages[0].name)
-
-        try:
-            merged = apis.models.virtual_experiment.MetadataRegistry \
-                .from_flowir_concrete_and_data(
-                concrete=concrete,
-                data_files=data_files,
-                platforms=ve.parameterisation.get_available_platforms(),
-                variable_names=ve.parameterisation.get_configurable_variable_names()
-            )
-
-            merged.inherit_defaults(ve.parameterisation)
-
-            # VV: Now look at the global variables of all platforms in `concrete` and fill in any missing
-            # default values (i.e. values for which there's no mention in ve.parameterisation)
-
-            known_platforms_and_default = list(known_platforms or [])
-            if experiment.model.frontends.flowir.FlowIR.LabelDefault not in known_platforms_and_default:
-                known_platforms_and_default.append('default')
-
-            default_values = concrete.get_default_global_variables()
-
-            for p in known_platforms_and_default:
-                p_vars = concrete.get_platform_global_variables(p)
-                full_context = copy.deepcopy(default_values)
-                full_context.update(p_vars or {})
-
-                for key in p_vars or {}:
-                    try:
-                        p_value = experiment.model.frontends.flowir.FlowIR.fill_in(
-                            str(p_vars[key]), full_context, ignore_errors=True, label=None, is_primitive=True)
-                    except Exception as e:
-                        logger.warning(f"Unable to expand variable {key}={p_vars[key]} due to {e} - "
-                                       f"will assume that this is not a problem")
-                        p_value = str(p_vars[key])
-
-                    for x in merged.executionOptionsDefaults.variables:
-                        if x.name == key:
-                            for pv in x.valueFrom:
-                                if pv.platform == p:
-                                    break
-                                else:
-                                    x.valueFrom.append(apis.models.virtual_experiment.ValueInPlatform(
-                                        value=p_value, platform=p))
-                            break
-                    else:
-                        merged.executionOptionsDefaults.variables.append(
-                            apis.models.virtual_experiment.VariableWithDefaultValues(name=key, valueFrom=[
-                                apis.models.virtual_experiment.ValueInPlatform(value=p_value, platform=p)
-                            ])
-                        )
-
-            ve.metadata.registry.inputs = merged.inputs
-            ve.metadata.registry.data = merged.data
-            ve.metadata.registry.containerImages = merged.containerImages
-            ve.metadata.registry.executionOptionsDefaults = merged.executionOptionsDefaults
-            ve.metadata.registry.interface = concrete.get_interface() or {}
-        except apis.models.errors.ApiError as e:
-            logger.warning(f"Could not extract registry metadata due to {e}. "
-                           f"Traceback: {traceback.format_exc()}")
-            raise e from e
-        except Exception as e:
-            logger.warning(f"Could not extract registry metadata due to {e}. "
-                           f"Traceback: {traceback.format_exc()}")
-            raise apis.models.errors.ApiError(f"Unable to extract registry metadata") from e
+        update_registry_metadata_of_parameterised_package(
+            ve=ve, concrete=concrete, data_files=data_files, platforms=known_platforms)
     try:
         logger.info(f"Discovered registry metadata: {ve.metadata.registry}")
         ve.test()

@@ -37,6 +37,7 @@ class PackageMetadataCollection:
     ):
         self._log = logging.getLogger('Downloader')
         self._concrete_and_data: Dict[str, apis.models.virtual_experiment.StorageMetadata] = concrete_and_data or {}
+        self._entered = 0
 
     def get_common_platforms(self) -> List[str]:
         ret: Optional[List[str]] = None
@@ -74,9 +75,11 @@ class PackageMetadataCollection:
         return self._concrete_and_data[name]
 
     def __enter__(self):
+        self._entered += 1
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self._entered -= 1
         pass
 
 
@@ -92,7 +95,6 @@ class PackagesDownloader(PackageMetadataCollection):
         self._ve = ve
         self._temp_dir: tempfile.TemporaryDirectory | None = None
         self._already_downloaded_to = already_downloaded_to
-        self._do_cleanup = False
 
     def _download_package_git(self, package: apis.models.virtual_experiment.BasePackage):
         security = package.source.git.security
@@ -207,25 +209,23 @@ class PackagesDownloader(PackageMetadataCollection):
             return self._already_downloaded_to
 
     def __enter__(self):
+        super().__enter__()
+
         if self._already_downloaded_to is None:
             self._temp_dir = tempfile.TemporaryDirectory(dir=self._prefix_dir)
             self._already_downloaded_to = self._temp_dir.name
-            self._do_cleanup = True
             platforms = self._ve.get_known_platforms() or [None]
             platform = platforms[0]
 
             for package in self._ve.base.packages:
                 self._download_package(package, platform)
 
-        ret = PackagesDownloader(
-            ve=self._ve, prefix_dir=self._prefix_dir, already_downloaded_to=self._already_downloaded_to)
-
-        ret._concrete_and_data = self._concrete_and_data
-
-        return ret
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._do_cleanup:
+        super().__exit__(exc_type, exc_val, exc_tb)
+
+        if self._entered == 0:
             try:
                 self._temp_dir.cleanup()
             finally:

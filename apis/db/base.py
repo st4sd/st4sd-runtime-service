@@ -31,6 +31,7 @@ class Database:
         self._db: tinydb.TinyDB | None = None
         self._db_label = db_label
         self._log = logging.getLogger(db_label)
+        self._opened = 0
 
         with SerializeAccessToDB.crit:
             if self._db_path not in SerializeAccessToDB.locks:
@@ -46,6 +47,7 @@ class Database:
             if os.path.exists(parent_dir) is False:
                 os.makedirs(parent_dir, exist_ok=True)
             self._db = tinydb.TinyDB(self._db_path)
+            self._opened += 1
         except Exception:
             self._lock.release()
             raise
@@ -53,7 +55,9 @@ class Database:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
-            self._db.close()
+            self._opened -= 1
+            if self._opened == 0:
+                self._db.close()
         except Exception:
             raise
         finally:
