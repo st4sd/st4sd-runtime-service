@@ -6,6 +6,7 @@
 
 import json
 import logging
+import os
 import pprint
 import tempfile
 import time
@@ -262,3 +263,59 @@ def test_cannot_remove_latest_tag(ve_sum_numbers: apis.models.virtual_experiment
 
             with pytest.raises(apis.models.errors.CannnotRemoveLatestTagError) as e:
                 db.tag_update(ve_sum_numbers.metadata.package.name, ["hello"])
+
+
+def test_query_relationship_identifier(output_dir: str):
+    import apis.kernel.relationships
+    import apis.models.query_relationship
+    import apis.models.relationships
+
+    db = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, 'db'))
+
+    with db:
+        db.insert_many([
+            apis.models.relationships.Relationship.parse_obj({'identifier': 'hello-world'}).dict(),
+            apis.models.relationships.Relationship.parse_obj({'identifier': 'not-hello-world'}).dict(),
+        ])
+
+    q = apis.models.query_relationship.QueryRelationship.parse_obj({'identifier': 'hello.*'})
+
+    x = apis.kernel.relationships.api_list_queries(q, db)
+
+    assert len(x) == 1
+    assert x[0]['identifier'] == 'hello-world'
+
+
+def test_query_relationship_inputgraph_identifier(output_dir: str):
+    import apis.models.query_relationship
+    import apis.models.relationships
+
+    db = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, 'db'))
+
+    with db:
+        db.insert_many([
+            apis.models.relationships.Relationship.parse_obj({
+                'identifier': 'hello-world',
+                'transform': {
+                    'outputGraph': {'identifier': 'dummy'},
+                    'inputGraph': {'identifier': 'hello-world'}
+                }
+            }).dict(),
+            apis.models.relationships.Relationship.parse_obj({
+                'identifier': 'not-hello-world',
+                'transform': {
+                    'outputGraph': {'identifier': 'hello-world'},
+                    'inputGraph': {'identifier': 'dummy'}
+                }
+            }).dict(),
+        ])
+
+    q = apis.models.query_relationship.QueryRelationship.parse_obj({
+        'transform': {
+            'inputGraph': {'identifier': 'hello-world:.*$'}
+        }})
+
+    x = apis.kernel.relationships.api_list_queries(q, db)
+
+    assert len(x) == 1
+    assert x[0]['transform']['inputGraph']['identifier'] == 'hello-world:latest'

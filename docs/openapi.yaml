@@ -131,6 +131,18 @@ paths:
         name: identifier
         required: true
         type: string
+    delete:
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: Unknown experiment
+        '500':
+          description: Internal error
+      summary: Delete an experiment
+      operationId: delete_experiment
+      tags:
+        - experiments
     get:
       responses:
         '404':
@@ -173,16 +185,28 @@ paths:
             - 'n'
       tags:
         - experiments
-    delete:
+  /experiments/{identifier}/dsl:
+    parameters:
+      - in: path
+        description: The package identifier. It must contain a $packageName and may include either a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`). If both suffixes are missing then the identifier implies the `:latest` tag suffix.
+        name: identifier
+        required: true
+        type: string
+    get:
       responses:
-        '200':
-          description: Success
         '404':
           description: Unknown experiment
-        '500':
-          description: Internal error
-      summary: Delete an experiment
-      operationId: delete_experiment
+      summary: Fetch an experiment given its identifier
+      operationId: get_experiment_dsl
+      parameters:
+        - name: outputFormat
+          in: query
+          type: string
+          description: Output format
+          default: json
+          enum:
+            - json
+            - yaml
       tags:
         - experiments
   /experiments/{identifier}/start:
@@ -282,6 +306,29 @@ paths:
         name: id
         required: true
         type: string
+    get:
+      responses:
+        '200':
+          description: Success
+          schema:
+            type: array
+            description: GET model for imagePullSecret with a given id
+            example:
+              - url-docker-registry1
+              - url-docker-registry2
+            items:
+              type: string
+              description: docker registry, e.g. res-drl-hpc-docker-local.artifactory.swg-devops.com
+              example: url-docker-registry
+        '404':
+          description: imagePullSecret not found
+        '500':
+          description: Internal error while retrieving imagePullSecret details
+      summary: Get imagePullSecret, returns a list of strings, each of which is a docker registry that the specified
+      description: imagePullSecret has pull access to
+      operationId: get_image_pull_secret
+      tags:
+        - image-pull-secrets
     put:
       responses:
         '200':
@@ -312,29 +359,6 @@ paths:
           in: body
           schema:
             $ref: '#/definitions/imagepullsecret'
-      tags:
-        - image-pull-secrets
-    get:
-      responses:
-        '200':
-          description: Success
-          schema:
-            type: array
-            description: GET model for imagePullSecret with a given id
-            example:
-              - url-docker-registry1
-              - url-docker-registry2
-            items:
-              type: string
-              description: docker registry, e.g. res-drl-hpc-docker-local.artifactory.swg-devops.com
-              example: url-docker-registry
-        '404':
-          description: imagePullSecret not found
-        '500':
-          description: Internal error while retrieving imagePullSecret details
-      summary: Get imagePullSecret, returns a list of strings, each of which is a docker registry that the specified
-      description: imagePullSecret has pull access to
-      operationId: get_image_pull_secret
       tags:
         - image-pull-secrets
     post:
@@ -399,6 +423,13 @@ paths:
         name: id
         required: true
         type: string
+    delete:
+      responses:
+        '404':
+          description: Instance not found
+      operationId: delete_instance
+      tags:
+        - instances
     get:
       responses:
         '404':
@@ -415,13 +446,6 @@ paths:
           type: boolean
           description: A boolean flag that allows converting NaN and infinite values to strings.
           default: false
-      tags:
-        - instances
-    delete:
-      responses:
-        '404':
-          description: Instance not found
-      operationId: delete_instance
       tags:
         - instances
   /instances/{id}/outputs:
@@ -542,6 +566,20 @@ paths:
             $ref: '#/definitions/query-experiments'
       tags:
         - query
+  /query/relationships/:
+    post:
+      responses:
+        '200':
+          description: Success
+      operationId: post_query_relationships
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/query-relationships'
+      tags:
+        - query
   /relationships/:
     get:
       responses:
@@ -587,6 +625,13 @@ paths:
         in: path
         required: true
         type: string
+    delete:
+      responses:
+        '200':
+          description: Success
+      operationId: delete_relationship
+      tags:
+        - relationships
     get:
       responses:
         '200':
@@ -594,11 +639,31 @@ paths:
       operationId: get_relationship
       tags:
         - relationships
-    delete:
+  /relationships/{identifier}/preview/synthesize/dsl:
+    parameters:
+      - name: identifier
+        in: path
+        required: true
+        type: string
+    get:
       responses:
         '200':
           description: Success
-      operationId: delete_relationship
+      operationId: get_transform_dsl_preview
+      parameters:
+        - name: dslVersion
+          in: query
+          type: string
+          description: DSL version to return
+          default: 2_0.1.0
+          enum:
+            - 2_0.1.0
+            - '1'
+        - name: platform
+          in: query
+          type: string
+          description: If dslVersion != 1, then this is the name of the platform to preview. If empty, preview the platform that is common between the 2 PVEPs of the relationship. If there are multiple platforms then pick the first one based on lexicographical order (excluding `default`)
+          default: ''
       tags:
         - relationships
   /relationships/{identifier}/synthesize/{new_package_name}:
@@ -1289,6 +1354,9 @@ definitions:
     type: object
   experiment-start:
     properties:
+      platform:
+        type: string
+        description: The platform to use for the execution of the virtual experiment. It should match the parameterisation options of the parameterised virtual experiment package you are starting.
       inputs:
         type: array
         items:
@@ -1466,6 +1534,33 @@ definitions:
         type: boolean
         description: Match only parameterised virtual experiment packages with just one base package
         default: true
+    type: object
+  query-relationships:
+    properties:
+      identifier:
+        type: string
+        description: Regular expression to match names of relationships
+      transform:
+        $ref: '#/definitions/query-relationships-transform'
+    type: object
+  query-relationships-transform:
+    properties:
+      inputGraph:
+        $ref: '#/definitions/query-relationships-transform-inputgraph'
+      outputGraph:
+        $ref: '#/definitions/query-relationships-transform-outputgraph'
+    type: object
+  query-relationships-transform-inputgraph:
+    properties:
+      identifier:
+        type: string
+        default: Regular expression to match the identifiers of inputGraphs in transform relationships
+    type: object
+  query-relationships-transform-outputgraph:
+    properties:
+      identifier:
+        type: string
+        default: Regular expression to match the identifiers of outputGraphs in transform relationships
     type: object
   relationship:
     properties:

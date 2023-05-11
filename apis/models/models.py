@@ -444,6 +444,10 @@ mVolume = api_experiments.model("mount-volume", {
 })
 
 mExperimentStart = api_experiments.model('experiment-start', {
+    'platform': fields.String(
+        required=False, description="The platform to use for the execution of the virtual experiment. It should "
+                                    "match the parameterisation options of the parameterised virtual experiment "
+                                    "package you are starting."),
     'inputs': fields.List(fields.Nested(mFileContent), required=False),
     'data': fields.List(fields.Nested(mFileContent), required=False),
     'volumes': fields.List(fields.Nested(mVolume)),
@@ -606,3 +610,24 @@ mQueryExperiment = api_query.model(
             }
         ))
     }, description="Query database for experiments")
+
+mQueryRelationship = api_query.model(
+    'query-relationships', {
+        'identifier': fields.String(
+            required=False, description="Regular expression to match names of relationships"),
+        'transform': fields.Nested(api_query.model('query-relationships-transform', {
+            'inputGraph': fields.Nested(api_query.model(
+                'query-relationships-transform-inputgraph', {
+                    'identifier': fields.String("Regular expression to match the identifiers of inputGraphs "
+                                                "in transform relationships")
+                }
+            )),
+            'outputGraph': fields.Nested(api_query.model(
+                'query-relationships-transform-outputgraph', {
+                    'identifier': fields.String("Regular expression to match the identifiers of outputGraphs "
+                                                "in transform relationships")
+                }
+            ))
+        }))
+    }
+)
