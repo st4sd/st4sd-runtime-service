@@ -18,6 +18,7 @@ api = apis.models.api_authorisation
 @api.route('/token')
 @api.response(500, 'Internal error while retrieving token')
 @api.response(401, 'Unauthorised')
+@api.response(403, 'Unauthorised')
 class AuthorisationToken(Resource):
     @api.response(200, "Success")
     def get(self):

@@ -29,7 +29,6 @@ import apis.storage
 import utils
 
 api = apis.models.api_relationships
-m_relationship = apis.models.m_relationship
 
 parser_formatting_relationship_preview = apis.kernel.flask_utils.parser_formatting_relationship_preview
 
@@ -93,7 +92,7 @@ class Relationships(Resource):
             'problems': problems,
         }
 
-    @api.expect(m_relationship)
+    @api.expect(apis.models.m_relationship)
     def post(self):
         doc = request.get_json()
 

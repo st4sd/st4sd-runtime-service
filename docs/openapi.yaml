@@ -8,6 +8,8 @@ paths:
           description: Success
         '401':
           description: Unauthorised
+        '403':
+          description: Unauthorised
         '500':
           description: Internal error while retrieving token
       summary: Returns a token that can be used to authenticate to the service
@@ -45,6 +47,24 @@ paths:
       tags:
         - datasets
   /experiments/:
+    post:
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Experiment ID is invalid
+        '409':
+          description: Experiment ID already exists
+      summary: Add an experiment
+      operationId: post_experiment_list
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/virtual-experiment'
+      tags:
+        - experiments
     get:
       responses:
         '200':
@@ -85,24 +105,6 @@ paths:
           enum:
             - 'y'
             - 'n'
-      tags:
-        - experiments
-    post:
-      responses:
-        '200':
-          description: OK
-        '400':
-          description: Experiment ID is invalid
-        '409':
-          description: Experiment ID already exists
-      summary: Add an experiment
-      operationId: post_experiment_list
-      parameters:
-        - name: payload
-          required: true
-          in: body
-          schema:
-            $ref: '#/definitions/virtual-experiment'
       tags:
         - experiments
   /experiments/lambda/start:
@@ -196,7 +198,7 @@ paths:
       responses:
         '404':
           description: Unknown experiment
-      summary: Fetch an experiment given its identifier
+      summary: Fetch the DSL of an experiment given its identifier
       operationId: get_experiment_dsl
       parameters:
         - name: outputFormat
@@ -306,61 +308,6 @@ paths:
         name: id
         required: true
         type: string
-    get:
-      responses:
-        '200':
-          description: Success
-          schema:
-            type: array
-            description: GET model for imagePullSecret with a given id
-            example:
-              - url-docker-registry1
-              - url-docker-registry2
-            items:
-              type: string
-              description: docker registry, e.g. res-drl-hpc-docker-local.artifactory.swg-devops.com
-              example: url-docker-registry
-        '404':
-          description: imagePullSecret not found
-        '500':
-          description: Internal error while retrieving imagePullSecret details
-      summary: Get imagePullSecret, returns a list of strings, each of which is a docker registry that the specified
-      description: imagePullSecret has pull access to
-      operationId: get_image_pull_secret
-      tags:
-        - image-pull-secrets
-    put:
-      responses:
-        '200':
-          description: Success
-        '404':
-          description: imagePullSecret not found
-        '500':
-          description: Internal error while retrieving imagePullSecret details
-      summary: Update an existing imagePullSecret
-      description: |-
-        This method does not check whether the contents of the Secret object are correct. In the remainder of this
-        text @configuration IS the contents of the `config.json` key of the `consumable-computing-config` ConfigMap
-        (or the ConfigMap object that the environment variable `CONSUMABLE_COMPUTING_CONFIGMAP_NAME` points to)
-
-        if imagePullSecret is already defined in in the @configuration this method returns 422
-        (imagePullSecret already exists).
-
-        if the imagePullSecret is not defined in the @configuration BUT the associated kubernetes object exists
-        this method will NOT override the contents of the Secret object with the contents of the request. It will
-        return 409 (imagePullSecret conflict with existing Secret object with the same name)
-
-        if the imagePullSecret is successfully created it will be available to use within a couple of minutes after
-        Kubernetes asynchronously refreshes the file whose contents are the @configuration.
-      operationId: put_image_pull_secret
-      parameters:
-        - name: payload
-          required: true
-          in: body
-          schema:
-            $ref: '#/definitions/imagepullsecret'
-      tags:
-        - image-pull-secrets
     post:
       responses:
         '200':
@@ -395,6 +342,61 @@ paths:
           in: body
           schema:
             $ref: '#/definitions/imagepullsecret'
+      tags:
+        - image-pull-secrets
+    put:
+      responses:
+        '200':
+          description: Success
+        '404':
+          description: imagePullSecret not found
+        '500':
+          description: Internal error while retrieving imagePullSecret details
+      summary: Update an existing imagePullSecret
+      description: |-
+        This method does not check whether the contents of the Secret object are correct. In the remainder of this
+        text @configuration IS the contents of the `config.json` key of the `consumable-computing-config` ConfigMap
+        (or the ConfigMap object that the environment variable `CONSUMABLE_COMPUTING_CONFIGMAP_NAME` points to)
+
+        if imagePullSecret is already defined in in the @configuration this method returns 422
+        (imagePullSecret already exists).
+
+        if the imagePullSecret is not defined in the @configuration BUT the associated kubernetes object exists
+        this method will NOT override the contents of the Secret object with the contents of the request. It will
+        return 409 (imagePullSecret conflict with existing Secret object with the same name)
+
+        if the imagePullSecret is successfully created it will be available to use within a couple of minutes after
+        Kubernetes asynchronously refreshes the file whose contents are the @configuration.
+      operationId: put_image_pull_secret
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/imagepullsecret'
+      tags:
+        - image-pull-secrets
+    get:
+      responses:
+        '200':
+          description: Success
+          schema:
+            type: array
+            description: GET model for imagePullSecret with a given id
+            example:
+              - url-docker-registry1
+              - url-docker-registry2
+            items:
+              type: string
+              description: docker registry, e.g. res-drl-hpc-docker-local.artifactory.swg-devops.com
+              example: url-docker-registry
+        '404':
+          description: imagePullSecret not found
+        '500':
+          description: Internal error while retrieving imagePullSecret details
+      summary: Get imagePullSecret, returns a list of strings, each of which is a docker registry that the specified
+      description: imagePullSecret has pull access to
+      operationId: get_image_pull_secret
       tags:
         - image-pull-secrets
   /instances/:
@@ -581,6 +583,19 @@ paths:
       tags:
         - query
   /relationships/:
+    post:
+      responses:
+        '200':
+          description: Success
+      operationId: post_relationships
+      parameters:
+        - name: payload
+          required: true
+          in: body
+          schema:
+            $ref: '#/definitions/relationship'
+      tags:
+        - relationships
     get:
       responses:
         '200':
@@ -604,19 +619,6 @@ paths:
           enum:
             - 'y'
             - 'n'
-      tags:
-        - relationships
-    post:
-      responses:
-        '200':
-          description: Success
-      operationId: post_relationships
-      parameters:
-        - name: payload
-          required: true
-          in: body
-          schema:
-            $ref: '#/definitions/relationship'
       tags:
         - relationships
   /relationships/{identifier}:
@@ -686,7 +688,7 @@ paths:
           required: true
           in: body
           schema:
-            $ref: '#/definitions/relationship'
+            $ref: '#/definitions/relationship-synthesize'
       tags:
         - relationships
   /url-map/:
@@ -949,7 +951,7 @@ definitions:
     properties:
       url:
         type: string
-        default: Url of image registry
+        description: Url of image registry
       security:
         $ref: '#/definitions/base-dependencies-imageregistry-security'
     type: object
@@ -1014,7 +1016,7 @@ definitions:
             - $ref: '#/definitions/option'
       platform:
         type: string
-        default: Name of virtual experiment platform to use. If provided, the platform name cannot be overridden inside executionOptions or payload to start virtual experiment.
+        description: Name of virtual experiment platform to use. If provided, the platform name cannot be overridden inside executionOptions or payload to start virtual experiment.
     type: object
   option:
     properties:
@@ -1551,18 +1553,84 @@ definitions:
         $ref: '#/definitions/query-relationships-transform-outputgraph'
     type: object
   query-relationships-transform-inputgraph:
+    required:
+      - identifier
     properties:
       identifier:
         type: string
-        default: Regular expression to match the identifiers of inputGraphs in transform relationships
+        description: The parameterised virtual experiment package containing the inputGraph
     type: object
   query-relationships-transform-outputgraph:
     properties:
       identifier:
         type: string
-        default: Regular expression to match the identifiers of outputGraphs in transform relationships
+        description: Regular expression to match the identifiers of outputGraphs in transform relationships
     type: object
   relationship:
+    required:
+      - identifier
+    properties:
+      identifier:
+        type: string
+        example: pm3-to-dft
+      description:
+        type: string
+        description: Human readable description of transformation relationship
+      transform:
+        $ref: '#/definitions/relationship-transform'
+    type: object
+  relationship-transform:
+    properties:
+      inputGraph:
+        $ref: '#/definitions/query-relationships-transform-inputgraph'
+      outputGraph:
+        $ref: '#/definitions/query-relationships-transform-outputgraph'
+      relationship:
+        $ref: '#/definitions/relationship-transform-relationship'
+    type: object
+  relationship-transform-relationship:
+    properties:
+      inferParameters:
+        type: boolean
+        description: Whether to auto-update relationship with information about mappings bettween parameters of the 2 graph fragments
+        default: true
+      inferResults:
+        type: boolean
+        description: Whether to auto-update relationship with information about mappings bettween results of the 2 graph fragments
+        default: true
+      graphParameters:
+        type: array
+        items:
+          $ref: '#/definitions/relationship-transform-relationship-graphparameters'
+      graphResults:
+        type: array
+        items:
+          $ref: '#/definitions/relationship-transform-relationship-graphresults'
+    type: object
+  relationship-transform-relationship-graphparameters:
+    properties:
+      inputGraphParameter:
+        $ref: '#/definitions/relationship-transform-relationship-graphpvalue'
+      outputGraphParameter:
+        $ref: '#/definitions/relationship-transform-relationship-graphpvalue'
+    type: object
+  relationship-transform-relationship-graphpvalue:
+    properties:
+      name:
+        type: string
+        description: Symbolic name
+      default:
+        type: string
+        description: An optional default value that the symbolic name may contain
+    type: object
+  relationship-transform-relationship-graphresults:
+    properties:
+      inputGraphResult:
+        $ref: '#/definitions/relationship-transform-relationship-graphpvalue'
+      outputGraphResult:
+        $ref: '#/definitions/relationship-transform-relationship-graphpvalue'
+    type: object
+  relationship-synthesize:
     properties:
       parameterisation:
         $ref: '#/definitions/registry-entry-parameterisation'

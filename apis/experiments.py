@@ -1112,7 +1112,7 @@ class ExperimentDSL(Resource):
 
     @api.expect(_my_parser)
     def get(self, identifier: str):
-        '''Fetch an experiment given its identifier'''
+        """Fetch the DSL of an experiment given its identifier"""
 
         try:
             # VV: If identifier has neither @ or : it rewrites it to "${identifier}:latest}

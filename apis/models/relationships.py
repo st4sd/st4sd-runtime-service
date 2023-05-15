@@ -135,6 +135,8 @@ class Transform(apis.models.common.Digestable):
 
 class Relationship(apis.models.common.Digestable):
     identifier: str = pydantic.Field(..., description="Unique identifier of this relationship")
+    description: Optional[str] = pydantic.Field(
+        None, description="Human readable description of transformation relationship")
     transform: Optional[Transform] = None
 
 

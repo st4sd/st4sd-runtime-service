@@ -169,7 +169,7 @@ mBaseDependencies = api_experiments.model(
         'imageRegistries': fields.List(fields.Nested(api_experiments.model(
             'base-dependencies-imageregistry',
             {
-                'url': fields.String("Url of image registry"),
+                'url': fields.String(description="Url of image registry"),
                 'security': fields.Nested(api_experiments.model(
                     'base-dependencies-imageregistry-security',
                     {
@@ -256,9 +256,10 @@ mPresets = api_experiments.model(
         'runtime': fields.List(fields.Nested(mRuntimeConfig)),
         'environmentVariables': fields.List(fields.Nested(
             mOption, description="Environment variables to inject in the runtime orchestrator process.")),
-        'platform': fields.String("Name of virtual experiment platform to use. "
-                                  "If provided, the platform name cannot be overridden inside executionOptions "
-                                  "or payload to start virtual experiment.")
+        'platform': fields.String(
+            description="Name of virtual experiment platform to use. "
+                        "If provided, the platform name cannot be overridden inside executionOptions "
+                        "or payload to start virtual experiment.")
     })
 
 # VV: Notice that this contains a LIST of options associated with a "name" (platform, variable, env-var, etc)
@@ -567,14 +568,65 @@ experiment_instance = api_instances.model('experiment-instance', {
 ############################ relationships ############################
 api_relationships = Namespace('relationships', description='')
 
-m_transform = api_relationships.model('transform', {})
+m_graph_value = api_relationships.model(
+    'relationship-transform-relationship-graphpvalue', {
+        'name': fields.String(description="Symbolic name"),
+        'default': fields.String(description="An optional default value that the symbolic name may contain")
+    }
+)
+
+m_transform = api_relationships.model('relationship-transform', {
+    'inputGraph': fields.Nested(api_relationships.model(
+        'query-relationships-transform-inputgraph', {
+            'identifier': fields.String(
+                description="The parameterised virtual experiment package containing the inputGraph",
+                required=True)
+        }
+    )),
+    'outputGraph': fields.Nested(api_relationships.model(
+        'query-relationships-transform-outputgraph', {
+            'identifier': fields.String(description="Regular expression to match the identifiers of "
+                                                    "outputGraphs in transform relationships")
+        }
+    )),
+    'relationship': fields.Nested(api_relationships.model(
+        'relationship-transform-relationship', {
+            'inferParameters': fields.Boolean(
+                description="Whether to auto-update relationship with information "
+                            "about ""mappings bettween parameters of the 2 graph fragments", default=True),
+            'inferResults': fields.Boolean(
+                description="Whether to auto-update relationship with information about "
+                            "mappings bettween results of the 2 graph fragments", default=True),
+            'graphParameters': fields.List(
+                fields.Nested(api_relationships.model(
+                    'relationship-transform-relationship-graphparameters',
+                    {
+                        'inputGraphParameter': fields.Nested(m_graph_value),
+                        'outputGraphParameter': fields.Nested(m_graph_value),
+                    },
+                    description="Maps an inputGraph parameter to an outputGraph parameter"))
+            ),
+            'graphResults': fields.List(fields.Nested(
+                api_relationships.model(
+                    'relationship-transform-relationship-graphresults', {
+                        'inputGraphResult': fields.Nested(m_graph_value),
+                        'outputGraphResult': fields.Nested(m_graph_value),
+                    },
+                    description="Maps an outputGraph result to an inputGraph result"
+                )
+            ))
+        }
+    ))
+})
 
 m_relationship = api_relationships.model('relationship', {
-    'identifier': fields.String(required=True, example='anionsmiles-to-optimizedgeometry'),
+    'identifier': fields.String(required=True, example='pm3-to-dft'),
+    'description': fields.String(
+        required=False, description="Human readable description of transformation relationship"),
     'transform': fields.Nested(m_transform)
 })
 
-m_payload_synthesize = api_relationships.model('relationship', {
+m_payload_synthesize = api_relationships.model('relationship-synthesize', {
     'parameterisation': fields.Nested(mParameterisation)
 })
 
@@ -618,14 +670,16 @@ mQueryRelationship = api_query.model(
         'transform': fields.Nested(api_query.model('query-relationships-transform', {
             'inputGraph': fields.Nested(api_query.model(
                 'query-relationships-transform-inputgraph', {
-                    'identifier': fields.String("Regular expression to match the identifiers of inputGraphs "
-                                                "in transform relationships")
+                    'identifier': fields.String(
+                        description="Regular expression to match the identifiers of inputGraphs "
+                                    "in transform relationships")
                 }
             )),
             'outputGraph': fields.Nested(api_query.model(
                 'query-relationships-transform-outputgraph', {
-                    'identifier': fields.String("Regular expression to match the identifiers of outputGraphs "
-                                                "in transform relationships")
+                    'identifier': fields.String(
+                        description="Regular expression to match the identifiers of outputGraphs "
+                                    "in transform relationships")
                 }
             ))
         }))
