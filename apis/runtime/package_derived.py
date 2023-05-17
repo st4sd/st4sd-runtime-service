@@ -164,10 +164,10 @@ class GraphsFromManyPackagesMetadata(apis.models.common.Digestable):
     blueprints: Dict[str, BlueprintCollection] = {}
     components: Dict[str, Dict[str, experiment.model.frontends.flowir.DictFlowIRComponent]] = {}
 
-    aggregate_variables: VariableCollection
-    aggregate_blueprints: BlueprintCollection
-    aggregate_components: List[experiment.model.frontends.flowir.DictFlowIRComponent]
-    aggregate_environments: Any
+    aggregate_variables: VariableCollection = VariableCollection()
+    aggregate_blueprints: BlueprintCollection = BlueprintCollection()
+    aggregate_components: List[experiment.model.frontends.flowir.DictFlowIRComponent] = []
+    aggregate_environments: Any = None
 
 
 class DerivedPackage:
@@ -304,7 +304,12 @@ class DerivedPackage:
             platforms = package_metadata.get_common_platforms()
 
         if not platforms:
-            raise apis.models.errors.ApiError("Missing a list of platforms for which to synthesize the derived package")
+            self._log.warning("Missing list of platforms, will synthesize "
+                              "just for 'default' platform")
+            platforms = ['default']
+
+        if 'default' not in platforms:
+            platforms = ['default'] + platforms
 
         # VV: format is {pkgName: <something>}
         all_vars: Dict[str, VariableCollection] = {}
@@ -358,7 +363,7 @@ class DerivedPackage:
 
             # VV: Pretty sure, I'm missing something here.
             # VV: TODO how do we handle conflicting component names?
-            # VV: TODO how do handle missing stages? e.g. derived package contains stages 0 and 28 - what do we do?
+            # VV: TODO how do we handle missing stages? e.g. derived package contains stages 0 and 28 - what do we do?
 
             for node in graph_template.nodes:
                 cid = experiment.model.graph.ComponentIdentifier(node.reference)
@@ -422,6 +427,10 @@ class DerivedPackage:
                 missing_variables = []
 
                 for platform in platforms:
+                    if platform not in concrete.platforms:
+                        self._log.warning(f"Platform {platform} does not exist in {pkg_name} "
+                                          f"- will skip processing components")
+                        continue
                     conf_with_bp = concrete.get_component_configuration(
                         comp_id, raw=True, include_default=True, inject_missing_fields=True, platform=platform,
                         is_primitive=True)
@@ -447,6 +456,11 @@ class DerivedPackage:
             for platform in platforms:
                 if platform not in aggregate_vars.platforms:
                     aggregate_vars.platforms[platform] = PlatformVariables()
+
+                if platform not in concrete.platforms:
+                    self._log.warning(f"Platform {platform} does not exist in {pkg_name} "
+                                      f"- will skip processing variables")
+                    continue
 
                 all_blueprints[pkg_name].platforms[platform] = PlatformBlueprint().parse_obj({
                     'global': concrete.get_platform_blueprint(platform)

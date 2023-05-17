@@ -625,8 +625,6 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             ]
         )
 
-        derived.base.connections.append(foundation_connection)
-
         surrogate_package = derived.base.get_package(transform.inputGraph.identifier)
         if len(surrogate_package.graphs) != 1:
             raise apis.models.errors.ApiError(
@@ -662,7 +660,20 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             ]
         )
 
-        derived.base.connections.append(surrogate_connections)
+        # VV: The Derived package uses the ordering of `connections` to layer variables.
+        # The idea is that each connection explains how to "instantiate" a Graph and instantiating a Graph last
+        # indicates that we want to use that Graph's global variables in the final (derived) FlowIR
+        policy_foundation = apis.models.relationships.VariablesMergePolicy.OutputGraphOverridesInputGraph.value
+        policy_surrogate = apis.models.relationships.VariablesMergePolicy.InputGraphOverridesOutputGraph.value
+
+        if self._transform.relationship.variablesMergePolicy == policy_foundation:
+            derived.base.connections.extend([surrogate_connections, foundation_connection])
+        elif self._transform.relationship.variablesMergePolicy == policy_surrogate:
+            derived.base.connections.extend([foundation_connection, surrogate_connections])
+        else:
+            raise apis.models.errors.ApiError(
+                "Cannot interpret relationship because variablesMergePolicy"
+                f"={self._transform.relationship.variablesMergePolicy} is not implemented")
 
     def _populate_include_files(
             self,

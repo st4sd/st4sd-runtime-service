@@ -98,25 +98,14 @@ def test_extract_graphs_and_metadata(
     )
     # VV: The important one is `force_tolerance` because its value (0.05) is the one in surrogate,
     # expensive has a different tolerance (0.005)
-    assert graph_meta.aggregate_variables.dict(exclude_none=True) == {
-        'platforms': {
-            'default': {'global': {}, 'stages': {}},
-            'openshift': {
-                'global': {
-                    'P': '101325.0',
-                    'T': '298.15',
-                    'ani_model': 'ani2x',
-                    'backend': 'kubernetes',
-                    'force_tolerance': '0.05',
-                    'max_opt_steps': '5000',
-                    'numberMolecules': '1',
-                    'optimizer': 'bfgs',
-                    'rep_key': 'smiles',
-                    'startIndex': '0'},
-                'stages': {0: {}}}}}
+    aggregate_variables = graph_meta.aggregate_variables.dict(exclude_none=True)
+    assert sorted(aggregate_variables['platforms']) == sorted(['default', 'openshift'])
 
     assert graph_meta.aggregate_blueprints.dict(exclude_none=True) == {
-        'platforms': {'openshift': {'global': {}, 'stages': {0: {}}}}}
+        'platforms': {
+            'openshift': {'global': {}, 'stages': {0: {}}},
+            'default': {'global': {}, 'stages': {0: {}}}
+        }}
 
     comps = {f"stage{x.get('stage', 0)}.{x['name']}": x for x in graph_meta.aggregate_components}
 
@@ -135,11 +124,11 @@ def test_extract_graphs_and_metadata(
         '%(optimizer)s -i %(max_opt_steps)s --temperature %(T)s --pressure %(P)s '
         '--force_tolerance %(force_tolerance)s --ff_minimize 0 -amac 0')
 
-    assert graph_meta.aggregate_variables.platforms['openshift'].vGlobal == {
+    assert graph_meta.aggregate_variables.platforms['default'].vGlobal == {
         'P': '101325.0',
         'T': '298.15',
         'ani_model': 'ani2x',
-        'backend': 'kubernetes',
+        'backend': 'local',
         'force_tolerance': '0.05',
         'max_opt_steps': '5000',
         'numberMolecules': '1',
@@ -147,7 +136,13 @@ def test_extract_graphs_and_metadata(
         'rep_key': 'smiles',
         'startIndex': '0'}
 
-    assert graph_meta.aggregate_variables.platforms['default'].vGlobal == {}
+    from_platform = graph_meta.aggregate_variables.platforms['default'].vGlobal.copy()
+    from_platform['backend'] = "kubernetes"
+
+    assert graph_meta.aggregate_variables.platforms['openshift'].vGlobal == from_platform
+
+    for x in graph_meta.aggregate_variables.platforms:
+        assert graph_meta.aggregate_variables.platforms[x].stages == {0: {}}
 
 
 def test_synthesize_derived(

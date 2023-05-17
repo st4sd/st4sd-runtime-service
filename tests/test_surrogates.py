@@ -158,14 +158,19 @@ def test_gamess_homo_lumo_dft_surrogate_ani_stable_digest(
         logger.info(x.source.path)
         logger.info(packages_metadata.get_root_directory_containing_package(x.source.packageName))
 
-    assert derived_ve.metadata.registry.digest == "sha256x415a78745ea5c4cec7237b091ca19b4ebf07e09b20225c3866efd40c"
+    assert derived_ve.metadata.registry.digest == "sha256x752b0e70a8f9aafc4507f3926ffb71021e3c9a035ba3f7bfbeb415b5"
 
 
+@pytest.mark.parametrize("variable_merge_policy", [
+    apis.models.relationships.VariablesMergePolicy.InputGraphOverridesOutputGraph,
+    apis.models.relationships.VariablesMergePolicy.OutputGraphOverridesInputGraph,
+])
 def test_gamess_homo_lumo_dft_surrogate_ani_derive_persist(
         ve_homo_lumo_dft_gamess_us: apis.models.virtual_experiment.ParameterisedPackage,
         ve_configuration_generator_ani: apis.models.virtual_experiment.ParameterisedPackage,
         homolumogamess_ani_package_metadata: apis.storage.PackageMetadataCollection,
         output_dir: str,
+        variable_merge_policy: apis.models.relationships.VariablesMergePolicy
 ):
     transform = apis.models.relationships.Transform(
         outputGraph=apis.models.relationships.GraphDescription(
@@ -176,6 +181,7 @@ def test_gamess_homo_lumo_dft_surrogate_ani_derive_persist(
             identifier="configuration-generator-ani-gamess",
             components=["GenerateOptimizedConfiguration"],
         ),
+        relationship=apis.models.relationships.TransformRelationship(variablesMergePolicy=variable_merge_policy.value)
     )
 
     multi = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(transform)
@@ -188,8 +194,11 @@ def test_gamess_homo_lumo_dft_surrogate_ani_derive_persist(
             multi.discover_parameterised_packages(db)
 
     packages_metadata = homolumogamess_ani_package_metadata
+    # presets = apis.models.virtual_experiment.ParameterisationPresets(platform="openshift"))
     derived_ve = multi.prepare_derived_package("hello", apis.models.virtual_experiment.Parameterisation(
-        presets=apis.models.virtual_experiment.ParameterisationPresets(platform="openshift")))
+        executionOptions=apis.models.virtual_experiment.ParameterisationExecutionOptions(
+            platform=['openshift', 'openshift-kubeflux'])
+    ))
     multi.synthesize_derived_package(packages_metadata, derived_ve)
     logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
 
@@ -214,6 +223,14 @@ def test_gamess_homo_lumo_dft_surrogate_ani_derive_persist(
 
     for x in ['interface.py', '__init__.py', 'dft_restart.py', 'semi_empirical_restart.py', ]:
         open(os.path.join(dir_persist, 'hooks', x)).close()
+
+    variables = package.concrete_synthesized.get_platform_variables('openshift')
+    if variable_merge_policy == apis.models.relationships.VariablesMergePolicy.OutputGraphOverridesInputGraph:
+        assert variables['global']['conflicting'] == 'from foundation'
+    elif variable_merge_policy == apis.models.relationships.VariablesMergePolicy.InputGraphOverridesOutputGraph:
+        assert variables['global']['conflicting'] == 'from surrogate'
+    else:
+        raise ValueError(f"Unknown merge policy {variable_merge_policy}")
 
 
 def test_psi4_surrogate_neural_potential_persist(

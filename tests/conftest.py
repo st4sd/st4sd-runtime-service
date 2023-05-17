@@ -1247,7 +1247,11 @@ components:
 - stage: 0
   name: GenerateOptimizedConfiguration 
   command:
-    arguments: -scsv pag_data.csv -rk %(key)s -ri %(molecule_index)s --ani_model %(ani_model)s -o %(optimizer)s --force_tolerance %(force_tolerance)s --ff_minimize %(ff_minimize)s -amac %(ani_minimize_all_conformers)s --test -og input_molecule.txt --n_conformers %(n_conformers)s --max_iterations %(max_iterations)s
+    arguments: -scsv pag_data.csv -rk %(key)s -ri %(molecule_index)s 
+      --ani_model %(ani_model)s -o %(optimizer)s --force_tolerance %(force_tolerance)s 
+      --ff_minimize %(ff_minimize)s -amac %(ani_minimize_all_conformers)s 
+      --test -og input_molecule.txt --n_conformers %(n_conformers)s 
+      --max_iterations %(max_iterations)s %(conflicting)s
     environment: None
     executable: bin/optimize_ani.py
   references:
@@ -1273,6 +1277,7 @@ variables:
       key: "smiles"
       n_conformers: 50
       max_iterations: 5000
+      conflicting: from surrogate
   openshift:
     global:
       backend: kubernetes
@@ -1411,7 +1416,7 @@ components:
 - stage: 1
   name: GeometryOptimisation
   command:
-    arguments: molecule.inp %(gamess-version-number)s %(number-processors)s
+    arguments: molecule.inp %(gamess-version-number)s %(number-processors)s %(conflicting)s
     environment: gamess
     executable: rungms
   references:
@@ -1503,6 +1508,7 @@ variables:
       gamess-version-number: '01'
       basis: GBASIS=PM3
       functional: B3LYP
+      conflicting: from foundation
     stages:
       0:
         stage-name: SMILES_to_GAMESS

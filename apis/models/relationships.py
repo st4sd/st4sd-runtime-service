@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
 from typing import Dict
 from typing import List
@@ -71,11 +72,27 @@ class RelationshipResults(apis.models.common.Digestable):
     inputGraphResult: Optional[GraphValue] = None
 
 
+class VariablesMergePolicy(Enum):
+    # VV: This is the default (variables in the Parent of the OutputGraph override
+    # those in the InputGraph fragment)
+    OutputGraphOverridesInputGraph = 'outputGraphOverridesInputGraph'
+    InputGraphOverridesOutputGraph = 'inputGraphOverridesOutputGraph'
+
+
 class TransformRelationship(apis.models.common.Digestable):
     graphParameters: List[RelationshipParameters] = []
     graphResults: List[RelationshipResults] = []
     inferParameters: bool = True
     inferResults: bool = True
+    variablesMergePolicy: str = pydantic.Field(
+        VariablesMergePolicy.OutputGraphOverridesInputGraph.value,
+        description="How to merge the variables of InputGraph and OutputGraph"
+    )
+
+    @pydantic.validator("variablesMergePolicy")
+    def validate_variables_merge_policy(cls, policy: str) -> str:
+        VariablesMergePolicy(policy)
+        return policy
 
     def get_parameter_relationship_by_name_output(self, name: str) -> RelationshipParameters:
         for p in self.graphParameters:
