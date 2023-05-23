@@ -626,7 +626,20 @@ m_relationship = api_relationships.model('relationship', {
     'transform': fields.Nested(m_transform)
 })
 
+mSynthesizeOptions = api_relationships.model('relationship-synthesize-options', {
+    'generateParameterisation': fields.Boolean(
+        default=True,
+        description="Whether to auto-generate parameterisation options. When False the method will not auto-generate "
+                    "any parameterisation configuration for the synthesized parameterised virtual experiment package. "
+                    "When True the method generates 1 preset for each variable in the final experiment which has a "
+                    "unique value. It overrides this information using the presets/executionOptions of the "
+                    "parent(outputGraph). It overrides this merged information using the \"parameterisation\" "
+                    "settings that are part of this payload. The default is `True`"
+    )
+})
+
 m_payload_synthesize = api_relationships.model('relationship-synthesize', {
+    'options': fields.Nested(mSynthesizeOptions),
     'parameterisation': fields.Nested(mParameterisation)
 })
 

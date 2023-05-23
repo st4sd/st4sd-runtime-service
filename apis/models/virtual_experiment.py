@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 import copy
 import datetime
 import difflib
@@ -32,6 +33,7 @@ import apis.models.common
 import apis.models.constants
 import apis.models.errors
 import apis.models.from_core
+
 
 TSourceDatasetLocation = namedtuple('TSourceDatasetLocation', ['dataset_name'])
 TBaseConfig = namedtuple('TBaseConfig', ['path', 'manifestPath'])
@@ -102,16 +104,23 @@ class BasePackageConfig(apis.models.common.Digestable):
     manifestPath: Optional[str]
 
 
-class StorageMetadata(pydantic.BaseModel):
+class VirtualExperimentMetadata(pydantic.BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-    rootDirectory: Optional[str] = None
-    location: Optional[str] = None
     concrete: experiment.model.frontends.flowir.FlowIRConcrete
-    top_level_folders: List[str] = []
-    manifestData: Dict[str, str]
-    data: List[str]
+    manifestData: Dict[str, str] = pydantic.Field(
+        {}, description="The manifest metadata, keys are application-dependency names and values are paths"
+                        "relative to the parent of the virtual experiment standalone/standard project")
+    data: List[str] = pydantic.Field([], description="The files under the implied data application-dependency")
+
+
+class StorageMetadata(VirtualExperimentMetadata):
+    rootDirectory: Optional[str] = pydantic.Field(
+        None, description="Path to directory on local storage that contains a project")
+    location: Optional[str] = None
+    top_level_folders: List[str] = pydantic.Field(
+        [], description="A list of directories in the top level of the virtual experiment (for package variants)")
 
     def path_offset_location(self, path: str) -> str | None:
         if self.location is None:
@@ -160,7 +169,6 @@ class StorageMetadata(pydantic.BaseModel):
             config: BasePackageConfig,
             platform: str | None = None,
             prefix_paths: str | None = None,
-            find_any_valid_platform: bool = False,
     ) -> StorageMetadata:
         """Loads FlowIRConcrete and discovers data files of a BasePackage
 
@@ -1077,13 +1085,6 @@ class GraphBindingCollection(apis.models.common.Digestable):
         return cls.ensure_correct_type(value, "output")
 
 
-class BasePackageGraphNodeUseBinding(apis.models.common.Digestable):
-    source: BasePackageGraphBindingSource = pydantic.Field(
-        ..., description="Identifies the source of which the value will replace the reference")
-    reference: str = pydantic.Field(
-        ..., description="An entry in the component's references. "
-                         "The reference will be rewritten to point to the source")
-
 
 class BasePackageGraphNode(apis.models.common.Digestable):
     reference: str = pydantic.Field(
@@ -1388,3 +1389,267 @@ class ParameterisedPackageDropUnknown(ParameterisedPackage):
 
             return cast(ParameterisedPackageDropUnknown, super(ParameterisedPackageDropUnknown, cls) \
                         .parse_obj(obj, *args, **kwargs))
+
+
+def apply_parameterisation_options_to_dsl2(dsl: Dict[str, Any], parameterisation: Parameterisation):
+    """Modifies the arguments for the <main> workflow in the entrypoint to adhere to Parameterisation rules
+
+    - parameterisation.presets.veriables define hard-coded values to variables, therefore these should not appear
+       in entrypoint.execute[0].args because the end user has no way to change them
+    - parameterisation.executionOptions.variables allow users to choose between 1 and infinite values. These
+        should appear as the value of a parameter with the same name under entrypoint.execute[0].args.
+        Because a parameterisation.executionOptions.variables entry may contain multiple values and DSL 2.0 supports
+        just 1 value for a parameter, this method will update entrypoint.execute[0].args to reflect the default value
+        of the variables entry (i.e. what the experiment would get if the user launched the experiment and did not
+        opt to ask for a specific platform).
+
+    Arguments:
+        dsl: the DSL 2.0 to modify in place in place. The method assumes that the platform from which the DSL 2.0
+            was generated from is the same as the default (or preset) platform that the parameterisation dictates.
+            That is
+              `parameterisation.presets.platform or (parameterisation.executionOptions.platform or ['default'])]0]`
+        parameterisation: The parameterisation rules to apply
+    """
+    ref_param_name = re.compile(r'param[0-9]+')
+    main_args: Dict[str, Any] = dsl['entrypoint']['execute'][0].get('args', {})
+    workflow = dsl['workflows'][0]
+
+    variable_names_presets = {x.name for x in parameterisation.presets.variables}
+
+    # VV: Remove variables defined in presets from the entrypoint
+    main_args = {k: v for (k, v) in main_args.items() if k not in variable_names_presets}
+
+    # VV: Find the default values of variables that are part of executionOptions - override the associated
+    # parameter values in the entrypoint
+    variables_execution_options = {}
+    for x in parameterisation.executionOptions.variables:
+        if x.value is not None or x.valueFrom:
+            variables_execution_options[x.name] = x.value or x.valueFrom[0].value
+        else:
+            # VV: the parameterisation does not define a default value for this variable, just echo the
+            # default value from the default platform that the DSL 2.0 was generated from
+            for param in workflow['signature']['parameters']:
+                if param['name'] == x.name and 'default' in param:
+                    variables_execution_options[x.name] = param['default']
+                    break
+            else:
+                raise apis.models.errors.ApiError(
+                    f"Could not extract default value for configurable parameter {x.name}")
+
+    main_args.update(variables_execution_options)
+
+    dsl['entrypoint']['execute'][0]['args'] = main_args
+
+
+class VariableCharacterization(apis.models.common.Digestable):
+    platforms: List[str] = pydantic.Field([], description="The names of the platforms that were taken into account")
+    uniqueValues: Dict[str, str] = pydantic.Field(
+        {}, description="Variables which have the same value in all platforms that can reference them")
+    multipleValues: Set[str] = pydantic.Field(set(), description="Variables which have at least 2 different values in "
+                                                                 "the platforms that can reference them")
+
+
+def characterize_variables(
+        dsl: experiment.model.frontends.flowir.FlowIRConcrete,
+        platforms: Optional[List[str]] = None
+) -> VariableCharacterization:
+    """Partitions variables of a virtual experiment into 2 buckets: those that have unique values across all
+    platforms that can reference them and those who don't
+
+    Arguments:
+        dsl: The DSL 1.0 (FlowIR) definition of a virtual experiment
+        platforms: (Optional) the platforms to take into account - defaults to all platforms of virtual experiment
+
+    Returns:
+        VariableCharacterization pydantic data model
+    """
+    if platforms is None:
+        platforms = list(dsl.platforms)
+
+    ret = VariableCharacterization(platforms=platforms)
+
+    for platform in platforms:
+        platform_vars = dsl.get_platform_global_variables(platform)
+        for (k, v) in platform_vars.items():
+            if k in ret.multipleValues:
+                continue
+
+            if k not in ret.uniqueValues:
+                ret.uniqueValues[k] = v
+                continue
+
+            if ret.uniqueValues[k] != v:
+                del ret.uniqueValues[k]
+                ret.multipleValues.add(k)
+
+    return ret
+
+
+def parameterisation_from_flowir(
+        dsl: experiment.model.frontends.flowir.FlowIRConcrete,
+        platforms: Optional[List[str]] = None,
+) -> Parameterisation:
+    """Generate a default parameterisation from a DSL 1.0 (i.e. FlowIR) schema
+
+    Rules ::
+
+        1. All platforms are available for execution
+        2. Variables which have a unique value across all platforms that define them should appear as presets
+        3. Other variables should not appear in either presets or executionOptions so that they receive their
+            value at the point that a user chooses which platform to use.
+
+    Arguments:
+        dsl: A DSL 1.0 (FlowIR) representation of the virtual experiment
+        platforms: The platforms to consider - defaults to all platforms
+
+    Returns:
+        Parameterisation based on the above rules. It will also contain executionOptions.platform = platforms
+    """
+    vars = characterize_variables(dsl, platforms)
+
+    parameterisation = Parameterisation()
+    parameterisation.executionOptions.platform = vars.platforms
+
+    parameterisation.presets.variables = [
+        apis.models.common.Option(name=k, value=v)
+        for (k, v) in vars.uniqueValues.items()
+    ]
+
+    return parameterisation
+
+
+def merge_parameterisation(
+        base: Parameterisation,
+        override: Parameterisation
+) -> Parameterisation:
+    """Merges 2 parameterisation settings, override completely overrides any conflicting information from base
+
+    Conflicts ::
+
+        1. override defines a variable (executionOption/presets) and base defines a
+          variable with same name (presets/executionOption)
+        2. override defines one or more platforms (executionOption/presets) and base defines one or more platforms
+          (presets/executionOptions)
+        3. override defines data information for specific name (presets/executionOptions) and base defines data
+          information (preses/executionOptions) for the same data filename
+
+    Arguments:
+        base: the parameterisation options to use as the base scope of settings
+        override: the parameterisation options to layer on top of the base scope of settings - completely overrides
+            any conflicting setting set in @base
+
+    Returns:
+        A Parameterisation object which combines the settings from @override and @base such that @override
+            completely overrides the configuration options that @base defines
+    """
+
+    # VV: Start with the contents of @override and copy in any non-conflicting information from @base
+    merged = override.copy(deep=True)
+
+    variable_names = {x.name for x in merged.presets.variables}.union(
+        {x.name for x in merged.executionOptions.variables})
+    data_files = {x.name for x in merged.presets.data}.union({x.name for x in merged.executionOptions.data})
+
+    # VV: Copy any non-conflicting variables from @base into merged
+    for x in base.presets.variables:
+        if x.name not in variable_names:
+            merged.presets.variables.append(x.copy(deep=True))
+    for x in base.executionOptions.variables:
+        if x.name not in variable_names:
+            merged.executionOptions.variables.append(x.copy(deep=True))
+
+    # VV: Copy any non-conflicting information about data files from @base into merged
+    for x in base.presets.data:
+        if x.name not in data_files:
+            merged.presets.data.append(x.copy(deep=True))
+    for x in base.executionOptions.data:
+        if x.name not in data_files:
+            merged.executionOptions.data.append(x.copy(deep=True))
+
+    # VV: If @override does not define any information about platforms copy the information from @base as is
+    if not merged.executionOptions.platform and merged.presets.platform is None:
+        merged.executionOptions.platform = base.executionOptions.platform
+        merged.presets.platform = base.presets.platform
+
+    return merged
+
+
+def extract_top_level_directory(path: str) -> str:
+    if '/' in path:
+        return path.split('/', 1)[0]
+
+    return path
+
+
+def manifest_from_parameterised_package(
+        ve: apis.models.virtual_experiment.ParameterisedPackage
+) -> Dict[str, str]:
+    # VV: The manifest should contain all the top-level directories that the would-be VE has
+    top_level_directories = sorted({extract_top_level_directory(x.dest.path)
+                                    for x in ve.base.includePaths})
+    return {x: x for x in top_level_directories}
+
+
+def dsl_from_concrete(
+        concrete: experiment.model.frontends.flowir.FlowIRConcrete,
+        manifest: Dict[str, str],
+        platform: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Generate DSL 2.0 (v0.1.0) from FlowIR (DSL 1.0)
+
+    The DSL has the schema ::
+
+        entrypoint: # describes how to run this YAML file
+          # Hard coded to run an instance of the Workflow class "main"
+          entry-instance: main
+          execute: # the same as workflow.execute with the difference that there is always 1 step
+            # and the name of the step is always <entry-instance>
+            - target: "<entry-instance>"
+              args: # Instantiate the class
+                parameter-name: parameter value # see notes
+
+        # There is going to be exactly 1 workflow class (`main`)
+        workflows: # Available Workflow Classes
+          - signature: # Identical to the schema of a signature in a Component class
+              name: main
+              parameters:
+                - name: parameter-name
+                  default: an optional default value (string)
+
+            # The names of all the steps in this Workflow class
+            # Each step is the instance of a Class (either Workflow, or Component)
+            steps:
+              the-step-name: the-class-name
+
+            # How to execute each step - execution order is a product of dependencies between steps
+            execute:
+              - target: "<the-step-name>" # reference to the step to execute enclosed in "<" and ">"
+                args: # The values to pass to the step
+                  parameter-name: parameter-value # see notes
+
+        components: # Available Component Classes
+          - signature: # identical to the schema of a signature in a Workflow class
+              name: the identifier of the class
+              parameters:
+                - name: parameter name
+                  default: an optional default value (string)
+
+            # All Component fields from FlowIR (DSL 1.0) except for stage and name
+
+    Arguments:
+        concrete: The FlowIR (DSL 1.0) specification
+        manifest: The manifest data (keys are top-level directories and values are paths that would populate
+            the top level directories)
+        platform: The platform from which to generate DSL 2.0 (defaults to `default`)
+
+    Returns:
+        A dictionary that contains the auto-generated DSL.
+    """
+    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(
+        concrete.raw(), manifest=manifest,
+        documents=None, platform=platform, primitive=True,
+        variable_substitute=False)
+
+    dsl = graph.to_dsl()
+
+    return dsl

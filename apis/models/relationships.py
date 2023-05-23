@@ -15,6 +15,7 @@ from typing import Optional
 import experiment.model.graph
 import pydantic
 
+import apis.models.errors
 import apis.models.common
 import apis.models.virtual_experiment
 
@@ -157,7 +158,17 @@ class Relationship(apis.models.common.Digestable):
     transform: Optional[Transform] = None
 
 
+class SynthesizeOptions(apis.models.common.Digestable):
+    generateParameterisation: bool = pydantic.Field(
+        True, description="Auto generate parameterisation options",
+        alias='generate-parameterisation'
+    )
+
+
 class PayloadSynthesize(apis.models.common.Digestable):
     parameterisation: apis.models.virtual_experiment.Parameterisation = pydantic.Field(
-        apis.models.virtual_experiment.Parameterisation()
+        default_factory=apis.models.virtual_experiment.Parameterisation
+    )
+    options: SynthesizeOptions = pydantic.Field(
+        default_factory=SynthesizeOptions, description="Options to guide synthesis"
     )

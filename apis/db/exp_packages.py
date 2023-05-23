@@ -184,7 +184,7 @@ class DatabaseExperiments(apis.db.base.Database):
 
         Raises:
             apis.models.errors.ParameterisedPackageNotFoundError: No parameterised package with @identifier
-            apis.models.errors.CannnotRemoveLatestTagError: new_tags does not contain "latest" but parameterised package
+            apis.models.errors.CannotRemoveLatestTagError: new_tags does not contain "latest" but parameterised package
                 tags do (i.e. metadata.registry.tags)
         """
         self._log.info(f"Setting the tags of {identifier} to {new_tags}")
@@ -202,7 +202,7 @@ class DatabaseExperiments(apis.db.base.Database):
         pp = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(matches[0])
 
         if 'latest' in pp.metadata.registry.tags and 'latest' not in new_tags:
-            raise apis.models.errors.CannnotRemoveLatestTagError(identifier)
+            raise apis.models.errors.CannotRemoveLatestTagError(identifier)
 
         for t in new_tags:
             qi = apis.models.common.PackageIdentifier.from_parts(pi.name, tag=t, digest=None)

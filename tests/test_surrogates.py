@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import collections
 from typing import Any
 from typing import Dict
 
@@ -15,11 +16,14 @@ import os
 import tempfile
 import pytest
 
+import apis.db.relationships
 import apis.db.exp_packages
 import apis.models
+import apis.kernel.relationships
 import apis.models.relationships
 import apis.models.virtual_experiment
 import apis.runtime
+import apis.runtime.package
 import apis.runtime.package_derived
 import apis.runtime.package_transform
 import apis.storage
@@ -390,33 +394,12 @@ def test_modular_ani_band_gap_gamess_persist(
 
 
 def test_modular_optimizer_band_gap_reference_data(
-        ve_modular_optimizer: apis.models.virtual_experiment.ParameterisedPackage,
-        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
         package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
         output_dir: str,
 ):
-    relationship = {"identifier": "maul-to-band-gap-dft-modular", "transform": {
-        "inputGraph": {"identifier": "optimizer-modular:latest",
-                       "components": ["stage0.Optimizer", "stage0.XYZToGAMESS"]},
-        "outputGraph": {"identifier": "band-gap-dft-gamess-us:latest", "components": ["stage0.XYZToGAMESS"]},
-        "relationship": {"graphParameters": [{"inputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"},
-                                              "outputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"}},
-                                             {"inputGraphParameter": {"name": "stage0.XYZToGAMESS:ref"},
-                                              "outputGraphParameter": {"name": "stage0.SMILESToGAMESSInput:ref"}},
-                                             {"inputGraphParameter": {"name": "data/ref_bnn_ani_checkpoint.pt:ref"},
-                                              "outputGraphParameter": {"name": "data/ref_bnn_ani_checkpoint.pt:ref"}},
-                                             {"inputGraphParameter": {"name": "input/input_molecule.txt:ref"},
-                                              "outputGraphParameter": {
-                                                  "name": "stage0.SetFunctional/input_molecule.txt:ref"}}],
-                         "graphResults": [{"inputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"},
-                                           "outputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"}}]}}}
     packages_metadata = package_metadata_modular_optimizer_band_gap_gamess
-
-    rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(relationship)
-
-    rel.transform.inputGraph.package = ve_modular_optimizer.base.packages[0]
-    rel.transform.outputGraph.package = ve_modular_band_gap_gamess.base.packages[0]
-
+    rel = rel_optimizer_band_gap
     logger.info(f"Relationship: {rel.json(exclude_none=True, exclude_unset=True, indent=2)}")
 
     transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
@@ -445,3 +428,174 @@ def test_modular_optimizer_band_gap_reference_data(
     for x in ["input_anion.txt", "input_cation.txt", "input_molecule.txt", "input_neutral.txt",
               "model-weights.checkpoint"]:
         open(os.path.join(dir_persist, 'data', x)).close()
+
+
+def test_generate_parameterisation_for_derived_from_optimizer_and_bandgap(
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str,
+):
+    packages = package_metadata_modular_optimizer_band_gap_gamess
+    rel = rel_optimizer_band_gap
+    derived = apis.kernel.relationships.synthesize_ve_from_transformation(
+        rel.transform, packages, parameterisation=ve_modular_band_gap_gamess.parameterisation)
+
+    parameterisation = apis.models.virtual_experiment.parameterisation_from_flowir(derived.concrete_synthesized)
+    all_vars = apis.models.virtual_experiment.characterize_variables(derived.concrete_synthesized)
+
+    assert all_vars.multipleValues == {"backend"}
+
+    assert len(parameterisation.executionOptions.variables) == 0
+    assert len(parameterisation.presets.variables) == len(all_vars.uniqueValues)
+    assert len(all_vars.uniqueValues) > 0
+    assert all([x.name != "backend" for x in parameterisation.presets.variables])
+
+
+def validate_band_gap_optimizer_dsl_args(
+        dsl: Dict[str, Any],
+        package: apis.models.virtual_experiment.ParameterisedPackage,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+):
+    args = {k: v for (k, v) in dsl['entrypoint']['execute'][0]['args'].items()}
+
+    assert args == {
+        'backend': 'kubernetes',
+        'basis': 'GBASIS=N31 NGAUSS=6 NDFUNC=2 NPFUNC=1 DIFFSP=.TRUE. DIFFS=.TRUE.',
+        'collabel': 'label',
+        'functional': 'B3LYP',
+        'gamess-grace-period-seconds': '1800',
+        'gamess-restart-hook-file': 'dft_restart.py',
+        'gamess-walltime-minutes': '700',
+        'mem': '4295000000',
+        'number-processors': '1',
+        'numberMolecules': '1',
+        'param1': 'input/smiles.csv:copy',
+        'param3': 'input/smiles.csv:ref',
+        'startIndex': '0'
+    }
+
+    final_executionOptions_variables = package.parameterisation.executionOptions.variables
+    outputgraph_executionOptions_variables = ve_modular_band_gap_gamess.parameterisation.executionOptions.variables
+
+    assert len(outputgraph_executionOptions_variables) > 0
+
+    assert final_executionOptions_variables == outputgraph_executionOptions_variables
+
+
+def test_preview_synthesize_dsl(
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str,
+):
+    packages = package_metadata_modular_optimizer_band_gap_gamess
+
+    path_db_experiments = os.path.join(output_dir, "experiments.json")
+    path_db_relationships = os.path.join(output_dir, "relationships.json")
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
+    db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
+
+    with db_relationships:
+        db_relationships.insert_many([rel_optimizer_band_gap.dict()])
+
+    with db_experiments:
+        db_experiments.push_new_entry(ve_modular_band_gap_gamess)
+
+    ret = apis.kernel.relationships.api_preview_synthesize_dsl(
+        identifier=rel_optimizer_band_gap.identifier,
+        packages=packages,
+        db_relationships=db_relationships,
+        db_experiments=db_experiments,
+        dsl_version="2.0.0_0.1.0"
+    )
+
+    validate_band_gap_optimizer_dsl_args(ret.dsl, ret.package, ve_modular_band_gap_gamess)
+
+
+def test_synthesize(
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str,
+):
+    packages = package_metadata_modular_optimizer_band_gap_gamess
+
+    path_db_experiments = os.path.join(output_dir, "experiments.json")
+    path_db_relationships = os.path.join(output_dir, "relationships.json")
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
+    db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
+
+    with db_relationships:
+        db_relationships.insert_many([rel_optimizer_band_gap.dict()])
+
+    with db_experiments:
+        db_experiments.push_new_entry(ve_modular_band_gap_gamess)
+
+    synthesize = apis.models.relationships.PayloadSynthesize()
+    synthesize.options.generateParameterisation = True
+
+    metadata = apis.kernel.relationships.api_synthesize_from_transformation(
+        identifier=rel_optimizer_band_gap.identifier,
+        new_package_name="synthetic",
+        packages=packages,
+        db_relationships=db_relationships,
+        db_experiments=db_experiments,
+        synthesize=synthesize,
+        path_multipackage=os.path.join(output_dir, "synthesized")
+    )
+
+    logger.warning(f"The resulting parameterisation options are {metadata.package.parameterisation.json(indent=2)}")
+
+    dsl = apis.models.virtual_experiment.dsl_from_concrete(
+        concrete=metadata.metadata.concrete,
+        manifest=metadata.metadata.manifestData,
+        platform=(metadata.package.get_known_platforms() or ['default'])[0]
+    )
+
+    validate_band_gap_optimizer_dsl_args(dsl, metadata.package, ve_modular_band_gap_gamess)
+
+
+def test_transformation_push_and_then_synthesize(
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str,
+):
+    packages = package_metadata_modular_optimizer_band_gap_gamess
+
+    path_db_experiments = os.path.join(output_dir, "experiments.json")
+    path_db_relationships = os.path.join(output_dir, "relationships.json")
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
+    db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
+
+    with db_relationships:
+        db_relationships.insert_many([rel_optimizer_band_gap.dict()])
+
+    with db_experiments:
+        db_experiments.push_new_entry(ve_modular_band_gap_gamess)
+
+    rel = apis.kernel.relationships.api_push_relationship(
+        rel=rel_optimizer_band_gap,
+        db_relationships=db_relationships,
+        db_experiments=db_experiments,
+        packages=packages
+    )
+
+    with db_relationships:
+        docs = db_relationships.query(db_relationships.construct_query(rel_optimizer_band_gap.identifier))
+
+        assert len(docs) == 1
+
+    preview = apis.kernel.relationships.api_preview_synthesize_dsl(
+        identifier=rel.identifier,
+        packages=packages,
+        db_relationships=db_relationships,
+        db_experiments=db_experiments,
+        dsl_version="2.0.0_0.1.0"
+    )
+
+    validate_band_gap_optimizer_dsl_args(preview.dsl, preview.package, ve_modular_band_gap_gamess)

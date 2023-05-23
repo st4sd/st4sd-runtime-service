@@ -6,13 +6,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import List
 from typing import Optional
 from typing import Set
+from typing import Union
 
 from typing import Callable
-
+import pydantic
 import experiment.model.errors
 import experiment.model.frontends.flowir
 import experiment.model.graph
@@ -88,20 +90,27 @@ class TransformRelationship:
         self._output_graph_name = output_graph_name
         self._log = logging.getLogger('transform')
 
+        self._ve_inputgraph: Union[apis.models.virtual_experiment.ParameterisedPackage, None] = None
+        self._ve_outputgraph: Union[apis.models.virtual_experiment.ParameterisedPackage, None] = None
+
     def discover_parameterised_packages(
             self,
             db_packages: apis.db.exp_packages.DatabaseExperiments,
     ):
 
-        for identifier in [self._transform.inputGraph.identifier, self._transform.outputGraph.identifier]:
+        for kind, identifier in [('inputGraph', self._transform.inputGraph.identifier),
+                                 ('outputGraph', self._transform.outputGraph.identifier)]:
             docs = db_packages.query_identifier(identifier)
             if len(docs) == 0:
-                raise apis.models.errors.ApiError(f"Database does not contain "
-                                                  f"the parameterised virtual experiment package \"{identifier}\"")
+                raise apis.models.errors.ParameterisedPackageNotFoundError(identifier)
             elif len(docs) > 1:
                 raise apis.models.errors.ApiError(f"Database contains multiple parameterised virtual experiment "
                                                   f"packages with the identifier \"{identifier}\"")
-            pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+            try:
+                pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+            except pydantic.error_wrappers.ValidationError as e:
+                raise apis.models.errors.InvalidModelError(f"{kind} {identifier} is invalid",
+                                                           problems=e.errors())
             if len(pvep.base.packages) != 1:
                 raise apis.models.errors.ApiError(
                     f"Cannot use parameterised virtual experiment package {identifier} "
@@ -109,8 +118,16 @@ class TransformRelationship:
                     f"(it has {len(pvep.base.packages)} base packages)")
             if identifier == self._transform.inputGraph.identifier:
                 self._transform.inputGraph.package = pvep.base.packages[0]
+                self._ve_inputgraph = pvep
             else:
                 self._transform.outputGraph.package = pvep.base.packages[0]
+                self._ve_outputgraph = pvep
+
+    def get_ve_inputgraph(self) -> Union[apis.models.virtual_experiment.ParameterisedPackage, None]:
+        return self._ve_inputgraph
+
+    def get_ve_outputgraph(self) -> Union[apis.models.virtual_experiment.ParameterisedPackage, None]:
+        return self._ve_outputgraph
 
     def guess_parameter_of_surrogate(
             self,
@@ -200,6 +217,11 @@ class TransformRelationship:
         # 1. does not get removed by transform
         # 2. has the same name as the inputGraph parameter
         # If there's such an outputGraph then generate a graphParameters mapping between the 2 components
+
+        all_graph_input_parameters = set()
+        for x in transform.relationship.graphParameters:
+            all_graph_input_parameters.add(x.inputGraphParameter.name)
+
         for surrogate in transform.inputGraph.components:
             cid = experiment.model.graph.ComponentIdentifier(surrogate)
             comp_params = get_parameters_of_component(concrete_surr.get_component((cid.stageIndex, cid.componentName)))
@@ -231,10 +253,13 @@ class TransformRelationship:
                             f"   Matching {dref_found.absoluteReference} with "
                             f"{dref_surr.absoluteReference} on pathRef= {dref_surr.pathRef}")
 
-                        transform.relationship.graphParameters.append(
-                            apis.models.relationships.RelationshipParameters(
-                                inputGraphParameter=apis.models.relationships.GraphValue(name=ref_surr),
-                                outputGraphParameter=apis.models.relationships.GraphValue(name=ref_found)))
+                        if ref_surr not in all_graph_input_parameters:
+                            all_graph_input_parameters.add(ref_surr)
+
+                            transform.relationship.graphParameters.append(
+                                apis.models.relationships.RelationshipParameters(
+                                    inputGraphParameter=apis.models.relationships.GraphValue(name=ref_surr),
+                                    outputGraphParameter=apis.models.relationships.GraphValue(name=ref_found)))
 
         # VV: We can do something similar for graphResults
         # - If there is a parameter in the outputGraph referencing a component that the transformation removes, AND
@@ -249,6 +274,10 @@ class TransformRelationship:
                 known_mappings.update(m.outputGraphResult.name)
 
         cids_found = concrete_found.get_component_identifiers(recompute=True, include_documents=False)
+
+        all_graph_output_results = set()
+        for x in transform.relationship.graphResults:
+            all_graph_output_results.add(x.outputGraphResult.name)
 
         for cid in cids_found:
             comp_id = experiment.model.graph.ComponentIdentifier(cid[1], cid[0])
@@ -276,11 +305,14 @@ class TransformRelationship:
                         self._log.info(
                             f"   Matching graphResult {dref.absoluteReference} with "
                             f"{cref.absoluteReference} on pathRef= {dref.pathRef}")
-                        rel = apis.models.relationships.RelationshipResults(
-                            outputGraphResult=apis.models.relationships.GraphValue(name=dref.absoluteReference),
-                            inputGraphResult=apis.models.relationships.GraphValue(name=cref.absoluteReference)
-                        )
-                        transform.relationship.graphResults.append(rel)
+                        if dref.absoluteReference not in all_graph_output_results:
+                            all_graph_input_parameters.add(dref.absoluteReference)
+
+                            rel = apis.models.relationships.RelationshipResults(
+                                outputGraphResult=apis.models.relationships.GraphValue(name=dref.absoluteReference),
+                                inputGraphResult=apis.models.relationships.GraphValue(name=cref.absoluteReference)
+                            )
+                            transform.relationship.graphResults.append(rel)
 
     def _infer_relationship_single_component_graphs(
             self,
@@ -441,8 +473,8 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         if surrogate_package is None:
             raise KeyError(f"Missing transform.inputGraph.package")
 
-        derived.base.packages.append(foundation_package)
-        derived.base.packages.append(surrogate_package)
+        derived.base.packages.append(foundation_package.copy(deep=True))
+        derived.base.packages.append(surrogate_package.copy(deep=True))
 
         self._log.info(f"Base packages: {[x.name for x in derived.base.packages]}")
 
@@ -600,7 +632,8 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         foundation_package = derived.base.get_package(transform.outputGraph.identifier)
         if len(foundation_package.graphs) != 1:
             raise apis.models.errors.ApiError(f"Expected Foundation graph of {foundation_package.name} to "
-                                              f"have exactly 1 graph, but it has {len(foundation_package.graphs)}")
+                                              f"have exactly 1 graph, but it has {len(foundation_package.graphs)}\n"
+                                              f"{foundation_package.json(indent=2)}")
 
         foundation_graph = foundation_package.graphs[0]
         foundation_connection = apis.models.virtual_experiment.BasePackageGraphInstance(

@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import logging
 import pprint
 import traceback
@@ -18,6 +19,7 @@ from flask import request, current_app
 from flask_restx import Resource, reqparse
 
 import apis.kernel.flask_utils
+import apis.kernel.relationships
 import apis.models.constants
 import apis.models.errors
 import apis.models.relationships
@@ -99,31 +101,22 @@ class Relationships(Resource):
         try:
             rel = apis.models.relationships.Relationship.parse_obj(doc)
         except pydantic.error_wrappers.ValidationError as e:
-            api.abort(400, "Invalid relationship", problems=e.errors())
-            raise  # VV: keep linter happy
+            raise apis.models.errors.InvalidModelError("Relationship is invalid", problems=e.errors())
+
         try:
-            if rel.transform:
-                transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
-                if rel.transform.inputGraph.package is None or rel.transform.outputGraph.package is None:
-                    with utils.database_experiments_open() as db:
-                        transform.discover_parameterised_packages(db)
-
-                ve = transform.prepare_derived_package(
-                    rel.identifier, parameterisation=apis.models.virtual_experiment.Parameterisation())
-                try:
-                    with apis.storage.PackagesDownloader(ve) as download:
-                        rel.transform = transform.try_infer(download)
-                except Exception as e:
-                    api.abort(400, "Incomplete relationship", problem=str(e))
-                    raise e  # VV: keep linter happy
-
-            with utils.database_relationships_open() as db:
-                db.upsert(rel.dict(exclude_none=False), ql=db.construct_query(rel.identifier))
+            rel = apis.kernel.relationships.api_push_relationship(
+                rel=rel,
+                db_relationships=utils.database_relationships_open(),
+                db_experiments=utils.database_experiments_open(),
+                packages=apis.storage.PackagesDownloader(ve=None),
+            )
             return {
                 "entry": rel.dict()
             }
         except werkzeug.exceptions.HTTPException:
             raise
+        except apis.models.errors.InvalidModelError as e:
+            api.abort(400, e.message, problems=e.problems)
         except apis.models.errors.ApiError as e:
             api.abort(400, f"Invalid relationship", problem=str(e))
         except Exception as e:
@@ -132,102 +125,63 @@ class Relationships(Resource):
             api.abort(500, f"Internal error while registering relationship")
 
 
-@api.route("/<identifier>/preview/synthesize/dsl/", doc=False)
-@api.route("/<identifier>/preview/synthesize/dsl")
+@api.route("/<identifier>/preview/synthesize/dsl", doc=False)
+@api.route("/<identifier>/preview/synthesize/dsl/")
 class TransformDSLPreview(Resource):
     _my_parser = parser_formatting_relationship_preview()
 
     @api.expect(_my_parser)
     def get(self, identifier: str):
+        """Previews the DSL and parameterised virtual experiment package of a would-be synthesized experiment.
+
+        It returns a Dictionary with the format ::
+
+            {
+                "dsl": { the dictionary representing the DSL of the computational graph },
+                "experiment": { the dictionary representing the parameterised virtual experiment package that
+                                would have been created in the registry },
+                "problems": [ a list of potential issues/warnings ]
+            }
+        """
         try:
             args = self._my_parser.parse_args()
 
-            with utils.database_relationships_open() as db:
-                ql = db.construct_query(identifier)
-                docs = db.query(ql)
+            db_relationships = utils.database_relationships_open()
+            db_experiments = utils.database_experiments_open()
 
-            if len(docs) == 0:
-                api.abort(404, "Unknown transform relationship", unknownTransformIdentifier=identifier)
-            try:
-                rel = apis.models.relationships.Relationship.parse_obj(docs[0])
-            except pydantic.error_wrappers.ValidationError as e:
-                raise apis.models.errors.ApiError(f"Invalid relationship - validations errors: {e.errors()}")
+            ret = apis.kernel.relationships.api_preview_synthesize_dsl(
+                identifier=identifier,
+                packages=apis.storage.PackagesDownloader(ve=None),
+                db_relationships=db_relationships,
+                db_experiments=db_experiments,
+                dsl_version=args.dslVersion
+            )
 
-            if not rel.transform:
-                raise api.abort(400, "Relationship is not Transform", notATransformRelationship=identifier)
-
-            transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
-
-            synthesize = apis.models.relationships.PayloadSynthesize()
-            platform_name = args.platform
-
-            if not platform_name:
-                # VV: If dslVersion != 1, then this is the name of the platform to preview. If empty, preview the
-                # platform that is common between the 2 PVEPs of the relationship. If there are multiple platforms
-                # then pick the first one based on lexicographical order (excluding `default`)
-                with utils.database_experiments_open() as db:
-                    ve_input = db.query_identifier(rel.transform.inputGraph.identifier)[0]
-                    ve_output = db.query_identifier(rel.transform.outputGraph.identifier)[0]
-
-                ve_input = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(ve_input)
-                ve_output = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(ve_output)
-
-                platforms = set(ve_input.parameterisation.get_available_platforms() or [])
-                platforms.intersection(ve_output.parameterisation.get_available_platforms())
-
-                try:
-                    platforms.remove("default")
-                except KeyError:
-                    pass
-
-                platform_name = sorted(platforms)[0] if platforms else "default"
-
-            synthesize.parameterisation.presets.platform = platform_name
-
-            ve = transform.prepare_derived_package("synthetic", synthesize.parameterisation)
-
-            with apis.storage.PackagesDownloader(ve) as download:
-                transform.synthesize_derived_package(download, ve)
-                apis.runtime.package.prepare_parameterised_package_for_download_definition(ve)
-                apis.runtime.package.get_and_validate_parameterised_package(ve, download)
-                derived = apis.runtime.package.combine_multipackage_parameseterised_package(ve, download)
-
-                if args.dslVersion == "1":
-                    dsl = derived.concrete_synthesized.raw()
-                else:
-                    # VV: The manifest should contain all the top-level directories that the would-be VE has
-                    top_level_directories = sorted(
-                        {apis.runtime.package_derived.extract_top_level_directory(x.dest.path)
-                         for x in ve.base.includePaths})
-                    manifest = {x: x for x in top_level_directories}
-
-                    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(
-                        derived.concrete_synthesized.raw(), manifest=manifest,
-                        documents=None, platform=platform_name, primitive=True,
-                        variable_substitute=False)
-                    dsl = graph.to_dsl()
-
-                return {
-                    "dsl": dsl,
-                    "problems": []
-                }
+            return {
+                "dsl": ret.dsl,
+                "experiment": ret.package.dict(),
+                "problems": []
+            }
         except werkzeug.exceptions.HTTPException:
             raise
+        except apis.models.errors.RelationshipNotFoundError as e:
+            api.abort(404, e.message, relationshipNotFound=e.identifier)
         except apis.models.errors.ApiError as e:
             api.abort(400, f"Invalid payload, reason: {str(e)}", problem=str(e))
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while previewing the synthesized parameterised "
                                        f"virtual experiment package from relationship. "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(500, f"Internal error while previewing the syntehesized parameterised virtual experiment "
-                           f"package from relationship")
+            api.abort(500, "Internal error while previewing the synthesized parameterised virtual experiment "
+                           "package from relationship")
 
 
-@api.route("/<identifier>/synthesize/<new_package_name>/", doc=False)
-@api.route("/<identifier>/synthesize/<new_package_name>")
+@api.route("/<identifier>/synthesize/<new_package_name>", doc=False)
+@api.route("/<identifier>/synthesize/<new_package_name>/")
 class TransformSynthesize(Resource):
     @api.expect(apis.models.m_payload_synthesize)
     def post(self, identifier: str, new_package_name: str):
+        """Synthesizes a new experiment and stores it in the registry using the <identifier> relationship"""
         try:
             doc = request.get_json()
             synthesize = apis.models.relationships.PayloadSynthesize.parse_obj(doc)
@@ -235,34 +189,29 @@ class TransformSynthesize(Resource):
             api.abort(400, f"Invalid synthesize payload, problems are {e.json()}", problems=e.errors())
             raise e  # VV: Keep linter happy
 
+        # VV: TODO FIX ME
         try:
-            with utils.database_relationships_open() as db:
-                ql = db.construct_query(identifier)
-                docs = db.query(ql)
+            ret = apis.kernel.relationships.api_synthesize_from_transformation(
+                identifier=identifier,
+                new_package_name=new_package_name,
+                packages=apis.storage.PackagesDownloader(ve=None),
+                db_relationships=utils.database_relationships_open(),
+                db_experiments=utils.database_experiments_open(),
+                synthesize=synthesize,
+                path_multipackage=apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
+            )
 
-            if len(docs) == 0:
-                api.abort(404, "Unknown transform relationship", unknownTransformIdentifier=identifier)
-            try:
-                rel = apis.models.relationships.Relationship.parse_obj(docs[0])
-            except pydantic.error_wrappers.ValidationError as e:
-                raise apis.models.errors.ApiError(f"Invalid relationship - validations errors: {e.errors()}")
-
-            if not rel.transform:
-                raise api.abort(400, "Relationship is not Transform", notATransformRelationship=identifier)
-
-            transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
-            derived = transform.prepare_derived_package(new_package_name, synthesize.parameterisation)
-
-            with apis.storage.PackagesDownloader(derived) as download:
-                transform.synthesize_derived_package(download, derived)
-                logging.getLogger("transform").info(f"Synthesized {derived.json(indent=2)}")
-                db = utils.database_experiments_open()
-                apis.runtime.package.validate_adapt_and_store_experiment_to_database(derived, download, db)
-            return {"result": derived.dict()}
+            return {"result": ret.package.dict(), "problems": []}
         except werkzeug.exceptions.HTTPException:
             raise
+        except apis.models.errors.RelationshipNotFoundError as e:
+            api.abort(404, e.message, relationshipNotFound=e.identifier)
+        except apis.models.errors.ParameterisedPackageNotFoundError as e:
+            api.abort(404, e.message, parameterisedPackageNotFound=e.identifier)
+        except apis.models.errors.InvalidModelError as e:
+            api.abort(400, e.message, problems=e.problems)
         except apis.models.errors.ApiError as e:
-            api.abort(400, f"Invalid payload, reason: {str(e)}", problem=str(e))
+            api.abort(400, e.message)
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while synthesizing parameterised virtual experiment package "
                                        f"from relationship. Traceback: {traceback.format_exc()}")
@@ -270,8 +219,8 @@ class TransformSynthesize(Resource):
                            f"package from relationship")
 
 
-@api.route("/<identifier>/", doc=False)
-@api.route("/<identifier>")
+@api.route("/<identifier>", doc=False)
+@api.route("/<identifier>/")
 class Relationship(Resource):
     def get(self, identifier: str):
         try:

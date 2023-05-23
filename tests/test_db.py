@@ -261,7 +261,7 @@ def test_cannot_remove_latest_tag(ve_sum_numbers: apis.models.virtual_experiment
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
             db.push_new_entry(ve_sum_numbers)
 
-            with pytest.raises(apis.models.errors.CannnotRemoveLatestTagError) as e:
+            with pytest.raises(apis.models.errors.CannotRemoveLatestTagError) as e:
                 db.tag_update(ve_sum_numbers.metadata.package.name, ["hello"])
 
 

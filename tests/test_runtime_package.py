@@ -454,7 +454,6 @@ def test_workflow_variables_default_choices_from_value(
         ve_sum_numbers,
         namespace_presets,
         payload_config)
-
     assert package.workflow_variables['hello'] == 'not-world'
 
 
@@ -1579,13 +1578,18 @@ def test_validate_adapt_and_store_experiment_to_database(
 
     original_created_on = ve_psi4.metadata.registry.createdOn
 
-    # VV: Ensure that validate_adapt_and_store_experiment_to_database() updates createdOn, and digest
+    # VV: Ensure that validate_parameterised_package() updates createdOn, and digest
     time.sleep(0.1)
     ve_psi4.metadata.registry.digest = "invalid"
 
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
         db = apis.db.exp_packages.DatabaseExperiments(f.name)
-        apis.runtime.package.validate_adapt_and_store_experiment_to_database(ve_psi4, collection, db)
+
+        metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(ve_psi4, collection, db)
+        apis.runtime.package.validate_parameterised_package(ve=ve_psi4, metadata=metadata)
+
+        with db:
+            db.push_new_entry(ve_psi4)
 
         with db:
             doc = db.query()
@@ -1599,8 +1603,10 @@ def test_validate_adapt_and_store_experiment_to_database(
         ve_psi4.base.packages[0].source.git.location.branch = "other_branch"
         ve_psi4.base.packages[0].source.git.version = "totally-new-version"
 
-        time.sleep(0.1)
-        apis.runtime.package.validate_adapt_and_store_experiment_to_database(ve_psi4, collection, db)
+        metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(ve_psi4, collection, db)
+        apis.runtime.package.validate_parameterised_package(ve=ve_psi4, metadata=metadata)
+        with db:
+            db.push_new_entry(ve_psi4)
 
         with db:
             many_docs = db.query()
@@ -1671,7 +1677,8 @@ def test_extract_all_variables_during_validate(
 
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
         db = apis.db.exp_packages.DatabaseExperiments(f.name)
-        apis.runtime.package.validate_adapt_and_store_experiment_to_database(ve_psi4, collection, db)
+        metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(ve_psi4, collection, db)
+        apis.runtime.package.validate_parameterised_package(ve=ve_psi4, metadata=metadata)
 
     all_vars = ve_psi4.metadata.registry.executionOptionsDefaults.variables
     logger.info(f"All executionOptionDefaults {ve_psi4.metadata.registry.executionOptionsDefaults.json(indent=2)}")
@@ -1728,6 +1735,7 @@ def test_extract_all_variables_during_validate(
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
         db = apis.db.exp_packages.DatabaseExperiments(f.name)
         with pytest.raises(apis.models.errors.UnknownVariableError) as e:
-            apis.runtime.package.validate_adapt_and_store_experiment_to_database(ve_psi4, collection, db)
+            metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(ve_psi4, collection, db)
+            apis.runtime.package.validate_parameterised_package(ve=ve_psi4, metadata=metadata)
 
     assert e.value.variable_name == unknown_variable

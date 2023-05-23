@@ -16,11 +16,9 @@ import json
 import os
 import pprint
 import random
-import re
 import string
 import traceback
 from typing import List, Dict, Optional, Any, Tuple
-from typing import Union
 
 import experiment.model.errors
 import experiment.model.frontends.flowir
@@ -684,8 +682,7 @@ class ExperimentFactory:
             if ':' in mountpath:
                 raise ValueError("mountPath \"%s\" of %s contains the illegal character ':'" % (mountpath, volume))
 
-            volumemount_entry = {'name': volume_name, 'mountPath': mountpath}
-            volumemount_entry['readOnly'] = True
+            volumemount_entry = {'name': volume_name, 'mountPath': mountpath, 'readOnly': True}
             for key in ['subPath', 'readOnly']:
                 if key in volume:
                     volumemount_entry[key] = volume[key]
@@ -1089,7 +1086,11 @@ class ExperimentList(Resource):
             download = apis.storage.PackagesDownloader(ve)
             db = utils.database_experiments_open()
 
-            apis.runtime.package.validate_adapt_and_store_experiment_to_database(ve, download, db)
+            metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(ve, download, db)
+            apis.runtime.package.validate_parameterised_package(ve=ve, metadata=metadata)
+            with db:
+                db.push_new_entry(ve)
+
             return {"result": ve.dict()}
         except werkzeug.exceptions.HTTPException:
             raise
@@ -1139,62 +1140,30 @@ class ExperimentDSL(Resource):
 
             ve.parameterisation.get_available_platforms()
 
-            graph: Union[experiment.model.graph.WorkflowGraph, None] = None
-
             if len(ve.base.packages) == 1:
                 download = apis.storage.PackagesDownloader(ve)
 
                 with download:
                     metadata = download.get_metadata(ve.base.packages[0].name)
-                    concrete: experiment.model.frontends.flowir.FlowIRConcrete = metadata.concrete.copy()
-
-                    graph = experiment.model.graph.WorkflowGraph.graphFromFlowIR(
-                        flowir=concrete.raw(), manifest=metadata.manifestData, platform=platform_name,
-                        variable_substitute=False)
+                    manifest = {x: x for x in metadata.top_level_folders}
+                    dsl = apis.models.virtual_experiment.dsl_from_concrete(metadata.concrete, manifest)
             elif len(ve.base.packages) > 1:
                 # VV: FIXME This is a hack, the derived packages currently live on a PVC
-
                 path = os.path.join(
                     apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
                     ve.metadata.package.name,
-                    ve.metadata.registry.digest
-                )
+                    ve.metadata.registry.digest)
                 package = experiment.model.storage.ExperimentPackage.packageFromLocation(
                     path, platform=platform_name, primitive=True, variable_substitute=False)
-                graph = experiment.model.graph.WorkflowGraph.graphFromPackage(
-                    experimentPackage=package,
-                    platform=platform_name,
-                )
+                concrete = package.configuration.get_flowir_concrete()
+                manifest = package.manifestData
+
+                dsl = apis.models.virtual_experiment.dsl_from_concrete(concrete, manifest, concrete.active_platform)
             else:
                 api.abort(400, "Parameterised virtual experiment package does not contain any base packages")
-
-            dsl = graph.to_dsl()
+                raise NotImplementedError()  # keep linter happy
 
             args = self._my_parser.parse_args()
-
-            # VV: Next, we should apply the presets/executionOptions rules to the parameters of the "main" workflow
-            # To this end, we should remove all items from entrypoint.execute[0].args that do not match
-            # param<Number> (those are special - they are references).
-            # Then we should pop in the values of variables in presets/executionOptions
-            ref_param_name = re.compile(r'param[0-9]+')
-            main_args = dsl['entrypoint']['execute'][0]['args']
-
-            updated_args = {
-                name: value for (name, value) in main_args.items() if ref_param_name.fullmatch(name)
-            }
-
-            # VV: re-use the logic that extracts values of variables when launching a virtual experiment
-            package = apis.runtime.package.NamedPackage(
-                ve,
-                apis.models.virtual_experiment.NamespacePresets(),
-                apis.models.virtual_experiment.PayloadExecutionOptions(),
-                apis.runtime.package.PackageExtraOptions()
-            )
-
-            updated_args.update(package.workflow_variables)
-
-            main_args.clear()
-            main_args.update(updated_args)
 
             if args.outputFormat == "yaml":
                 dsl = experiment.model.frontends.flowir.yaml_dump(dsl)
@@ -1208,11 +1177,11 @@ class ExperimentDSL(Resource):
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.ApiError as e:
-            current_app.logger.warning(f"Run into {e} while getting {identifier}. "
+            current_app.logger.warning(f"Run into {e} while generating the DSL of {identifier}. "
                                        f"Traceback: {traceback.format_exc()}")
             api.abort(500, str(e))
         except Exception as e:
-            current_app.logger.warning(f"Run into {e} while getting {identifier}. "
+            current_app.logger.warning(f"Run into {e} while generating the DSL of {identifier}. "
                                        f"Traceback: {traceback.format_exc()}")
             api.abort(500, f"Run into internal error while querying for {identifier}")
 
@@ -1428,7 +1397,7 @@ class ExperimentPackageTag(Resource):
         try:
             with utils.database_experiments_open() as db:
                 db.tag_update(identifier, tags)
-        except apis.models.errors.CannnotRemoveLatestTagError:
+        except apis.models.errors.CannotRemoveLatestTagError:
             api.abort(400, f"Cannot untag the latest tag from {identifier}", cannotUntagLatestFrom=identifier)
         except apis.models.errors.ParameterisedPackageNotFoundError:
             # VV: FIXME other places of the RestAPI are using "Experiment" instead of "ParameterisedPackage"

@@ -18,7 +18,10 @@ from typing import Any
 from typing import Dict
 from typing import List
 from typing import NamedTuple
+from typing import Optional
+from typing import Tuple
 
+import experiment.model.errors
 import experiment.model.frontends.flowir
 import six
 import yaml
@@ -505,13 +508,13 @@ class NamedPackage:
         # VV: finally add in any default variables from `modifiable_variables` - these are variables which COULD be
         # overridden but for which the user decided not to provide a value
         for allow_var in modifiable_variables:
-            if not allow_var.my_contents:
+            if allow_var.value is None and not allow_var.valueFrom:
                 # VV: The developer doesn't care what value users put in here. If they do not specify a value
                 # then the value is whatever the platform specifies
                 continue
             if allow_var.name not in payload_vars:
                 # VV: The default value is the 1st in the entry
-                if allow_var.value:
+                if allow_var.value is not None:
                     ve_vars[allow_var.name] = allow_var.value
                 elif allow_var.valueFrom:
                     ve_vars[allow_var.name] = allow_var.valueFrom[0].value
@@ -611,8 +614,7 @@ class NamedPackage:
                 raise ValueError("mountPath \"%s\" of %s contains the illegal character ':'" % (mountpath, volume))
 
             # VV: Start with some defaults that make sense
-            vm_config = {'name': volume_name, 'mountPath': mountpath}
-            vm_config['readOnly'] = True
+            vm_config = {'name': volume_name, 'mountPath': mountpath, 'readOnly': True}
 
             # VV: Then accept whatever the user put in the payload
             vm_config.update({x: volume_mount_entry[x] for x in volume_mount_entry if x in ['subPath', 'readOnly']})
@@ -1157,7 +1159,6 @@ def get_and_validate_parameterised_package(
     Arguments:
         ve: the parameterised virtual experiment package (PVEP)
         package_metadata_collection: The collection of the package metadata
-        db: The experiment Database. The db must not be open before calling this method.
     """
     parser = apis.models.common.parser_important_elaunch_arguments()
     try:
@@ -1176,14 +1177,17 @@ def get_and_validate_parameterised_package(
             metadata = package_metadata_collection.get_metadata(bp.name)
             concrete = metadata.concrete.copy()
             for p in known_platforms:
-                errors = []
                 try:
                     concrete.configure_platform(p)
-
                     errors = concrete.validate(metadata.top_level_folders)
                 except Exception as e:
-                    logger.warning(f"Unable to validate {bp.name} due to {e}. Traceback: {traceback.format_exc()}")
-                    errors.append(apis.models.errors.ApiError(f"Failed to validate base package {bp.name}"))
+                    errors = [e]
+
+                if len(errors) and all([
+                    isinstance(x, experiment.model.errors.FlowIRPlatformUnknown) for x in errors
+                ]):
+                    logger.warning(f"{bp.name} does not contain platform {p} - will not extract information from it")
+                    continue
 
                 if len(errors):
                     errors = "\n".join([str(x) for x in errors])
@@ -1193,20 +1197,23 @@ def get_and_validate_parameterised_package(
                     raise apis.models.errors.ApiError(msg)
 
 
-def combine_multipackage_parameseterised_package(
+def combine_multipackage_parameterised_package(
         ve: apis.models.virtual_experiment.ParameterisedPackage,
-        package_metadata_collection: apis.storage.PackageMetadataCollection
+        package_metadata_collection: apis.storage.PackageMetadataCollection,
+        path_multipackage: Optional[str] = None,
 ) -> apis.runtime.package_derived.DerivedPackage:
     """Combines the multiple base packages of a PVEP into a single DSL
 
     Arguments:
         ve: The parameterised virtual experiment package
         package_metadata_collection: The collection of the package metadata
+        path_multipackage: (Optional) The directory under which the derived package will be stored when using
+            persistent storage
 
     Returns a apis.runtime.package_derived.DerivedPackage which describes the resulting unified DSL
     """
     if len(ve.base.packages) > 1 and ve.base.connections:
-        derived = apis.runtime.package_derived.DerivedPackage(ve)
+        derived = apis.runtime.package_derived.DerivedPackage(ve, directory_to_place_derived=path_multipackage)
         known_platforms = ve.get_known_platforms() or package_metadata_collection.get_common_platforms()
         derived.synthesize(package_metadata=package_metadata_collection, platforms=known_platforms)
         ve.update_digest()
@@ -1216,7 +1223,7 @@ def combine_multipackage_parameseterised_package(
             msg = "but it has base.connections"
         else:
             msg = "and does not have base.connections"
-        raise apis.models.errors.ApiError(f"Virtual experiments does not contain exactly 1 base package but "
+        raise apis.models.errors.ApiError(f"Virtual experiment does not contain exactly 1 base package but "
                                           f"{len(ve.base.packages)} {msg}")
 
 
@@ -1224,7 +1231,6 @@ def update_registry_metadata_of_parameterised_package(
         ve: apis.models.virtual_experiment.ParameterisedPackage,
         concrete: experiment.model.frontends.flowir.FlowIRConcrete,
         data_files: List[str],
-        platforms: List[str],
 ):
     """Inspects a virtual experiment and updates its .metadata.registry fields to reflect information about the PVEP
 
@@ -1232,8 +1238,6 @@ def update_registry_metadata_of_parameterised_package(
         ve: The parameterised virtual experiment package (PVEP). The PVEP object is updated.
         concrete: The virtual experiment definition
         data_files: A list of files under the `data` directory of the virtual experiment.
-        platforms: The platforms that this PVEP can execute, these must be a subset of the platforms defined
-            in the virtual experiment definition that the PVEP points to
     """
     try:
         merged = apis.models.virtual_experiment.MetadataRegistry \
@@ -1249,7 +1253,8 @@ def update_registry_metadata_of_parameterised_package(
         # VV: Now look at the global variables of all platforms in `concrete` and fill in any missing
         # default values (i.e. values for which there's no mention in ve.parameterisation)
 
-        known_platforms_and_default = list(platforms or [])
+        known_platforms_and_default = list(ve.get_known_platforms() or concrete.platforms)
+
         if experiment.model.frontends.flowir.FlowIR.LabelDefault not in known_platforms_and_default:
             known_platforms_and_default.append('default')
 
@@ -1300,51 +1305,66 @@ def update_registry_metadata_of_parameterised_package(
         raise apis.models.errors.ApiError(f"Unable to extract registry metadata due to unexpected error") from e
 
 
-def validate_adapt_and_store_experiment_to_database(
+def access_and_validate_virtual_experiment_packages(
         ve: apis.models.virtual_experiment.ParameterisedPackage,
-        package_metadata_collection: apis.storage.PackageMetadataCollection,
-        db: apis.db.exp_packages.DatabaseExperiments,
-):
-    """Validates a Parameterised Virtual Experiment Package modifies it (e.g. add createdOn and digest) and persists to
-    database
+        packages: apis.storage.PackageMetadataCollection,
+        path_multipackage: Optional[str] = None,
+) -> apis.models.virtual_experiment.VirtualExperimentMetadata:
+    """Validates a Parameterised Virtual Experiment Package modifies it (e.g. add createdOn and digest)
 
     Notes: ::
 
-        - If PVEP is "derived" method also stores the concretized FlowIR definition on the filesystem.
+        - If PVEP is "derived" method also stores the synthesized standalone directory on persistent storage
 
     Arguments:
         ve: the parameterised virtual experiment package (PVEP)
-        package_metadata_collection: The collection of the package metadata
-        db: The experiment Database
+        packages: The collection of the package metadata
+        path_multipackage: (Optional - only for multi-package PVEPs) Path to store the aggregate virtual experiment
+            that is the result of a Synthesis step following instructions encoded in the multi-package PVEP
+
+    Returns:
+        The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
     """
 
     prepare_parameterised_package_for_download_definition(ve)
 
-    with package_metadata_collection:
-        get_and_validate_parameterised_package(ve, package_metadata_collection)
-
-        known_platforms = ve.get_known_platforms() or package_metadata_collection.get_common_platforms()
+    with packages:
+        get_and_validate_parameterised_package(ve, packages)
 
         if len(ve.base.packages) == 1:
-            concrete = package_metadata_collection.get_concrete_of_package(ve.base.packages[0].name)
-            data_files = package_metadata_collection.get_datafiles_of_package(ve.base.packages[0].name)
+            metadata = packages.get_metadata(ve.base.packages[0].name)
         else:
             # VV: Anything that does not have exactly 1 base package is supposed to be a multi-base package
-            derived = combine_multipackage_parameseterised_package(ve, package_metadata_collection)
+            path_multipackage = path_multipackage or apis.models.constants.ROOT_STORE_DERIVED_PACKAGES
+            derived = combine_multipackage_parameterised_package(ve, packages, path_multipackage=path_multipackage)
 
-            # VV: HACK Store the derived package in the same PVC that contains the virtual experiment
-            # instances till we decide how we will use the derived package instructions to build the
-            # synthesized package.
-            path = os.path.join(
-                apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
-                ve.metadata.package.name, ve.metadata.registry.digest)
+            ve.update_digest()
 
-            derived.persist_to_directory(path, package_metadata_collection)
-            concrete = derived.concrete_synthesized
-            data_files = derived.data_files
+            metadata = apis.runtime.package_derived.DerivedVirtualExperimentMetadata(
+                concrete=derived.concrete_synthesized,
+                manifestData=apis.models.virtual_experiment.manifest_from_parameterised_package(ve),
+                data=derived.data_files,
+                derived=derived
+            )
 
-        update_registry_metadata_of_parameterised_package(
-            ve=ve, concrete=concrete, data_files=data_files, platforms=known_platforms)
+    return metadata
+
+
+def validate_parameterised_package(
+        ve: apis.models.virtual_experiment.ParameterisedPackage,
+        metadata: apis.models.virtual_experiment.VirtualExperimentMetadata,
+):
+    """Validates a Parameterised Virtual Experiment Package and modifies it (e.g. add createdOn and digest)
+
+    Arguments:
+        ve: the parameterised virtual experiment package (PVEP) - updates this in memory
+        metadata: Metadata for the Virtual Experiment that Parameterised Virtual Experiment Package points to
+
+    Returns:
+        The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
+    """
+
+    update_registry_metadata_of_parameterised_package(ve=ve, concrete=metadata.concrete, data_files=metadata.data)
     try:
         logger.info(f"Discovered registry metadata: {ve.metadata.registry}")
         ve.test()
@@ -1358,9 +1378,6 @@ def validate_adapt_and_store_experiment_to_database(
 
         # VV: Generate createdOn timestamp right before adding to Database
         ve.metadata.registry.createdOn = ve.metadata.registry.get_time_now_as_str()
-
-        with db:
-            db.push_new_entry(ve)
     except Exception as e:
         logger.warning(f"Run into {e} while adding parameterised virtual experiment package to database. "
                        f"Traceback: {traceback.format_exc()}")

@@ -1772,6 +1772,34 @@ variables:
 """
 
 
+@pytest.fixture()
+def rel_optimizer_band_gap(
+        ve_modular_optimizer: apis.models.virtual_experiment.ParameterisedPackage,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+) -> apis.models.relationships.Relationship:
+    relationship = {"identifier": "maul-to-band-gap-dft-modular", "transform": {
+        "inputGraph": {"identifier": "optimizer-modular:latest",
+                       "components": ["stage0.Optimizer", "stage0.XYZToGAMESS"]},
+        "outputGraph": {"identifier": "band-gap-dft-gamess-us:latest", "components": ["stage0.XYZToGAMESS"]},
+        "relationship": {"graphParameters": [{"inputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"},
+                                              "outputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"}},
+                                             {"inputGraphParameter": {"name": "stage0.XYZToGAMESS:ref"},
+                                              "outputGraphParameter": {"name": "stage0.SMILESToGAMESSInput:ref"}},
+                                             {"inputGraphParameter": {"name": "data/ref_bnn_ani_checkpoint.pt:ref"},
+                                              "outputGraphParameter": {"name": "data/ref_bnn_ani_checkpoint.pt:ref"}},
+                                             {"inputGraphParameter": {"name": "input/input_molecule.txt:ref"},
+                                              "outputGraphParameter": {
+                                                  "name": "stage0.SetFunctional/input_molecule.txt:ref"}}],
+                         "graphResults": [{"inputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"},
+                                           "outputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"}}]}}}
+    rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(relationship)
+
+    rel.transform.inputGraph.package = ve_modular_optimizer.base.packages[0]
+    rel.transform.outputGraph.package = ve_modular_band_gap_gamess.base.packages[0]
+
+    return rel
+
+
 @pytest.fixture(scope="function")
 def flowir_modular_ani() -> str:
     return """

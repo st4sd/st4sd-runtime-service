@@ -17,8 +17,8 @@ def parser_formatting_relationship_preview() -> flask_restx.reqparse.RequestPars
     arg_parser = flask_restx.reqparse.RequestParser()
     arg_parser.add_argument(
         "dslVersion",
-        choices=["2_0.1.0", "1"],
-        default="2_0.1.0",
+        choices=["2.0.0_0.1.0", "1"],
+        default="2.0.0_0.1.0",
         help='DSL version to return',
         location='args')
     arg_parser.add_argument(

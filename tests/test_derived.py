@@ -83,7 +83,7 @@ def test_extract_graphs_and_metadata(
     # to fix the problems
 
     package = apis.runtime.package_derived.DerivedPackage(derived_ve)
-    graph_meta = package.extract_graphs_and_metadata(
+    graph_meta = package.extract_graphs(
         apis.storage.PackageMetadataCollection({
             'expensive': apis.models.virtual_experiment.StorageMetadata(
                 location=expensive.location, concrete=expensive.configuration.get_flowir_concrete(),

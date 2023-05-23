@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from typing import Dict
 from typing import Any
 from typing import List
 from typing import TYPE_CHECKING
@@ -23,6 +24,12 @@ class ApiError(Exception):
 
     def __str__(self):
         return self.message
+
+
+class InvalidModelError(ApiError):
+    def __init__(self, msg: str, problems: List[Dict[str, Any]]):
+        super().__init__(msg=msg)
+        self.problems = problems
 
 
 class UnknownVariableError(ApiError):
@@ -141,8 +148,14 @@ class ParameterisedPackageNotFoundError(DBError):
             f"Cannot find Parameterised Package \"{identifier}\"")
 
 
-class CannnotRemoveLatestTagError(DBError):
+class CannotRemoveLatestTagError(DBError):
     def __init__(self, identifier: str):
         self.identifier = identifier
-        super(CannnotRemoveLatestTagError, self).__init__(
+        super(CannotRemoveLatestTagError, self).__init__(
             f"Cannot remove the latest tag from Parameterised Package \"{identifier}\"")
+
+
+class RelationshipNotFoundError(DBError):
+    def __init__(self, identifier: str):
+        self.identifier = identifier
+        super().__init__(f"Cannot find relationship {identifier}")

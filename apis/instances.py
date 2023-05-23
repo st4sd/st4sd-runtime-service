@@ -40,7 +40,7 @@ def postprocess_workflow_dictionary(k8s_workflow: DictWorkflow, ve_def: Optional
 
     Args:
          k8s_workflow: A dictionary representation of a Workflow object
-         experiment_dict: The Dictionary definition of a virtual experiment
+         ve_def: The Dictionary definition of a virtual experiment
     """
     if 'status' in k8s_workflow:
         status_plain = copy.deepcopy(k8s_workflow['status'])
@@ -112,15 +112,9 @@ def postprocess_workflow_dictionary(k8s_workflow: DictWorkflow, ve_def: Optional
         status_rest = None
 
     k8s_labels = k8s_workflow.get("metadata", {}).get("labels", {})
-    instance = {
-        "id": k8s_labels.get('rest-uid', k8s_workflow["metadata"]["uid"]),
-        "name": k8s_workflow["metadata"]["name"],
-        "status": status_rest,
-        "outputs": outputfiles,
-        "k8s-labels": k8s_labels,
-    }
-
-    instance["experiment"] = ve_def or {}
+    instance = {"id": k8s_labels.get('rest-uid', k8s_workflow["metadata"]["uid"]),
+                "name": k8s_workflow["metadata"]["name"], "status": status_rest, "outputs": outputfiles,
+                "k8s-labels": k8s_labels, "experiment": ve_def or {}}
 
     return instance
 
@@ -551,7 +545,7 @@ class InstanceStatus(Resource):
         if instance is None:
             api.abort(404, message=f"Workflow instance {id} not found")
 
-        if instance.get('status', None) == None:
+        if instance.get('status', None) is None:
             api.abort(400, message=f"Workflow instance {id} does not have a status yet")
 
         flesh_out_workflow_instance_status(instance)

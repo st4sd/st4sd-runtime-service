@@ -33,16 +33,19 @@ import apis.s3
 class PackageMetadataCollection:
     def __init__(
             self,
-            concrete_and_data: Dict[str, apis.models.virtual_experiment.StorageMetadata] | None = None
+            concrete_and_data: Dict[str, apis.models.virtual_experiment.StorageMetadata] | None = None,
+            ve: apis.models.virtual_experiment.ParameterisedPackage | None = None,
     ):
         self._log = logging.getLogger('Downloader')
-        self._concrete_and_data: Dict[str, apis.models.virtual_experiment.StorageMetadata] = concrete_and_data or {}
+        self._metadata: Dict[str, apis.models.virtual_experiment.StorageMetadata] = concrete_and_data or {}
+        self._ve = ve
         self._entered = 0
+        self._times_entered_total = 0
 
     def get_common_platforms(self) -> List[str]:
         ret: Optional[List[str]] = None
 
-        for name in sorted(self._concrete_and_data):
+        for name in sorted(self._metadata):
             concrete = self.get_concrete_of_package(name)
             platforms = concrete.platforms
             if ret is None:
@@ -52,30 +55,47 @@ class PackageMetadataCollection:
 
         return ret or []
 
+    def update_parameterised_package(self, ve: apis.models.virtual_experiment.ParameterisedPackage | None):
+
+        if self._times_entered_total == 0:
+            self._ve = ve
+        elif self._ve != ve:
+            old_ve = self._ve.metadata.package.name if self._ve is not None else "*none*"
+            new_ve = ve.metadata.package.name if ve is not None else "*none*"
+            self._ve = ve
+            self._log.warning(f"Changing ve from {old_ve} to {new_ve}")
+
+    def get_parameterised_package(self) -> apis.models.virtual_experiment.ParameterisedPackage | None:
+        return self._ve
+
     def get_all_package_metadata(self) -> Dict[str, apis.models.virtual_experiment.StorageMetadata]:
-        return self._concrete_and_data
+        return self._metadata
 
     def get_root_directory_containing_package(self, name: str) -> str:
-        return self._concrete_and_data[name].rootDirectory
+        return self._metadata[name].rootDirectory
 
     def get_location_of_package(self, name: str) -> str:
         # VV: Ensure package exists
-        return self._concrete_and_data[name].location
+        return self._metadata[name].location
 
     def get_manifest_data_of_package(self, name: str) -> experiment.model.frontends.flowir.DictManifest:
-        return copy.deepcopy(self._concrete_and_data[name].manifestData)
+        return copy.deepcopy(self._metadata[name].manifestData)
 
     def get_concrete_of_package(self, name: str) -> experiment.model.frontends.flowir.FlowIRConcrete:
-        return self._concrete_and_data[name].concrete.copy()
+        return self._metadata[name].concrete.copy()
 
     def get_datafiles_of_package(self, name: str) -> List[str]:
-        return list(self._concrete_and_data[name].data)
+        return list(self._metadata[name].data)
 
     def get_metadata(self, name: str) -> apis.models.virtual_experiment.StorageMetadata:
-        return self._concrete_and_data[name]
+        return self._metadata[name]
+
+    def upsert_metadata(self, name: str, metadata: apis.models.virtual_experiment.StorageMetadata):
+        self._metadata[name] = metadata
 
     def __enter__(self):
         self._entered += 1
+        self._times_entered_total += 1
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -86,13 +106,17 @@ class PackageMetadataCollection:
 class PackagesDownloader(PackageMetadataCollection):
     def __init__(
             self,
-            ve: apis.models.virtual_experiment.ParameterisedPackage,
+            ve: apis.models.virtual_experiment.ParameterisedPackage | None,
             prefix_dir: str | None = None,
             already_downloaded_to: str | None = None
     ):
-        super(PackagesDownloader, self).__init__()
+        """Downloads base packages of a parameterised package
+
+        Args:
+             ve: the parameterised package that owns the base packages
+        """
+        super(PackagesDownloader, self).__init__(ve=ve)
         self._prefix_dir = prefix_dir or "/tmp"
-        self._ve = ve
         self._temp_dir: tempfile.TemporaryDirectory | None = None
         self._already_downloaded_to = already_downloaded_to
 
@@ -200,7 +224,7 @@ class PackagesDownloader(PackageMetadataCollection):
         conc_data = apis.models.virtual_experiment.StorageMetadata.from_config(
             package.config, platform, download_path)
 
-        self._concrete_and_data[package.name] = conc_data
+        self._metadata[package.name] = conc_data
 
     def _root_directory(self) -> str | None:
         if self._temp_dir:

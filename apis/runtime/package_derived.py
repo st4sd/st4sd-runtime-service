@@ -31,6 +31,10 @@ import apis.models.virtual_experiment
 import apis.storage
 
 
+class DerivedVirtualExperimentMetadata(apis.models.virtual_experiment.VirtualExperimentMetadata):
+    derived: DerivedPackage
+
+
 class PackageConflictMetadata(apis.models.common.Digestable):
     name: str
     value: Any  # ellipsis indicates that there is no value
@@ -41,12 +45,6 @@ class _book(pydantic.BaseModel):
     package: str
     value: Any
 
-
-def extract_top_level_directory(path: str) -> str:
-    if '/' in path:
-        return path.split('/', 1)[0]
-
-    return path
 
 
 class PackageConflict(apis.models.common.Digestable):
@@ -78,7 +76,7 @@ class PackageConflict(apis.models.common.Digestable):
             return tuple(_book(package=x, value=get_key_or_ellipsis(objects[x]), location=location) for x in objects)
 
         def is_primitive(x: Any) -> bool:
-            return x is None or x == ... or isinstance(x, (bool, int, float) + six.string_types)
+            return x is None or x is ... or isinstance(x, (bool, int, float) + six.string_types)
 
         remaining = [
             tuple(_book(package=x, value=packages[x], location=[]) for x in packages)
@@ -200,6 +198,9 @@ class DerivedPackage:
 
         self._log = logging.getLogger("Derive")
 
+    def get_parameterised_package(self) -> apis.models.virtual_experiment.ParameterisedPackage:
+        return self._ve
+
     @property
     def data_files(self) -> List[str]:
         return list(self._data_files)
@@ -295,7 +296,7 @@ class DerivedPackage:
 
         return ret
 
-    def extract_graphs_and_metadata(
+    def extract_graphs(
             self,
             package_metadata: apis.storage.PackageMetadataCollection,
             platforms: List[str] | None
@@ -565,7 +566,7 @@ class DerivedPackage:
             raise apis.models.errors.ApiError("Missing list of platforms for which to synthesize the derived package")
 
         self._log.info(f"Synthesizing parameterised virtual experiment package for Derived (platforms: {platforms})")
-        graphs_meta = self.extract_graphs_and_metadata(package_metadata, platforms)
+        graphs_meta = self.extract_graphs(package_metadata, platforms)
 
         self._log.info(f"Extracted graphsMetadata: {graphs_meta.dict()}")
 
@@ -592,7 +593,8 @@ class DerivedPackage:
         blueprints = graphs_meta.aggregate_blueprints.dict(exclude_none=True)['platforms']
         variables = graphs_meta.aggregate_variables.dict(exclude_none=True)['platforms']
 
-        top_level_directories = sorted({extract_top_level_directory(x.dest.path) for x in self._ve.base.includePaths})
+        top_level_directories = sorted({apis.models.virtual_experiment.extract_top_level_directory(x.dest.path)
+                                        for x in self._ve.base.includePaths})
 
         output = self.synthesize_output()
 
@@ -684,3 +686,7 @@ class DerivedPackage:
 
         with open(os.path.join(conf_path, 'flowir_package.yaml'), 'w') as f:
             experiment.model.frontends.flowir.yaml_dump(pretty_flowir, f)
+
+
+# VV: This is so that DerivedVirtualExperimentMetadata can contain DerivedPackage
+DerivedVirtualExperimentMetadata.update_forward_refs()
