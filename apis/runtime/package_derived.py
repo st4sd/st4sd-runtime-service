@@ -559,9 +559,6 @@ class DerivedPackage:
         #   5. aggregate blueprints (with conflicts resolved - see step 2 for info regarding conflicts)
         #   6. aggregate variables (with conflicts resolved - see step 2 for info regarding conflicts)
 
-        if platforms is None:
-            platforms = package_metadata.get_common_platforms()
-
         if not platforms:
             raise apis.models.errors.ApiError("Missing list of platforms for which to synthesize the derived package")
 

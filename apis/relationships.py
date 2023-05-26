@@ -99,13 +99,8 @@ class Relationships(Resource):
         doc = request.get_json()
 
         try:
-            rel = apis.models.relationships.Relationship.parse_obj(doc)
-        except pydantic.error_wrappers.ValidationError as e:
-            raise apis.models.errors.InvalidModelError("Relationship is invalid", problems=e.errors())
-
-        try:
             rel = apis.kernel.relationships.api_push_relationship(
-                rel=rel,
+                rel=doc,
                 db_relationships=utils.database_relationships_open(),
                 db_experiments=utils.database_experiments_open(),
                 packages=apis.storage.PackagesDownloader(ve=None),
@@ -116,8 +111,12 @@ class Relationships(Resource):
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.InvalidModelError as e:
+            current_app.logger.warning(f"Run into {e} while registering relationship. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(400, e.message, problems=e.problems)
         except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while registering relationship. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(400, f"Invalid relationship", problem=str(e))
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while registering relationship. "
@@ -165,8 +164,12 @@ class TransformDSLPreview(Resource):
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.RelationshipNotFoundError as e:
+            current_app.logger.warning(f"Run into {e} while previewing synthesis from {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(404, e.message, relationshipNotFound=e.identifier)
         except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while previewing synthesis from {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(400, f"Invalid payload, reason: {str(e)}", problem=str(e))
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while previewing the synthesized parameterised "
@@ -205,12 +208,20 @@ class TransformSynthesize(Resource):
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.RelationshipNotFoundError as e:
+            current_app.logger.warning(f"Run into {e} while retrieving synthesizing {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(404, e.message, relationshipNotFound=e.identifier)
         except apis.models.errors.ParameterisedPackageNotFoundError as e:
+            current_app.logger.warning(f"Run into {e} while retrieving synthesizing {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(404, e.message, parameterisedPackageNotFound=e.identifier)
         except apis.models.errors.InvalidModelError as e:
+            current_app.logger.warning(f"Run into {e} while retrieving synthesizing {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(400, e.message, problems=e.problems)
         except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while retrieving synthesizing {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(400, e.message)
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while synthesizing parameterised virtual experiment package "

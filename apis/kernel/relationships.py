@@ -23,6 +23,7 @@ import apis.models.common
 import apis.models.query_relationship
 import apis.models.relationships
 import apis.models.virtual_experiment
+import apis.kernel.experiments
 import apis.runtime.package
 import apis.runtime.package_derived
 import apis.runtime.package_transform
@@ -183,28 +184,46 @@ def synthesize_from_transformation(
         A MetadataAndParameterisedPackage containing the VirtualExperimentMetadata (dsl, manifestdata, etc) and the
         auto-generated PVEP wrapper
     """
+    target_parameterisation: Optional[apis.models.virtual_experiment.Parameterisation] = None
+
     with db_experiments:
         docs = db_experiments.query_identifier(rel.transform.outputGraph.identifier)
-        if len(docs) == 0:
-            raise apis.models.errors.ParameterisedPackageNotFoundError(rel.transform.outputGraph.identifier)
-
-        try:
-            pvep_target = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
-        except pydantic.error_wrappers.ValidationError as e:
-            raise apis.models.errors.InvalidModelError(
-                f"outputGraph {rel.transform.outputGraph.identifier} is invalid", problems=e.errors())
+        if len(docs) == 1:
+            try:
+                target = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+                target_parameterisation = target.parameterisation
+            except pydantic.error_wrappers.ValidationError as e:
+                raise apis.models.errors.InvalidModelError(
+                    f"outputGraph {rel.transform.outputGraph.identifier} is invalid", problems=e.errors())
 
     transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
 
     # VV: If the payload does not set platform settings then copy them from the target
-    if synthesize.parameterisation.get_available_platforms() is None:
-        synthesize.parameterisation.presets.platform = pvep_target.parameterisation.presets.platform
-        synthesize.parameterisation.executionOptions.platform = pvep_target.parameterisation.executionOptions.platform
+    if synthesize.parameterisation.get_available_platforms() is None and target_parameterisation:
+        synthesize.parameterisation.presets.platform = target_parameterisation.presets.platform
+        synthesize.parameterisation.executionOptions.platform = target_parameterisation.executionOptions.platform
 
     ve = transform.prepare_derived_package(new_package_name, synthesize.parameterisation)
     packages.update_parameterised_package(ve)
 
     with packages:
+        # VV: Here we figure out which platforms we should include in the derived package
+        # 1. those in the synthesize payload, if missing
+        # 2. those in the target parameterisation, if missing
+        # 3. those defined in the target DSL 1.0
+
+        platforms = synthesize.parameterisation.get_available_platforms()
+
+        if not platforms:
+            if not platforms and target_parameterisation:
+                platforms = target_parameterisation.get_available_platforms()
+
+            if not platforms:
+                platforms = packages.get_concrete_of_package(rel.transform.outputGraph.identifier).platforms
+
+            synthesize.parameterisation.executionOptions.platform = platforms
+
+        ve.parameterisation = synthesize.parameterisation
         transform.synthesize_derived_package(packages, ve)
 
         metadata: apis.runtime.package_derived.DerivedVirtualExperimentMetadata = \
@@ -220,7 +239,7 @@ def synthesize_from_transformation(
 
         if synthesize.options.generateParameterisation:
             param_outputgraph = parameterisation_of_synthesized_from_outputgraph(
-                metadata.concrete, pvep_target.parameterisation)
+                metadata.concrete, target_parameterisation or apis.models.virtual_experiment.Parameterisation())
 
             # VV: Layering order (i-th is overriden by i+1 th)
             # 1. auto-generated (from the DSL of the synthesized virtual experiment)
@@ -275,6 +294,60 @@ def preview_synthesize_dsl(
     )
 
     return DSLAndPackage(dsl=dsl, package=metadata.package)
+
+
+def resolve_base_package(
+        name: str,
+        kind: str,
+        db_experiments: apis.db.exp_packages.DatabaseExperiments
+) -> apis.models.virtual_experiment.BasePackage:
+    try:
+        query = apis.kernel.experiments.api_get_experiment(name, db_experiments)
+    except apis.models.errors.InvalidModelError as e:
+        raise apis.models.errors.InvalidModelError(
+            f"The {kind} parameterised virtual experiment package {name} is invalid", e.problems)
+
+    if len(query.experiment.base.packages) != 1:
+        raise apis.models.errors.ApiError(
+            f"{kind} must point to a parameterised virtual experiment package with exactly 1 base package, "
+            f"however it points to a package with {len(query.experiment.base.packages)} base packages")
+    return query.experiment.base.packages[0]
+
+
+def push_relationship(
+        rel: apis.models.relationships.Relationship,
+        db_relationships: apis.db.relationships.DatabaseRelationships,
+        db_experiments: apis.db.exp_packages.DatabaseExperiments,
+        packages: apis.storage.PackageMetadataCollection,
+) -> apis.models.relationships.Relationship:
+    """Enhance the relationship and then store it in the database
+
+    Args:
+        rel: A relationship
+        db_relationships: The database to store the relationship in
+        db_experiments: The database containing the parameterised virtual experiment packages that the relationship
+            references
+        packages: The collection of the package metadata (DSL 1.0, manifest, etc) of the underlying base packages
+    """
+
+    if rel.transform.inputGraph.package is None:
+        identifier = rel.transform.inputGraph.identifier
+        rel.transform.inputGraph.package = resolve_base_package(identifier, "inputGraph", db_experiments)
+
+    if rel.transform.outputGraph.package is None:
+        identifier = rel.transform.outputGraph.identifier
+        rel.transform.outputGraph.package = resolve_base_package(identifier, "outputGraph", db_experiments)
+
+    _ = preview_synthesize_dsl(
+        rel=rel,
+        packages=packages,
+        db_experiments=db_experiments,
+    )
+
+    with db_relationships:
+        db_relationships.upsert(rel.dict(exclude_none=False), ql=db_relationships.construct_query(rel.identifier))
+
+    return rel
 
 
 ########### apis
@@ -362,7 +435,7 @@ def api_synthesize_from_transformation(
 
 
 def api_push_relationship(
-        rel: apis.models.relationships.Relationship,
+        rel: Dict[str, Any],
         db_relationships: apis.db.relationships.DatabaseRelationships,
         db_experiments: apis.db.exp_packages.DatabaseExperiments,
         packages: apis.storage.PackageMetadataCollection,
@@ -376,13 +449,15 @@ def api_push_relationship(
             references
         packages: The collection of the package metadata (DSL 1.0, manifest, etc) of the underlying base packages
     """
-    _ = preview_synthesize_dsl(
+
+    try:
+        rel = apis.models.relationships.Relationship.parse_obj(rel)
+    except pydantic.error_wrappers.ValidationError as e:
+        raise apis.models.errors.InvalidModelError(f"Relationship is invalid", e.errors())
+
+    return push_relationship(
         rel=rel,
-        packages=packages,
+        db_relationships=db_relationships,
         db_experiments=db_experiments,
+        packages=packages
     )
-
-    with db_relationships:
-        db_relationships.upsert(rel.dict(exclude_none=False), ql=db_relationships.construct_query(rel.identifier))
-
-    return rel

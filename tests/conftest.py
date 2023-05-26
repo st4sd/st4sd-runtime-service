@@ -31,6 +31,11 @@ logging.basicConfig(format=FORMAT)
 rootLogger = logging.getLogger()
 
 
+def pytest_addoption(parser):
+    parser.addoption('--real-packages', action='store_true', dest="real_packages",
+                     default=False, help="Enable tests that involve real packages")
+
+
 @pytest.fixture()
 def flowir_psi4() -> str:
     return """
@@ -1952,9 +1957,67 @@ variables:
 """
 
 
+@pytest.fixture()
+def flowir_simple_foundation() -> str:
+    return """
+components:
+  - name: generate-inputs
+    command:
+      executable: echo
+      arguments: input
+  - name: simulation
+    command: 
+      executable: echo
+      arguments: slow simulation
+    references:
+    - stage0.generate-inputs:output
+  - name: analysis
+    command: 
+      executable: echo
+      arguments: Analyze the outputs of simulation:output
+    references:
+    - "simulation:output"
+"""
+
+
+@pytest.fixture()
+def flowir_simple_surrogate() -> str:
+    return """
+components:
+  - name: generate-inputs
+    command:
+      executable: echo
+      arguments: input
+  - name: simulation
+    command: 
+      executable: echo
+      arguments: fast simulation of stage0.generate-inputs:output
+    references:
+    - stage0.generate-inputs:output
+"""
+
+
+@pytest.fixture()
+def rel_simple_relationship() -> Dict[str, Any]:
+    return {
+        "identifier": "simple",
+        "description": "Replaces a slow simulation with a fast one",
+        "transform": {
+            "inputGraph": {
+                "identifier": "simple-fast",
+                "components": ["stage0.simulation"]
+            },
+            "outputGraph": {
+                "identifier": "simple-slow",
+                "components": ["stage0.simulation"]
+            }
+        }
+    }
+
+
 @pytest.fixture(scope="function")
 def derived_ve_gamess_homo_dft_ani():
-    package = definition = {
+    package = {
         "metadata": {
             "package": {
                 "name": "homolumo-ani-surrogate",
@@ -3125,6 +3188,36 @@ def homolumogamess_ani_package_metadata(
         'configuration-generator-ani-gamess:latest': StorageMetadata.from_config(
             apis.models.virtual_experiment.BasePackageConfig(
                 path="ani-surrogate.yaml", manifestPath="manifest.yaml"), prefix_paths=surrogate_location
+        )
+    })
+
+    return packages_metadata
+
+
+@pytest.fixture()
+def package_metadata_simple(
+        flowir_simple_surrogate,
+        flowir_simple_foundation,
+        output_dir: str,
+) -> apis.storage.PackageMetadataCollection:
+    expensive_location = package_from_files(
+        location=os.path.join(output_dir, "foundation"),
+        files={'conf/flowir_package.yaml': flowir_simple_foundation}
+    )
+
+    surrogate_location = package_from_files(
+        location=os.path.join(output_dir, "surrogate"),
+        files={'conf/flowir_package.yaml': flowir_simple_surrogate}
+    )
+
+    StorageMetadata = apis.models.virtual_experiment.StorageMetadata
+
+    packages_metadata = apis.storage.PackageMetadataCollection({
+        'simple-slow:latest': StorageMetadata.from_config(
+            prefix_paths=expensive_location, config=apis.models.virtual_experiment.BasePackageConfig(),
+        ),
+        'simple-fast:latest': StorageMetadata.from_config(
+            prefix_paths=surrogate_location, config=apis.models.virtual_experiment.BasePackageConfig(),
         )
     })
 

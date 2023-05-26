@@ -270,7 +270,7 @@ def test_psi4_surrogate_neural_potential_persist(
     dir_persist = os.path.join(output_dir, "persist")
     package = apis.runtime.package_derived.DerivedPackage(
         derived_ve, directory_to_place_derived=output_dir)
-    package.synthesize(package_metadata=packages_metadata, platforms=None)
+    package.synthesize(package_metadata=packages_metadata, platforms=ve_psi4.get_known_platforms())
     package.persist_to_directory(dir_persist, packages_metadata)
 
     # VV: Ensure paths exist
@@ -357,7 +357,7 @@ def test_modular_ani_band_gap_gamess_persist(
         relationship: Dict[str, Any],
         output_dir: str,
 ):
-    packages_metadata = package_metadata_modular_ani_band_gap_gamess
+    packages = package_metadata_modular_ani_band_gap_gamess
 
     rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(relationship)
 
@@ -370,14 +370,15 @@ def test_modular_ani_band_gap_gamess_persist(
 
     derived_ve = transform.prepare_derived_package(
         "hello", parameterisation=apis.models.virtual_experiment.Parameterisation())
-    transform.synthesize_derived_package(packages_metadata, derived_ve)
+    transform.synthesize_derived_package(packages, derived_ve)
     logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
 
     dir_persist = os.path.join(output_dir, "persist")
+    platforms = packages.get_concrete_of_package("band-gap-dft-gamess-us:latest").platforms
     package = apis.runtime.package_derived.DerivedPackage(
         derived_ve, directory_to_place_derived=output_dir)
-    package.synthesize(package_metadata=packages_metadata, platforms=None)
-    package.persist_to_directory(dir_persist, packages_metadata)
+    package.synthesize(package_metadata=packages, platforms=platforms)
+    package.persist_to_directory(dir_persist, packages)
 
     # VV: Ensure paths exist
     open(os.path.join(dir_persist, "conf", "flowir_package.yaml")).close()
@@ -398,7 +399,7 @@ def test_modular_optimizer_band_gap_reference_data(
         rel_optimizer_band_gap: apis.models.relationships.Relationship,
         output_dir: str,
 ):
-    packages_metadata = package_metadata_modular_optimizer_band_gap_gamess
+    packages = package_metadata_modular_optimizer_band_gap_gamess
     rel = rel_optimizer_band_gap
     logger.info(f"Relationship: {rel.json(exclude_none=True, exclude_unset=True, indent=2)}")
 
@@ -406,14 +407,15 @@ def test_modular_optimizer_band_gap_reference_data(
 
     derived_ve = transform.prepare_derived_package(
         "hello", parameterisation=apis.models.virtual_experiment.Parameterisation())
-    transform.synthesize_derived_package(packages_metadata, derived_ve)
+    transform.synthesize_derived_package(packages, derived_ve)
     logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
 
     dir_persist = os.path.join(output_dir, "persist")
+    platforms = packages.get_concrete_of_package("band-gap-dft-gamess-us:latest").platforms
     package = apis.runtime.package_derived.DerivedPackage(
         derived_ve, directory_to_place_derived=output_dir)
-    package.synthesize(package_metadata=packages_metadata, platforms=None)
-    package.persist_to_directory(dir_persist, packages_metadata)
+    package.synthesize(package_metadata=packages, platforms=platforms)
+    package.persist_to_directory(dir_persist, packages)
 
     # VV: Ensure paths exist
     open(os.path.join(dir_persist, "conf", "flowir_package.yaml")).close()
@@ -436,13 +438,21 @@ def test_generate_parameterisation_for_derived_from_optimizer_and_bandgap(
         ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
         output_dir: str,
 ):
-    packages = package_metadata_modular_optimizer_band_gap_gamess
-    rel = rel_optimizer_band_gap
-    derived = apis.kernel.relationships.synthesize_ve_from_transformation(
-        rel.transform, packages, parameterisation=ve_modular_band_gap_gamess.parameterisation)
+    synthesize = apis.models.relationships.PayloadSynthesize()
 
-    parameterisation = apis.models.virtual_experiment.parameterisation_from_flowir(derived.concrete_synthesized)
-    all_vars = apis.models.virtual_experiment.characterize_variables(derived.concrete_synthesized)
+    # synthesize.parameterisation.executionOptions.platform = ['default', 'openshift', 'makis']
+
+    metadata = apis.kernel.relationships.synthesize_from_transformation(
+        rel=rel_optimizer_band_gap,
+        new_package_name="synthetic",
+        packages=package_metadata_modular_optimizer_band_gap_gamess,
+        db_experiments=apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "empty-database.txt")),
+        synthesize=synthesize,
+        update_experiments_database=False,
+        path_multipackage=None)
+
+    parameterisation = apis.models.virtual_experiment.parameterisation_from_flowir(metadata.metadata.concrete)
+    all_vars = apis.models.virtual_experiment.characterize_variables(metadata.metadata.concrete)
 
     assert all_vars.multipleValues == {"backend"}
 
@@ -599,3 +609,43 @@ def test_transformation_push_and_then_synthesize(
     )
 
     validate_band_gap_optimizer_dsl_args(preview.dsl, preview.package, ve_modular_band_gap_gamess)
+
+
+def test_simple_relationship(
+        ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage,
+        package_metadata_simple: apis.storage.PackageMetadataCollection,
+        rel_simple_relationship: Dict[str, Any],
+        output_dir: str,
+):
+    rel = apis.models.relationships.Relationship.parse_obj(rel_simple_relationship)
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "experiments.txt"))
+    db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationship.txt"))
+
+    ve_fake_slow = ve_sum_numbers.copy(deep=True)
+    ve_fake_slow.metadata.package.name = "simple-slow"
+
+    ve_fake_fast = ve_sum_numbers.copy(deep=True)
+    ve_fake_fast.metadata.package.name = "simple-fast"
+
+    with db_experiments:
+        db_experiments.push_new_entry(ve_fake_slow)
+        db_experiments.push_new_entry(ve_fake_fast)
+
+    rel = apis.kernel.relationships.push_relationship(
+        rel=rel,
+        db_relationships=db_relationships,
+        db_experiments=db_experiments,
+        packages=package_metadata_simple)
+
+    logger.info(f"Updated relationship: {rel.json(indent=2)}")
+
+    # VV: The 1-outputGraph components consume 1 component from outputGraph
+    assert len(rel.transform.relationship.graphResults) == 1
+    assert rel.transform.relationship.graphResults[0].inputGraphResult.name == "stage0.simulation:ref"
+    assert rel.transform.relationship.graphResults[0].outputGraphResult.name == "stage0.simulation:ref"
+
+    # VV: The inputGraph components consume 1 component from 1-outputGraph
+    assert len(rel.transform.relationship.graphParameters) == 1
+    assert rel.transform.relationship.graphParameters[0].inputGraphParameter.name == "stage0.generate-inputs:output"
+    assert rel.transform.relationship.graphParameters[0].outputGraphParameter.name == "stage0.generate-inputs:output"

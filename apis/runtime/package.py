@@ -1214,8 +1214,7 @@ def combine_multipackage_parameterised_package(
     """
     if len(ve.base.packages) > 1 and ve.base.connections:
         derived = apis.runtime.package_derived.DerivedPackage(ve, directory_to_place_derived=path_multipackage)
-        known_platforms = ve.get_known_platforms() or package_metadata_collection.get_common_platforms()
-        derived.synthesize(package_metadata=package_metadata_collection, platforms=known_platforms)
+        derived.synthesize(package_metadata=package_metadata_collection, platforms=ve.get_known_platforms())
         ve.update_digest()
         return derived
     elif len(ve.base.packages) != 1:

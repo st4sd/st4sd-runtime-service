@@ -11,6 +11,7 @@ import pprint
 from typing import Any
 from typing import Dict
 from typing import List
+from typing import NamedTuple
 
 import pydantic.error_wrappers
 
@@ -29,6 +30,11 @@ class FormatOptions(apis.models.common.Digestable):
     hideMetadataRegistry: str
     hideNone: str
     hideBeta: str
+
+
+class ParameterisedPackageAndProblems(NamedTuple):
+    experiment: apis.models.virtual_experiment.ParameterisedPackage
+    problems: List[Dict[str, Any]]
 
 
 # VV: TODO Refactor code to organize codes that APIs call so that the HTTP codes are just a proxy to methods
@@ -160,3 +166,38 @@ def api_list_queries(request: Dict[str, Any], format_options: FormatOptions):
         docs = api_query_experiments(query=query, db_experiments=db_experiments, db_relationships=db_relationships)
 
     return format_documents(docs, format_options)
+
+
+def api_get_experiment(
+        identifier: str,
+        db_experiment: apis.db.exp_packages.DatabaseExperiments,
+        try_drop_unknown: bool = True,
+) -> ParameterisedPackageAndProblems:
+    identifier = apis.models.common.PackageIdentifier(identifier).identifier
+
+    with db_experiment:
+        docs = db_experiment.query_identifier(identifier)
+
+    if len(docs) == 0:
+        raise apis.models.errors.ParameterisedPackageNotFoundError(identifier)
+
+    problems = []
+
+    try:
+        ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+    except pydantic.error_wrappers.ValidationError as e:
+        problems = e.errors()
+
+        try:
+            if try_drop_unknown:
+                ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
+                    .parse_obj(docs[0])
+            else:
+                raise apis.models.errors.InvalidModelError(
+                    f"Parameterised virtual experiment package {identifier} is invalid", problems)
+        except pydantic.ValidationError:
+            # VV: We cannot auto-upgrade the package, just return the original problems so that the devs fix everything
+            raise apis.models.errors.InvalidModelError(
+                f"Parameterised virtual experiment package {identifier} is invalid", problems)
+
+    return ParameterisedPackageAndProblems(experiment=ve, problems=problems)

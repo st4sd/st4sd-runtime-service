@@ -181,7 +181,8 @@ class PackagesDownloader(PackageMetadataCollection):
             package.source.git.version = commit_id
 
         if security is None or len(security.dict(exclude_none=True)) == 0:
-            oauth_token = apis.k8s.extract_git_oauth_token_default()
+            # oauth_token = apis.k8s.extract_git_oauth_token_default()
+            oauth_token = None
             return download_with_token_and_extract_commit_id(oauth_token)
         elif security.oauth is not None and security.oauth.valueFrom.secretKeyRef:
             secret = security.oauth.valueFrom.secretKeyRef

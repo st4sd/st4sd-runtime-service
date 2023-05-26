@@ -38,6 +38,7 @@ import apis.image_pull_secrets
 import apis.instances
 import apis.k8s
 import apis.kernel.flask_utils
+import apis.kernel.experiments
 import apis.models
 import apis.models.common
 import apis.models.constants
@@ -1200,30 +1201,22 @@ class Experiment(Resource):
         '''Fetch an experiment given its identifier'''
 
         try:
-            # VV: If identifier has neither @ or : it rewrites it to "${identifier}:latest}
-            identifier = apis.models.common.PackageIdentifier(identifier).identifier
-
-            with utils.database_experiments_open() as db:
-                docs = db.query_identifier(identifier)
-
-                if len(docs) == 0:
-                    api.abort(404, message=f"There is no entry in the experiment registry "
-                                           f"that matches {identifier}")
-
-                try:
-                    ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
-                        .parse_obj(docs[0])
-                    problems = []
-                except pydantic.error_wrappers.ValidationError as e:
-                    ve = docs[0]
-                    problems = e.errors()
+            ret = apis.kernel.experiments.api_get_experiment(identifier, utils.database_experiments_open())
 
             return {
-                'entry': do_format_parameterised_package(ve, self._my_parser),
-                'problems': problems,
+                'entry': do_format_parameterised_package(ret.experiment, self._my_parser),
+                'problems': ret.problems,
             }
         except werkzeug.exceptions.HTTPException:
             raise
+        except apis.models.errors.InvalidModelError as e:
+            current_app.logger.warning(f"Run into {e} while getting {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(400, e.message, problems=e.problems)
+        except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while getting {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(400, e.message)
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while getting {identifier}. "
                                        f"Traceback: {traceback.format_exc()}")

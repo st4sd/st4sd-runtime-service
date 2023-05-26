@@ -163,6 +163,7 @@ class TransformRelationship:
                            f"candidates were {foundation_params}, surrogate file reference was "
                            f"{surrogate_pathref}")
 
+
     def _infer_relationship_identical_parameter_names(
             self,
             packages_metadata: apis.storage.PackageMetadataCollection,
@@ -265,8 +266,6 @@ class TransformRelationship:
         # - If there is a parameter in the outputGraph referencing a component that the transformation removes, AND
         # - there is no graphResult mapping for this parameter, AND
         # - there is a component in the inputGraph with the same name, THEN
-        # Generate a graphResults mapping between the 2 components - we could just use graphParameters here.
-        # In the upcoming refresh of the schema we should get rid of the graphResults field completely
 
         known_mappings = set()
         for m in transform.relationship.graphResults:
@@ -279,22 +278,23 @@ class TransformRelationship:
         for x in transform.relationship.graphResults:
             all_graph_output_results.add(x.outputGraphResult.name)
 
+        self._log.info(f"Foundation components are: {cids_found} known graphResults are {all_graph_output_results}")
+
         for cid in cids_found:
-            comp_id = experiment.model.graph.ComponentIdentifier(cid[1], cid[0])
-
-            if comp_id.identifier in transform.outputGraph.components:
-                print(cid)
-                continue
-
             # VV: This component will stick around after the transformation. Let's check its parameters, and apply the
             # logic above to generate a new graphResults entry
             comp = concrete_found.get_component(cid)
             params = get_parameters_of_component(comp)
 
+            # VV: Don't generate graphResults to satisfy parameters of components that the transformation removes
+            comp_id = experiment.model.graph.ComponentIdentifier(cid[1], cid[0])
+            if comp_id.identifier in transform.outputGraph.components:
+                continue
+
             for p in params:
                 dref = apis.models.from_core.DataReference(p)
-                if dref.externalProducerName or \
-                        (dref.producerIdentifier.identifier in transform.outputGraph.components):
+
+                if dref.externalProducerName:
                     continue
 
                 for cs in transform.inputGraph.components:
@@ -302,11 +302,18 @@ class TransformRelationship:
                     cref = apis.models.from_core.DataReference.from_parts(stage, name, "", "ref")
 
                     if references_cmp(cref.absoluteReference, dref.absoluteReference) > 0:
+                        # VV: Rewrite the outputGraph reference so that it points to the entire Component
+                        # this way we can satisfy all references to this component with just 1 graphResults
+                        dref = apis.models.from_core.DataReference(
+                            experiment.model.frontends.flowir.FlowIR.compile_reference(
+                                dref.producerName, filename=None, method="ref", stage_index=dref.stageIndex)
+                        )
                         self._log.info(
                             f"   Matching graphResult {dref.absoluteReference} with "
                             f"{cref.absoluteReference} on pathRef= {dref.pathRef}")
+
                         if dref.absoluteReference not in all_graph_output_results:
-                            all_graph_input_parameters.add(dref.absoluteReference)
+                            all_graph_output_results.add(dref.absoluteReference)
 
                             rel = apis.models.relationships.RelationshipResults(
                                 outputGraphResult=apis.models.relationships.GraphValue(name=dref.absoluteReference),
@@ -367,6 +374,9 @@ class TransformRelationship:
                 ':'.join((cid_foundation.identifier, 'ref'))).absoluteReference
             name_surrogate = apis.models.from_core.DataReference(
                 ':'.join((cid_surrogate.identifier, 'ref'))).absoluteReference
+
+            self._log.info(f"Identified single component in both graphs and generating graphResults for "
+                           f"{name_foundation} -> {name_surrogate}")
             rel = apis.models.relationships.RelationshipResults(
                 outputGraphResult=apis.models.relationships.GraphValue(name=name_foundation),
                 inputGraphResult=apis.models.relationships.GraphValue(name=name_surrogate)
@@ -522,11 +532,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             apis.models.virtual_experiment.BasePackageGraphNode(reference=x) for x in all_comp_ids
         ]
 
-    def _populate_graph_bindings(
-            self,
-            graph: apis.models.virtual_experiment.BasePackageGraph,
-            is_foundation: bool
-    ):
+    def _populate_graph_bindings_for_foundation(self, graph: apis.models.virtual_experiment.BasePackageGraph):
         """Adds graphBindings to connect the components in the Foundation to those in the Surrogate
 
         The Foundation is the parameterised virtual experiment package whose sub-graph is outputGraph.
@@ -535,68 +541,80 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         @self._transform explains how to substitute an occurrence of outputGraph with transform(inputGraph)
 
         Arguments:
-            graph: The graph to populate with bindings (input and output). The method updates the @graph in-place.
-            is_foundation: Whether the graph is a representation of Foundation (True) or Surrogate (False)
+            graph: Foundation graph to populate with bindings (input and output). The method updates the @graph in-place.
 
         Returns:
             The method returns None, it updates @graph in-place.
         """
-        if is_foundation:
-            # VV: I am the outputGraph which means I need to bind the parameters of the inputGraph
-            # to whatever is populating MY input parameters. Therefore, I'll create output "bindings" that point
-            # to what's populating MY input parameters
-            # I also need to consume the outputs of the inputGraph therefore I need to create inputBindings
-            for x in self._transform.relationship.graphParameters:
-                v = x.outputGraphParameter
+        # VV: I am the outputGraph which means I need to bind the parameters of the inputGraph
+        # to whatever is populating MY input parameters. Therefore, I'll create output "bindings" that point
+        # to what's populating MY input parameters
+        # I also need to consume the outputs of the inputGraph therefore I need to create inputBindings
+        for x in self._transform.relationship.graphParameters:
+            v = x.outputGraphParameter
 
-                # VV: For the time being we can assume that parameters are references,
-                if not v.name:
-                    raise apis.models.errors.ApiError(f"We do not know how to create an output binding for "
-                                                      f"{graph.name} using graphParameter {x}")
+            # VV: For the time being we can assume that parameters are references,
+            if not v.name:
+                raise apis.models.errors.ApiError(f"We do not know how to create an output binding for "
+                                                  f"{graph.name} using graphParameter {x}")
 
-                # VV :"input" refs are external, we do not need to have an output binding for those
-                dref = apis.models.from_core.DataReference(v.name)
-                if dref.externalProducerName:
-                    continue
+            # VV :"input" refs are external, we do not need to have an output binding for those
+            dref = apis.models.from_core.DataReference(v.name)
+            if dref.externalProducerName:
+                continue
 
-                graph.bindings.output.append(
-                    # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                    apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+            graph.bindings.output.append(
+                # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
 
-            for x in self._transform.relationship.graphResults:
-                v = x.outputGraphResult
+        for x in self._transform.relationship.graphResults:
+            v = x.outputGraphResult
 
-                if not v.name:
-                    raise apis.models.errors.ApiError(f"We do not know how to create an input binding for "
-                                                      f"{graph.name} using graphResult {x}")
-                graph.bindings.input.append(
-                    # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                    apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
-        else:
-            # VV: I am the inputGraph - the foundation is going to populate my inputs with its outputs
-            # and my outputs will populate its inputs
-            for x in self._transform.relationship.graphParameters:
-                v = x.inputGraphParameter
+            if not v.name:
+                raise apis.models.errors.ApiError(f"We do not know how to create an input binding for "
+                                                  f"{graph.name} using graphResult {x}")
+            graph.bindings.input.append(
+                # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
 
-                if not v.name:
-                    raise apis.models.errors.ApiError(f"We do not know how to create an input binding for "
-                                                      f"{graph.name} using graphParameter {x}")
+    def _populate_graph_bindings_for_surrogate(self, graph: apis.models.virtual_experiment.BasePackageGraph):
+        """Adds graphBindings to connect the components in the Surrogate to those in the Foundation
 
-                graph.bindings.input.append(
-                    # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                    apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+        The Foundation is the parameterised virtual experiment package whose sub-graph is outputGraph.
 
-            # VV: The inputGraph results are probably consumed by the foundation so create output bindings for those
-            for x in self._transform.relationship.graphResults:
-                v = x.outputGraphResult if is_foundation else x.inputGraphResult
+        The Surrogate is the parameterised virtual experiment package whose sub-graph is inputGraph
+        @self._transform explains how to substitute an occurrence of outputGraph with transform(inputGraph)
 
-                if not v.name:
-                    raise apis.models.errors.ApiError(f"We do not know how to create an output binding for "
-                                                      f"{graph.name} using graphParameter {x}")
+        Arguments:
+            graph: Surrogate graph to populate with bindings (input and output). The method updates the @graph in-place.
 
-                graph.bindings.output.append(
-                    # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                    apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+        Returns:
+            The method returns None, it updates @graph in-place.
+        """
+        # VV: I am the inputGraph - the foundation is going to populate my inputs with its outputs
+        # and my outputs will populate its inputs
+        for x in self._transform.relationship.graphParameters:
+            v = x.inputGraphParameter
+
+            if not v.name:
+                raise apis.models.errors.ApiError(f"We do not know how to create an input binding for "
+                                                  f"{graph.name} using graphParameter {x}")
+
+            graph.bindings.input.append(
+                # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+
+        # VV: The inputGraph results are probably consumed by the foundation so create output bindings for those
+        for x in self._transform.relationship.graphResults:
+            v = x.inputGraphResult
+
+            if not v.name:
+                raise apis.models.errors.ApiError(f"We do not know how to create an output binding for "
+                                                  f"{graph.name} using graphParameter {x}")
+
+            graph.bindings.output.append(
+                # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
 
     def _add_base_graphs_with_dangling_bindings(
             self,
@@ -621,8 +639,8 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             surrogate_concrete, surrogate_graph, components_exclusively_include=transform.inputGraph.components)
         surrogate_package.graphs.append(surrogate_graph)
 
-        self._populate_graph_bindings(foundation_graph, is_foundation=True)
-        self._populate_graph_bindings(surrogate_graph, is_foundation=False)
+        self._populate_graph_bindings_for_foundation(foundation_graph)
+        self._populate_graph_bindings_for_surrogate(surrogate_graph)
 
     def _connect_foundation_and_surrogate_graphs(
             self,
@@ -857,8 +875,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                the contents of all paths tha the Surrogate manifest points to.
             4. Copy key-outputs/interface of Foundation and patch it with Surrogate (if Transform asks
                to replace Foundation components that produce key-outputs with Surrogate ones)
-            5. Inherit parameterisation from Foundation, but trim Platforms to just those that
-               are common between the 2 VEs
+            5. Inherit parameterisation from Foundation
         """
         # VV: Create the blueprints for the Derived package and do the legwork to have a
         # self._transform that contains all necessary information to connect the 2 graphs
