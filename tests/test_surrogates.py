@@ -481,9 +481,10 @@ def validate_band_gap_optimizer_dsl_args(
         'mem': '4295000000',
         'number-processors': '1',
         'numberMolecules': '1',
-        'param1': 'input/smiles.csv:copy',
-        'param3': 'input/smiles.csv:ref',
-        'startIndex': '0'
+        'startIndex': '0',
+        'input.smiles.csv': 'input/smiles.csv',
+        'data.input_molecule.txt': 'data/input_molecule.txt',
+        'data.model-weights.checkpoint': 'data/model-weights.checkpoint',
     }
 
     final_executionOptions_variables = package.parameterisation.executionOptions.variables
