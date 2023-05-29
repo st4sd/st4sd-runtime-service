@@ -230,13 +230,6 @@ def synthesize_from_transformation(
             apis.runtime.package.access_and_validate_virtual_experiment_packages(
                 ve=ve, packages=packages, path_multipackage=path_multipackage)
 
-        if path_multipackage:
-            # VV: HACK Store the derived package in the same PVC that contains the virtual experiment
-            # instances till we decide how we will use the derived package instructions to build the
-            # synthesized package.
-            path_exp = os.path.join(path_multipackage, ve.metadata.package.name, ve.metadata.registry.digest)
-            metadata.derived.persist_to_directory(path_exp, packages)
-
         if synthesize.options.generateParameterisation:
             param_outputgraph = parameterisation_of_synthesized_from_outputgraph(
                 metadata.concrete, target_parameterisation or apis.models.virtual_experiment.Parameterisation())
@@ -252,6 +245,19 @@ def synthesize_from_transformation(
             param = apis.models.virtual_experiment.merge_parameterisation(param, synthesize.parameterisation)
 
             ve.parameterisation = param
+
+        ve.update_digest()
+
+        if path_multipackage:
+            # VV: HACK Store the derived package in the same PVC that contains the virtual experiment
+            # instances till we decide how we will use the derived package instructions to build the
+            # synthesized package. Recall that the digest depends on the base packages AND parameterisation options.
+            # The parameterisation options can change post push of PVEP therefore we cannot use digest here as we'd
+            # need to re-derive the PVEP (or move it on the disk) on an update to its parameterisation fields.
+            # Instead, we'll just use the information about the base packages.
+            path_exp = os.path.join(path_multipackage, ve.metadata.package.name, ve.get_packages_identifier())
+            metadata.derived.persist_to_directory(path_exp, packages)
+
 
         apis.runtime.package.validate_parameterised_package(ve=ve, metadata=metadata)
         if update_experiments_database:

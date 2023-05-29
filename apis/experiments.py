@@ -1153,7 +1153,7 @@ class ExperimentDSL(Resource):
                 path = os.path.join(
                     apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
                     ve.metadata.package.name,
-                    ve.metadata.registry.digest)
+                    ve.get_packages_identifier())
                 package = experiment.model.storage.ExperimentPackage.packageFromLocation(
                     path, platform=platform_name, primitive=True, variable_substitute=False)
                 concrete = package.configuration.get_flowir_concrete()
@@ -1519,6 +1519,14 @@ class ExperimentStart(Resource):
             body = package.construct_k8s_workflow()
 
             current_app.logger.info(f"Creating new experiment {package.experiment_name}")
+
+            if len(ve.base.packages) > 1:
+                # VV: For the time being we're storing the standalone st4sd package under a certain path in persistent
+                # storage. Double check that the files are there before asking elaunch.py to run the experiment
+                if os.path.exists(package.get_path_to_multi_package_pvep()) is False:
+                    raise apis.models.errors.ApiError(
+                        "Unable to locate the package files - try recreating the package (e.g. by using the "
+                        "/relationships/<identifier>/synthesize/ API)")
 
             try:
                 api_response = api_instance.create_namespaced_custom_object(

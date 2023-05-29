@@ -19,6 +19,7 @@ import pytest
 import apis.db.relationships
 import apis.db.exp_packages
 import apis.models
+import apis.models.common
 import apis.kernel.relationships
 import apis.models.relationships
 import apis.models.virtual_experiment
@@ -568,20 +569,15 @@ def test_synthesize(
     validate_band_gap_optimizer_dsl_args(dsl, metadata.package, ve_modular_band_gap_gamess)
 
 
-def test_transformation_push_and_then_synthesize(
-        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+def simple_push_and_synthesize(
+        packages: apis.storage.PackageMetadataCollection,
         rel_optimizer_band_gap: apis.models.relationships.Relationship,
         ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        db_experiments: apis.db.exp_packages.DatabaseExperiments,
+        db_relationships: apis.db.relationships.DatabaseRelationships,
+        new_package_name: str,
         output_dir: str,
 ):
-    packages = package_metadata_modular_optimizer_band_gap_gamess
-
-    path_db_experiments = os.path.join(output_dir, "experiments.json")
-    path_db_relationships = os.path.join(output_dir, "relationships.json")
-
-    db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
-    db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
-
     with db_relationships:
         db_relationships.insert_many([rel_optimizer_band_gap.dict()])
 
@@ -595,20 +591,67 @@ def test_transformation_push_and_then_synthesize(
         packages=packages
     )
 
+    synthesize = apis.models.relationships.PayloadSynthesize()
+    synthesize.options.generateParameterisation = True
+
+    return apis.kernel.relationships.synthesize_from_transformation(
+        rel=rel,
+        new_package_name=new_package_name,
+        packages=packages,
+        db_experiments=db_experiments,
+        synthesize=synthesize,
+        update_experiments_database=True,
+        path_multipackage=output_dir,
+    )
+
+
+def test_transformation_push_and_then_synthesize(
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str,
+):
+    path_db_experiments = os.path.join(output_dir, "experiments.json")
+    path_db_relationships = os.path.join(output_dir, "relationships.json")
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
+    db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
+
+    metadata = simple_push_and_synthesize(
+        packages=package_metadata_modular_optimizer_band_gap_gamess,
+        rel_optimizer_band_gap=rel_optimizer_band_gap,
+        ve_modular_band_gap_gamess=ve_modular_band_gap_gamess,
+        db_experiments=db_experiments,
+        db_relationships=db_relationships,
+        new_package_name="synthetic",
+        output_dir=output_dir,
+    )
+
     with db_relationships:
         docs = db_relationships.query(db_relationships.construct_query(rel_optimizer_band_gap.identifier))
 
-        assert len(docs) == 1
+    assert len(docs) == 1
 
-    preview = apis.kernel.relationships.api_preview_synthesize_dsl(
-        identifier=rel.identifier,
-        packages=packages,
-        db_relationships=db_relationships,
-        db_experiments=db_experiments,
-        dsl_version="2.0.0_0.1.0"
+    with db_experiments:
+        docs = db_experiments.query_identifier("synthetic")
+
+    assert len(docs) == 1
+
+    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+
+    assert ve.metadata.registry.digest == metadata.package.metadata.registry.digest
+
+    ve.parameterisation.presets.variables.append(
+        apis.models.common.Option(name="numberMolecules", value="1000")
     )
 
-    validate_band_gap_optimizer_dsl_args(preview.dsl, preview.package, ve_modular_band_gap_gamess)
+    ve.update_digest()
+
+    assert ve.metadata.registry.digest != metadata.package.metadata.registry.digest
+
+    assert ve.base.to_digestable().dict() == metadata.package.base.to_digestable().dict()
+
+    assert ve.get_packages_identifier() == metadata.package.get_packages_identifier()
 
 
 def test_simple_relationship(

@@ -1343,6 +1343,12 @@ class ParameterisedPackage(apis.models.common.Digestable):
             parameterisation_executionOptions=self.parameterisation.executionOptions,
         )
 
+    def get_packages_identifier(self) -> str:
+        """Returns a unique identifier that takes into account only the base packages of the parameterised virtual
+        experiment package.
+        """
+        return apis.models.common.DigestableBase(base=self.base).to_digest()
+
     def update_digest(self):
         """Generates a digest of the virtual experiment entry"""
         self.metadata.registry.digest = self.to_digestable().to_digest()

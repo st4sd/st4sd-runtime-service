@@ -159,10 +159,7 @@ class Relationship(apis.models.common.Digestable):
 
 
 class SynthesizeOptions(apis.models.common.Digestable):
-    generateParameterisation: bool = pydantic.Field(
-        True, description="Auto generate parameterisation options",
-        alias='generate-parameterisation'
-    )
+    generateParameterisation: bool = pydantic.Field(True, description="Auto generate parameterisation options")
 
 
 class PayloadSynthesize(apis.models.common.Digestable):

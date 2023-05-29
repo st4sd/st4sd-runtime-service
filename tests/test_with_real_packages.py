@@ -48,6 +48,7 @@ def add_band_gap_pm3(
 def test_transformation_pm3_to_dft(output_dir: str):
     rel_raw = {
         "identifier": "pm3-to-dft",
+        "description": "Configure GAMESS-US to use PM3 instead of DFT",
         "transform": {
             "inputGraph": {
                 "identifier": "band-gap-pm3-gamess-us:latest",
@@ -129,12 +130,30 @@ def test_transformation_pm3_to_dft(output_dir: str):
 
     assert len(rel_expanded.transform.relationship.graphResults) == len(results)
 
-    apis.kernel.relationships.synthesize_from_transformation(
+    dir_path_multipackage = os.path.join(output_dir, "download-packages")
+    metadata = apis.kernel.relationships.synthesize_from_transformation(
         rel=rel_expanded,
         new_package_name="synthetic",
         packages=apis.storage.PackagesDownloader(ve=None),
         db_experiments=db_experiments,
         synthesize=apis.models.relationships.PayloadSynthesize(),
         update_experiments_database=True,
-        path_multipackage=os.path.join(output_dir, "download-packages")
+        path_multipackage=dir_path_multipackage
     )
+
+    logger.info(f"Digest of synthesized is {metadata.package.metadata.registry.digest}")
+    logger.info(f"Its base-packages identifier is {metadata.package.get_packages_identifier()}")
+
+    with db_experiments:
+        docs = db_experiments.query_identifier("synthetic")
+
+    assert len(docs) == 1
+
+    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+
+    assert ve.get_packages_identifier() == metadata.package.get_packages_identifier()
+
+    dir_package = os.path.join(dir_path_multipackage, "synthetic", ve.get_packages_identifier())
+    logger.info(f"Package is at {dir_package}")
+
+    assert os.path.isdir(dir_package)

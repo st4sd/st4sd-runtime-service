@@ -1503,7 +1503,7 @@ def test_derived_package(derived_ve: apis.models.virtual_experiment.Parameterise
 
     from_path = os.path.join(apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
                              derived_ve.metadata.package.name,
-                             derived_ve.metadata.registry.digest)
+                             derived_ve.get_packages_identifier())
 
     assert spec == {'apiVersion': 'st4sd.ibm.com/v1alpha1',
                     'kind': 'Workflow',

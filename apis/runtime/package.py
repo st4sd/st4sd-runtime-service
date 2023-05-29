@@ -729,6 +729,11 @@ class NamedPackage:
         }
         return injected
 
+    def get_path_to_multi_package_pvep(self) -> str:
+        return os.path.join(apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
+                            self._ve.metadata.package.name,
+                            self._ve.get_packages_identifier())
+
     @property
     def workflow_spec_package(self) -> Dict[str, str]:
         base = self._ve.base.packages
@@ -738,9 +743,7 @@ class NamedPackage:
                               f"consists of multiple packages - assume it exists in "
                               f"{apis.models.constants.ROOT_STORE_DERIVED_PACKAGES}")
             return {
-                'fromPath': os.path.join(apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
-                                         self._ve.metadata.package.name,
-                                         self._ve.metadata.registry.digest)
+                'fromPath': self.get_path_to_multi_package_pvep()
             }
 
         if len(base) != 1:
@@ -1313,7 +1316,8 @@ def access_and_validate_virtual_experiment_packages(
 
     Notes: ::
 
-        - If PVEP is "derived" method also stores the synthesized standalone directory on persistent storage
+        - If PVEP is "derived", method also stores the synthesized standalone directory on persistent storage
+        - If PVEP is "derived", method also double checks that the bindings use the correct input/output types
 
     Arguments:
         ve: the parameterised virtual experiment package (PVEP)
@@ -1326,6 +1330,17 @@ def access_and_validate_virtual_experiment_packages(
     """
 
     prepare_parameterised_package_for_download_definition(ve)
+
+    for package in ve.base.packages:
+        if not package.graphs:
+            continue
+
+        for graph in package.graphs:
+            for x in graph.bindings.input:
+                graph.bindings.ensure_input_type(x)
+
+            for x in graph.bindings.output:
+                graph.bindings.ensure_output_type(x)
 
     with packages:
         get_and_validate_parameterised_package(ve, packages)
