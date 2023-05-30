@@ -20,6 +20,7 @@ import apis.models.errors
 import apis.db.exp_packages
 import apis.db.relationships
 import apis.models.common
+import apis.models.constants
 import apis.models.query_relationship
 import apis.models.relationships
 import apis.models.virtual_experiment
@@ -58,7 +59,7 @@ def synthesize_ve_from_transformation(
 
     with packages:
         transform.synthesize_derived_package(packages, ve)
-        apis.runtime.package.prepare_parameterised_package_for_download_definition(ve)
+        apis.runtime.package.prepare_parameterised_package_for_download_definition(ve, db_secrets=packages.db_secrets)
         apis.runtime.package.get_and_validate_parameterised_package(ve, packages)
         return apis.runtime.package.combine_multipackage_parameterised_package(ve, packages)
 
@@ -364,7 +365,7 @@ def api_list_queries(
         db: Optional[apis.db.relationships.DatabaseRelationships] = None,
 ) -> List[Dict[str, Any]]:
     if db is None:
-        db = utils.database_relationships_open()
+        db = utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT)
 
     with db:
         query = db.construct_complex_query(query)

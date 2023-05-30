@@ -6,25 +6,45 @@
 
 from __future__ import annotations
 
+import apis.models.constants
 import apis.k8s
+import apis.db.secrets
 import pytest
+
+import utils
 
 
 def test_extract_oauth_token(mock_list_namespaced_secret):
-    oauth_token = apis.k8s.extract_git_oauth_token("my-test")
+    db_secret = apis.db.secrets.KubernetesSecrets(namespace=apis.models.constants.MONITORED_NAMESPACE)
+    with db_secret:
+        secret = db_secret.secret_get("my-test")
+    oauth_token = secret['data']['oauth-token']
+
     assert oauth_token == "my-token"
 
 
 def test_extract_oauth_token_no_secret(mock_list_namespaced_secret):
     with pytest.raises(apis.k8s.errors.KubernetesObjectNotFound) as e:
-        apis.k8s.extract_git_oauth_token("not-my-test")
+        db_secret = apis.db.secrets.KubernetesSecrets(namespace=apis.models.constants.MONITORED_NAMESPACE)
+        with db_secret:
+            _ = db_secret.secret_get("not-my-test")
 
     assert e.value.name == "not-my-test"
     assert e.value.kind == "secret"
 
 
 def test_extract_oauth_token_default(mock_list_namespaced_secret, mock_list_config_map_configuration):
-    oauth_token = apis.k8s.extract_git_oauth_token_default()
+    db_secret = apis.db.secrets.KubernetesSecrets(namespace=apis.models.constants.MONITORED_NAMESPACE)
+
+    config = utils.parse_configuration(
+        # VV: this is to test the Kubernetes Secret Database
+        local_deployment=False,
+        validate=False, from_config_map=apis.models.constants.ConfigMapWithParameters)
+
+    assert config.gitsecretOauth == "my-test"
+    with db_secret:
+        secret = db_secret.secret_get(config.gitsecretOauth)
+    oauth_token = secret['data']['oauth-token']
     assert oauth_token == "my-token"
 
 
@@ -47,7 +67,10 @@ def test_extract_s3_credentials_from_dataset_no_dataset(mock_list_dataset):
 
 
 def test_load_configuration(mock_list_config_map_configuration):
-    config = apis.k8s.load_configuration()
+    config = utils.parse_configuration(
+        # VV: this is to test the Kubernetes Secret Database
+        local_deployment=False,
+        from_config_map=apis.models.constants.ConfigMapWithParameters)
 
     assert config.image == "res-st4sd-team-official-base-docker-local.artifactory.swg-devops.com/st4sd-runtime-core:latest"
     assert config.gitsecretOauth == "my-test"

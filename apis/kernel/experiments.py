@@ -18,6 +18,7 @@ import pydantic.error_wrappers
 import apis.db.exp_packages
 import apis.db.relationships
 import apis.models.common
+import apis.models.constants
 import apis.models.errors
 import apis.models.query_experiment
 import apis.models.relationships
@@ -152,7 +153,7 @@ def format_documents(docs: List[Dict[str, Any]], format_options: FormatOptions) 
 
 
 def api_list_queries(request: Dict[str, Any], format_options: FormatOptions):
-    db_experiments = utils.database_experiments_open()
+    db_experiments = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
 
     if not request:
         with db_experiments:
@@ -162,7 +163,7 @@ def api_list_queries(request: Dict[str, Any], format_options: FormatOptions):
             query = apis.models.query_experiment.QueryExperiment.parse_obj(request)
         except pydantic.error_wrappers.ValidationError as e:
             raise apis.models.errors.ApiError(f"Invalid request, problems: {e.json(indent=2)}")
-        db_relationships = utils.database_relationships_open()
+        db_relationships = utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT)
         docs = api_query_experiments(query=query, db_experiments=db_experiments, db_relationships=db_relationships)
 
     return format_documents(docs, format_options)

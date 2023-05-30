@@ -6,7 +6,9 @@ import requests
 
 import apis.db.exp_packages
 import apis.db.relationships
+import apis.db.secrets
 import apis.kernel.relationships
+import apis.models.constants
 import apis.models.relationships
 import apis.models.virtual_experiment
 import apis.storage
@@ -45,7 +47,7 @@ def add_band_gap_pm3(
 
 
 @real_packages
-def test_transformation_pm3_to_dft(output_dir: str):
+def test_transformation_pm3_to_dft(output_dir: str, local_deployment: bool):
     rel_raw = {
         "identifier": "pm3-to-dft",
         "description": "Configure GAMESS-US to use PM3 instead of DFT",
@@ -76,6 +78,7 @@ def test_transformation_pm3_to_dft(output_dir: str):
 
     db_experiments = apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "exps.txt"))
     db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationships.txt"))
+    db_secrets = apis.db.secrets.DatabaseSecrets(os.path.join(output_dir, "secrets.txt"))
 
     _ = add_band_gap_dft(db_experiments)
     _ = add_band_gap_pm3(db_experiments)
@@ -84,7 +87,7 @@ def test_transformation_pm3_to_dft(output_dir: str):
         rel=relationship,
         db_experiments=db_experiments,
         db_relationships=db_relationships,
-        packages=apis.storage.PackagesDownloader(ve=None),
+        packages=apis.storage.PackagesDownloader(ve=None, db_secrets=db_secrets),
     )
 
     rel_expanded = apis.kernel.relationships.get_relationship(relationship.identifier, db_relationships)
@@ -129,12 +132,13 @@ def test_transformation_pm3_to_dft(output_dir: str):
     }
 
     assert len(rel_expanded.transform.relationship.graphResults) == len(results)
+    db_secrets = apis.db.secrets.DatabaseSecrets(os.path.join(output_dir, "secrets.txt"))
 
     dir_path_multipackage = os.path.join(output_dir, "download-packages")
     metadata = apis.kernel.relationships.synthesize_from_transformation(
         rel=rel_expanded,
         new_package_name="synthetic",
-        packages=apis.storage.PackagesDownloader(ve=None),
+        packages=apis.storage.PackagesDownloader(ve=None, db_secrets=db_secrets),
         db_experiments=db_experiments,
         synthesize=apis.models.relationships.PayloadSynthesize(),
         update_experiments_database=True,

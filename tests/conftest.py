@@ -37,6 +37,25 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture()
+def local_deployment():
+    orig_env = os.environ.get('LOCAL_DEPLOYMENT')
+
+    os.environ['LOCAL_DEPLOYMENT'] = "True"
+
+    import importlib
+    importlib.reload(apis.models.constants)
+
+    yield apis.models.constants.LOCAL_DEPLOYMENT
+
+    if orig_env is not None:
+        os.environ['LOCAL_DEPLOYMENT'] = orig_env
+    else:
+        del os.environ['LOCAL_DEPLOYMENT']
+
+    importlib.reload(apis.models.constants)
+
+
+@pytest.fixture()
 def flowir_psi4() -> str:
     return """
 application-dependencies: {}
@@ -357,12 +376,11 @@ variables:
 def output_dir() -> str:
     path = tempfile.mkdtemp()
 
-    print('Output dir is', path)
     yield path
 
     try:
-        shutil.rmtree(path)
-    except:
+        shutil.rmtree(output_dir, ignore_errors=True)
+    except FileNotFoundError:
         pass
 
 

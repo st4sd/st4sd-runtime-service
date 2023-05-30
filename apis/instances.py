@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import os
 import re
 import traceback
@@ -23,6 +24,7 @@ from kubernetes import client
 
 import apis.models
 import apis.models.common
+import apis.models.constants
 import apis.models.virtual_experiment
 import apis.storage
 import utils
@@ -125,7 +127,7 @@ def extract_virtual_experiment_entry(item) -> Dict[str, Any] | None:
     digest = item.get('metadata', {}).get('labels', {}).get('st4sd-package-digest')
 
     if package_name and digest:
-        with utils.database_experiments_open() as db:
+        with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
             identifier = apis.models.common.PackageIdentifier.from_parts(
                 package_name=package_name, tag=None, digest=digest)
             docs = db.query_identifier(identifier.identifier)
@@ -143,6 +145,11 @@ def extract_virtual_experiment_entry(item) -> Dict[str, Any] | None:
 
 def get_list_instances(api_instance, namespace):
     to_ret = []
+
+    if apis.models.constants.LOCAL_DEPLOYMENT:
+        logging.getLogger("local").info("Mocking 0 instances")
+        return to_ret
+
     try:
         api_response = api_instance.list_namespaced_custom_object(
             utils.K8S_WORKFLOW_GROUP, utils.K8S_WORKFLOW_VERSION, namespace, utils.K8S_WORKFLOW_PLURAL)
@@ -157,10 +164,14 @@ def get_list_instances(api_instance, namespace):
     return to_ret
 
 
-def get_instance(instance_id):
+def get_instance(instance_id: str) -> Optional[Dict[str, Any]]:
+    if apis.models.constants.LOCAL_DEPLOYMENT:
+        logging.getLogger("local").info(f"Mocking no instance {instance_id}")
+        return None
+
     namespace = utils.MONITORED_NAMESPACE
 
-    _ = setup_config()
+    _ = setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
     api_instance = client.CustomObjectsApi(client.ApiClient())
 
     api_response = api_instance.list_namespaced_custom_object(
@@ -201,7 +212,7 @@ class InstanceExperimentList(Resource):
     def get(self):
         '''List all instances of experiments'''
 
-        configuration = setup_config()
+        configuration = setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
         api_instance = client.CustomObjectsApi(client.ApiClient())
         return get_list_instances(api_instance, utils.MONITORED_NAMESPACE)
 

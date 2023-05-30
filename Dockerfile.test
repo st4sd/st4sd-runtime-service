@@ -9,4 +9,6 @@ FROM $base_image
 
 COPY tests /tests
 
-RUN python -m pytest /tests
+ENV LOCAL_DEPLOYMENT=True
+
+RUN python -m pytest -n 4 --real-packages /tests

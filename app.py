@@ -28,6 +28,8 @@ from middlelayer import PrefixMiddleware
 from flask_cors import CORS
 from datetime import datetime as dt
 
+import apis.models.constants
+import kubernetes.config
 
 # VV: Import modules to trigger the generation of API-Endpoints
 import apis.experiments
@@ -38,6 +40,8 @@ import apis.authorisation
 import apis.relationships
 import apis.query
 import apis.url_map
+
+
 
 app = Flask(__name__)
 app.wsgi_app = PrefixMiddleware(app.wsgi_app)
@@ -90,8 +94,6 @@ logging.basicConfig(format=FORMAT)
 logging.getLogger().setLevel(logging.INFO)
 app.logger.setLevel(logging.INFO)
 
-# print(app.url_map)
-
 
 def kill_web_server(exit_code):
     app.logger.critical("Terminating with sys.exit(%d)" % exit_code)
@@ -102,10 +104,16 @@ def kill_web_server(exit_code):
 
 
 def initialize():
-    app.logger.info("Validating config.json ...")
     try:
-        utils.setup_config(True)
-    except Exception as e:
+        app.logger.info("Loading Kubernetes config ...")
+
+        if apis.models.constants.LOCAL_DEPLOYMENT is False:
+            kubernetes.config.load_incluster_config()
+
+        app.logger.info("Validating config.json ...")
+
+        utils.setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT, validate=True)
+    except BaseException as e:
         app.logger.critical("Unable to validate configuration %s - will terminate" % e)
         kill_web_server(1)
     else:

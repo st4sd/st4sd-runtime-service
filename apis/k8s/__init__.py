@@ -21,27 +21,6 @@ import apis.models.virtual_experiment
 from apis.models.constants import *
 
 
-def load_configuration(
-        from_config_map: str | None = ConfigMapWithParameters
-) -> apis.models.virtual_experiment.Configuration:
-    f"""Loads the configuration settings
-
-    Arguments:
-        from_config_map(Optional[str]): Read configuration from kubernetes ConfigMap, if set to None will instead read
-            configuration from the config.json file that ${CONFIG_JSON_PATH} returns.
-
-    Returns:
-        apis.models.virtual_experiment.Configuration
-    """
-    if CONFIG_JSON_PATH is not None:
-        with open(CONFIG_JSON_PATH) as f:
-            configuration = json.load(f)
-    else:
-        configuration = extract_configmap_values(from_config_map)
-
-    return apis.models.virtual_experiment.Configuration.parse_obj(configuration)
-
-
 def extract_configmap_values(name: str, namespace: str = MONITORED_NAMESPACE) -> Dict[str, str]:
     name = name
     api = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())
@@ -54,31 +33,6 @@ def extract_configmap_values(name: str, namespace: str = MONITORED_NAMESPACE) ->
     configmap: kubernetes.client.V1ConfigMap = cm_list.items[0]
     data = yaml.load(configmap.data['config.json'], Loader=yaml.FullLoader)
     return data
-
-
-def extract_git_oauth_token_default() -> str:
-    config = load_configuration()
-    if config.gitsecretOauth is None:
-        logging.getLogger().warning("There is no default gitSecretOauth for cloning https:// URLs")
-        return None
-
-    return extract_git_oauth_token(config.gitsecretOauth)
-
-
-def extract_git_oauth_token(name: str, key: str | None = None, namespace: str = MONITORED_NAMESPACE) -> str:
-    if key is None:
-        key = "oauth-token"
-
-    api = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())
-
-    secrets: kubernetes.client.V1SecretList = api.list_namespaced_secret(
-        namespace, field_selector=f'metadata.name={name}')
-
-    if len(secrets.items) == 0:
-        raise apis.k8s.errors.KubernetesObjectNotFound('secret', k8s_name=name)
-
-    secret: kubernetes.client.V1Secret = secrets.items[0]
-    return base64.b64decode(secret.data[key]).decode()
 
 
 def extract_s3_credentials_from_dataset(

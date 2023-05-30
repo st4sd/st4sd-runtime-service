@@ -15,6 +15,7 @@ from flask import current_app, request
 from flask_restx import Resource
 
 import apis.models
+import apis.models.constants
 import utils
 
 api = apis.models.api_image_pull_secret
@@ -68,11 +69,12 @@ def get_all_image_pull_secrets(which=None, out_config=None):
 
     May optionally return loaded out_config if out_config is not set to None
     """
-    configuration = utils.setup_config()
-    if out_config is not None:
-        out_config.update(configuration.copy())
+    configuration = utils.parse_configuration(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
 
-    secrets_names = configuration['imagePullSecrets']
+    if out_config is not None:
+        out_config.update(configuration.dict().copy())
+
+    secrets_names = configuration.imagePullSecrets
 
     if which is not None:
         secrets_names = [x for x in secrets_names if x in which]
@@ -170,7 +172,8 @@ class ImagePullSecret(Resource):
         return kubernetes.client.models.V1Secret(
             data=data,
             type='kubernetes.io/dockerconfigjson',
-            metadata=kubernetes.client.models.V1ObjectMeta(name=secret_name, labels={'creator': 'consumable-computing'})
+            metadata=kubernetes.client.models.V1ObjectMeta(name=secret_name,
+                                                           labels={'creator': 'st4sd-runtime-service'})
         )
 
     def _try_create_imagePullSecret(self, secret_name: str, username: str, password: str,
@@ -196,7 +199,7 @@ class ImagePullSecret(Resource):
 
         Notes:
             utils.setup_config() returns the data/config.json contents of a ConfigMap (by default
-            consumable-computing-config).
+            st4sd-runtime-service).
             The Consumable Computing REST-API records in this ConfigMap "configuration" information, including:
                 imagePullSecrets which workflow instances can forward to pods they spawn so that the latter can
                  pull images.
@@ -210,7 +213,7 @@ class ImagePullSecret(Resource):
         """
         cf_map_lbl = 'config.json'
 
-        configuration = utils.setup_config()
+        configuration = utils.setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
         updated = secret_name in configuration['imagePullSecrets']
 
         def update_object():
@@ -283,7 +286,8 @@ class ImagePullSecret(Resource):
                                                  registry_url=registry_url, update=update)
                 return
             except ImagePullSecretAlreadyExists:
-                if id in utils.setup_config()['imagePullSecrets']:
+                if id in utils.setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)[
+                    'imagePullSecrets']:
                     msg = "imagePullSecret already exists"
                 else:
                     msg = "imagePullSecret already exists but has not become available yet"
@@ -316,7 +320,7 @@ class ImagePullSecret(Resource):
         """Create a new imagePullSecret.
 
         This method does not check whether the contents of the Secret object are correct. In the remainder of this
-        text @configuration IS the contents of the `config.json` key of the `consumable-computing-config` ConfigMap
+        text @configuration IS the contents of the `config.json` key of the `st4sd-runtime-service` ConfigMap
         (or the ConfigMap object that the environment variable `CONSUMABLE_COMPUTING_CONFIGMAP_NAME` points to)
 
         if imagePullSecret is already defined in in the @configuration this method returns 422
@@ -347,7 +351,7 @@ class ImagePullSecret(Resource):
         """Update an existing imagePullSecret.
 
         This method does not check whether the contents of the Secret object are correct. In the remainder of this
-        text @configuration IS the contents of the `config.json` key of the `consumable-computing-config` ConfigMap
+        text @configuration IS the contents of the `config.json` key of the `st4sd-runtime-service` ConfigMap
         (or the ConfigMap object that the environment variable `CONSUMABLE_COMPUTING_CONFIGMAP_NAME` points to)
 
         if imagePullSecret is already defined in in the @configuration this method returns 422

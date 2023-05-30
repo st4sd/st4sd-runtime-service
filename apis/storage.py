@@ -17,6 +17,8 @@ from typing import List
 from typing import Optional
 from typing import Any
 
+import utils
+import apis.db.secrets
 import experiment.model.frontends.flowir
 import experiment.model.graph
 import experiment.model.storage
@@ -35,7 +37,9 @@ class PackageMetadataCollection:
             self,
             concrete_and_data: Dict[str, apis.models.virtual_experiment.StorageMetadata] | None = None,
             ve: apis.models.virtual_experiment.ParameterisedPackage | None = None,
+            db_secrets: apis.db.secrets.DatabaseSecrets | None = None,
     ):
+        self.db_secrets = db_secrets
         self._log = logging.getLogger('Downloader')
         self._metadata: Dict[str, apis.models.virtual_experiment.StorageMetadata] = concrete_and_data or {}
         self._ve = ve
@@ -107,18 +111,30 @@ class PackagesDownloader(PackageMetadataCollection):
     def __init__(
             self,
             ve: apis.models.virtual_experiment.ParameterisedPackage | None,
+            db_secrets: apis.db.secrets.DatabaseSecrets | None,
             prefix_dir: str | None = None,
-            already_downloaded_to: str | None = None
+            already_downloaded_to: str | None = None,
+            local_deployment: Optional[bool] = None,
     ):
         """Downloads base packages of a parameterised package
 
         Args:
              ve: the parameterised package that owns the base packages
+             db_secrets: The Secrets database (see @local_deployment doc)
+             prefix_dir: The location that would host the packages if they were downloaded
+             already_downloaded_to: The location that the packages where downloaded into
+                the first time __enter__() ran
+            local_deployment: Whether the API is running in LOCAL mode - when None
+                this defaults to True if db_secrets is not an instance of
+                apis.db.secrets.KubernetesSecrets, otherwise it defaults to False
         """
-        super(PackagesDownloader, self).__init__(ve=ve)
+        super(PackagesDownloader, self).__init__(ve=ve, db_secrets=db_secrets)
         self._prefix_dir = prefix_dir or "/tmp"
         self._temp_dir: tempfile.TemporaryDirectory | None = None
         self._already_downloaded_to = already_downloaded_to
+
+        self._local_deployment = local_deployment if local_deployment is not None else \
+            not isinstance(db_secrets, apis.db.secrets.KubernetesSecrets)
 
     def _download_package_git(self, package: apis.models.virtual_experiment.BasePackage):
         security = package.source.git.security
@@ -180,22 +196,77 @@ class PackagesDownloader(PackageMetadataCollection):
 
             package.source.git.version = commit_id
 
+        # VV: 1st step, identify whether git-clone should use a git oauth-token and which secret/key contains its value
+        oauth_token = None
+        secret_name = ...
+        secret_key = ...
+        is_default_secret = False
+
         if security is None or len(security.dict(exclude_none=True)) == 0:
-            oauth_token = apis.k8s.extract_git_oauth_token_default()
-            return download_with_token_and_extract_commit_id(oauth_token)
-        elif security.oauth is not None and security.oauth.valueFrom.secretKeyRef:
-            secret = security.oauth.valueFrom.secretKeyRef
-            oauth_token = apis.k8s.extract_git_oauth_token(secret.name, secret.key)
+            # VV: There's no Secret associated with this specific base package, check if there's a default one
+            # for all base packages that this API instance can pull
+            config = utils.parse_configuration(
+                local_deployment=self._local_deployment,
+                validate=False
+            )
+
+            if config.gitsecretOauth:
+                secret_name = config.gitsecretOauth
+                secret_key = "oauth-token"
+                is_default_secret = True
+        elif security.oauth is not None:
+            if security.oauth.valueFrom:
+                if security.oauth.valueFrom.secretKeyRef:
+                    secret_ref = security.oauth.valueFrom.secretKeyRef
+                    secret_name = secret_ref.name
+                    secret_key = secret_ref.key or "oauth-token"
+                else:
+                    raise apis.models.errors.ApiError(
+                        f"Base package {package.name} specifies package.source.git.security.oauth.valueFrom "
+                        f"but package.source.git.security.oauth.valueFrom.secretKeyRef is empty")
+            elif security.oauth.value:
+                raise apis.models.errors.ApiError(
+                    f"Base package {package.name} specifies package.source.git.security.oauth.value "
+                    f"this indicates a programming error. The package should instead be using "
+                    f"package.source.git.security.oauth.valueFrom.secretKeyRef")
+
+        # VV: If there's a secret to use (which could be a "default" for all Base packages that don't explicitly
+        # specify one) - try to look up the secret and extract the oauth-token from it
+        if secret_name is not ...:
+            what = "default " if is_default_secret else ""
 
             try:
-                return download_with_token_and_extract_commit_id(oauth_token)
-            except apis.runtime.errors.CannotDownloadGitError as e:
-                raise apis.runtime.errors.CannotDownloadGitError(e.message + f"\nDouble check whether the oauth-token credentials in the {secret.name} Kubernetes Secret are correct.")
-        
-        else:
-            raise apis.models.errors.ApiError("Currently only support extracting the "
-                                              "interface of base packages with an oauth-token that is already stored "
-                                              "as a Secret on the cluster")
+                with self.db_secrets:
+                    secret = self.db_secrets.secret_get(secret_name)
+                if secret is None:
+                    raise apis.runtime.errors.CannotDownloadGitError(
+                        f"Cannot git clone because {what}secret {secret_name} with oauth credentials does not exist")
+            except apis.runtime.errors.RuntimeError:
+                raise
+            except apis.models.errors.ApiError as e:
+                raise apis.runtime.errors.CannotDownloadGitError(
+                    f"Cannot git clone because the {what}secret {secret_name} of an underlying error while getting"
+                    f"the secret. Underlying error: {e}")
+
+            try:
+                oauth_token = secret['data'][secret_key]
+            except KeyError as e:
+                raise apis.runtime.errors.CannotDownloadGitError(
+                    f"Cannot git clone because the {what}secret {secret_name} does not contain "
+                    f"the key data.{secret_key}. Underlying error: {e}")
+
+        try:
+            return download_with_token_and_extract_commit_id(oauth_token)
+        except apis.runtime.errors.CannotDownloadGitError as e:
+            if secret_name is not ...:
+                raise apis.runtime.errors.CannotDownloadGitError(
+                    f"Cannot git-clone with location {package.source.git.location.dict()} using the oauth credentials "
+                    f"in Secret {secret_name}. Double check the location and then verify that the oauth credentials "
+                    f"can clone the repository. Underlying error: {e.message}")
+            raise apis.runtime.errors.CannotDownloadGitError(
+                f"Cannot git-clone with location {package.source.git.location.dict()} without using any oauth "
+                f"credentials. Double check that the location is correct and set to public. Underlying error: "
+                f"{e.message}")
 
     def _download_package_dataset(self, package: apis.models.virtual_experiment.BasePackage):
         credentials = apis.k8s.extract_s3_credentials_from_dataset(package.source.dataset.security.dataset)

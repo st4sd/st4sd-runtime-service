@@ -8,44 +8,48 @@ import base64
 import difflib
 import json
 import logging
-import sys
+import os.path
+
 import traceback
 from typing import Dict, Any, cast, Optional
 
 import experiment.model.frontends.flowir as FlowIR
 import kubernetes
 import six
-from kubernetes import config
-from kubernetes.config import ConfigException
 
+import apis.models.errors
+import apis.models.virtual_experiment
 import apis.db.exp_packages
 import apis.db.relationships
+import apis.db.secrets
+import apis.k8s
+
 from apis.models.constants import *
 
-try:
-    config.load_incluster_config()
-except ConfigException as e:
-    print("Unable to load_incluster_config() (%s), will attempt load_kube_config()" % e,
-          file=sys.stderr)
-    try:
-        config.load_kube_config()
-    except ConfigException as e:
-        print("Unable to load_kube_config() (%s), will be unable to contact Kubernetes" % e,
-              file=sys.stderr)
+
+def _generate_path_to_storage_file(local_deployment: bool, filename: str) -> str:
+    configuration = setup_config(local_deployment=local_deployment)
+    return os.path.join(configuration['inputdatadir'], filename)
 
 
-def database_relationships_open() -> apis.db.relationships.DatabaseRelationships:
+def database_relationships_open(local_deployment: bool) -> apis.db.relationships.DatabaseRelationships:
     # VV: FIXME This is a bad place for this method, need to figure out a better way to decide where to store db
-    configuration = setup_config()
-    path = os.path.join(configuration['inputdatadir'], "relationships.json")
+    path = _generate_path_to_storage_file(local_deployment, "relationships.json")
     return apis.db.relationships.DatabaseRelationships(path)
 
 
-def database_experiments_open() -> apis.db.exp_packages.DatabaseExperiments:
+def database_experiments_open(local_deployment: bool) -> apis.db.exp_packages.DatabaseExperiments:
     # VV: FIXME This is a bad place for this method, need to figure out a better way to decide where to store db
-    configuration = setup_config()
-    path = os.path.join(configuration['inputdatadir'], "experiments.json")
+    path = _generate_path_to_storage_file(local_deployment, "experiments.json")
     return apis.db.exp_packages.DatabaseExperiments(path)
+
+
+def secrets_git_open(local_deployment: bool) -> apis.db.secrets.SecretsStorageTemplate:
+    if local_deployment is False:
+        return apis.db.secrets.KubernetesSecrets(namespace=MONITORED_NAMESPACE)
+    else:
+        path = _generate_path_to_storage_file(local_deployment, "git-secrets.json")
+        return apis.db.secrets.DatabaseSecrets(db_path=path)
 
 
 class KubernetesObjectNotFound(Exception):
@@ -54,7 +58,7 @@ class KubernetesObjectNotFound(Exception):
         self.kind = k8s_kind
         self.name = k8s_name
         self.message = 'Kubernetes object %s/%s does not exist' % (k8s_kind, k8s_name)
-        
+
         super(KubernetesObjectNotFound, self).__init__()
         
     def __str__(self):
@@ -251,19 +255,29 @@ def configuration_from_configmap(name):
 
 
 def get_config_json_path():
+    if CONFIG_JSON_PATH:
+        return os.path.isfile(CONFIG_JSON_PATH)
+
     paths = ['/etc/consumable/config.json', '/etc/config.json', 'config.json']
     for k in paths:
         if os.path.isfile(k):
             return k
 
 
-def setup_config(validate: bool = False, from_config_map: Optional[str] = ConfigMapWithParameters) \
-        -> Dict[str, Any]:
+def setup_config(
+        local_deployment: bool,
+        validate: bool = False,
+        from_config_map: Optional[str] = ...
+) -> Dict[str, Any]:
     """Loads the Consumable Computing configuration, may validate it before returning its contents.
 
+    If apis.models.constants.LOCAL_DEPLOYMENT is True this method returns an empty dictionary
+
     Arguments:
-        validate(bool): Set to True to validate contents of consumable-computing configuration file
-        from_config_map(Optional[str]): Read configuration from kubernetes ConfigMap, if set to None will instead read
+        local_deployment: Whether the API is running in LOCAL_DEPLOYMENT mode (i.e. not inside
+            Kubernetes)
+        validate(bool): Set to True to validate contents of configuration file
+        from_config_map(Optional[str]): Read configuration from kubernetes ConfigMap, if unset will instead read
             configuration from the config.json file that @get_config_json_path() returns.
 
     Returns:
@@ -275,7 +289,8 @@ def setup_config(validate: bool = False, from_config_map: Optional[str] = Config
                 "gitsecret-oauth" (optional): "Name of Secret object which contains the key `oauth-token`"
                 "imagePullSecret":
                   - "Name of Secret object which contains the key `.dockerconfigjson`"
-                "inputdatadir": "the directory that the workflow experiments description is stored (experiments.json)"
+                "inputdatadir": "the directory that runtime service uses to store metadata files
+                   (e.g. experiments.json, relationships.json, etc)"
                 "workingVolume": "name of the PVC that workflow instances will use to store their outputs",
                 "default-arguments": [
                     {
@@ -285,22 +300,54 @@ def setup_config(validate: bool = False, from_config_map: Optional[str] = Config
                 ]
             }
     """
-    if from_config_map is None:
-        configuration = {}
+    logger = logging.getLogger(__name__)
+
+    if from_config_map is ...:
+        if local_deployment is False:
+            from_config_map = ConfigMapWithParameters
+
+    if from_config_map is ...:
         path = get_config_json_path()
 
         if path is not None:
             with open(path) as f:
                 configuration = json.load(f)
+        elif local_deployment is False:
+            raise apis.models.errors.ApiError("Could not load configuration file")
         else:
-            # of the local file
-            print("COULDN'T LOAD CONFIGURATION, SHOULDN'T HAPPEN")
+            local_storage = LOCAL_STORAGE or os.getcwd()
+            ret = {'inputdatadir': local_storage}
+            logger.info(f"API is in LOCAL_DEPLOYMENT and CONFIG_JSON_PATH is unset - configuration={ret}")
+
+            return ret
     else:
         configuration = configuration_from_configmap(from_config_map)
 
-    print(json.dumps(configuration))
+    logger.info(f"Loaded configuration {json.dumps(configuration)}")
 
     if validate:
         validate_config(configuration)
 
     return configuration
+
+
+def parse_configuration(
+        local_deployment: bool,
+        validate: bool = False,
+        from_config_map: Optional[str] = ...
+) -> apis.models.virtual_experiment.Configuration:
+    f"""Loads the configuration settings
+
+    Arguments:
+        local_deployment: Whether API is running in LOCAL_DEPLOYMENT mode
+        validate(bool): Set to True to validate contents of configuration file
+        from_config_map(Optional[str]): Read configuration from kubernetes ConfigMap, if unset will instead read
+            configuration from the config.json file that @get_config_json_path() returns.
+
+    Returns:
+        apis.models.virtual_experiment.Configuration
+    """
+    configuration = setup_config(local_deployment=local_deployment, validate=validate,
+                                 from_config_map=from_config_map)
+
+    return apis.models.virtual_experiment.Configuration.parse_obj(configuration)

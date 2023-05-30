@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import apis.models.errors
 
+class RuntimeError(apis.models.errors.ApiError):
+    pass
 
-class CannotDownloadBasePackageError(apis.models.errors.ApiError):
+
+class CannotDownloadBasePackageError(RuntimeError):
     pass
 
 

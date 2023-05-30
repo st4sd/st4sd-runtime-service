@@ -33,7 +33,7 @@ from kubernetes import client
 from kubernetes.client.rest import ApiException
 
 import apis.datasets
-import apis.db
+import apis.db.secrets
 import apis.image_pull_secrets
 import apis.instances
 import apis.k8s
@@ -1042,11 +1042,10 @@ class ExperimentList(Resource):
     @api.expect(_my_parser)
     def get(self):
         '''List all experiments'''
-        with utils.database_experiments_open() as db:
+        with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
 
             entries = []
             problems = []
-
             for doc in db.query():
                 try:
                     obj = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(doc)
@@ -1084,8 +1083,9 @@ class ExperimentList(Resource):
                 raise  # keep linter happy
 
             current_app.logger.info(f"Creating experiment definition")
-            download = apis.storage.PackagesDownloader(ve)
-            db = utils.database_experiments_open()
+            download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
+                local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
+            db = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
 
             metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(ve, download, db)
             apis.runtime.package.validate_parameterised_package(ve=ve, metadata=metadata)
@@ -1120,7 +1120,7 @@ class ExperimentDSL(Resource):
             # VV: If identifier has neither @ or : it rewrites it to "${identifier}:latest}
             identifier = apis.models.common.PackageIdentifier(identifier).identifier
 
-            with utils.database_experiments_open() as db:
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 docs = db.query_identifier(identifier)
 
                 if len(docs) == 0:
@@ -1142,7 +1142,8 @@ class ExperimentDSL(Resource):
             ve.parameterisation.get_available_platforms()
 
             if len(ve.base.packages) == 1:
-                download = apis.storage.PackagesDownloader(ve)
+                download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
+                    local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
 
                 with download:
                     metadata = download.get_metadata(ve.base.packages[0].name)
@@ -1201,7 +1202,8 @@ class Experiment(Resource):
         '''Fetch an experiment given its identifier'''
 
         try:
-            ret = apis.kernel.experiments.api_get_experiment(identifier, utils.database_experiments_open())
+            ret = apis.kernel.experiments.api_get_experiment(identifier, utils.database_experiments_open(
+                apis.models.constants.LOCAL_DEPLOYMENT))
 
             return {
                 'entry': do_format_parameterised_package(ret.experiment, self._my_parser),
@@ -1229,7 +1231,7 @@ class Experiment(Resource):
         '''Delete an experiment'''
         deleted = False
         try:
-            with utils.database_experiments_open() as db:
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 deleted = db.delete_identifier(identifier)
         except Exception as e:
             current_app.logger.warning(traceback.format_exc())
@@ -1252,7 +1254,7 @@ class LambdaExperimentStart(Resource):
     def post(self):
         '''Start a lambda experiment'''
         try:
-            configuration = setup_config()
+            configuration = setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
 
             experiment_start_obj = request.json
 
@@ -1337,7 +1339,7 @@ class ExperimentPackageHistory(Resource):
     def get(self, package_name: str):
         '''Returns the history of tags and digests for this package'''
         try:
-            with utils.database_experiments_open() as db:
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 history = db.trace_history(package_name=package_name)
 
             return history.to_dict()
@@ -1388,7 +1390,7 @@ class ExperimentPackageTag(Resource):
             raise  # VV: keep linter happy
 
         try:
-            with utils.database_experiments_open() as db:
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 db.tag_update(identifier, tags)
         except apis.models.errors.CannotRemoveLatestTagError:
             api.abort(400, f"Cannot untag the latest tag from {identifier}", cannotUntagLatestFrom=identifier)
@@ -1431,7 +1433,7 @@ class ExperimentStart(Resource):
             # VV: If identifier has neither @ or : it rewrites it to "${identifier}:latest}
             identifier = apis.models.common.PackageIdentifier(identifier).identifier
 
-            with utils.database_experiments_open() as db:
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 docs = db.query_identifier(identifier)
 
             if len(docs) == 0:
@@ -1485,7 +1487,7 @@ class ExperimentStart(Resource):
                 s3_security = apis.k8s.extract_s3_credentials_from_dataset(s3_out.name, utils.MONITORED_NAMESPACE)
                 payload_config.configure_output_s3(s3_out.path, s3_security)
 
-            configuration = setup_config()
+            configuration = setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
             extra_options = apis.runtime.package.PackageExtraOptions.from_configuration(configuration)
             namespace_presets = apis.models.virtual_experiment.NamespacePresets.from_configuration(configuration)
 
@@ -1567,7 +1569,7 @@ class ExperimentStart(Resource):
                 api.abort(500, "Exception when creating input volume: %s\n" % e)
             ve.metadata.registry.timesExecuted += 1
 
-            with utils.database_experiments_open() as db:
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 db.upsert(ve.dict(exclude_none=True), ql=db.construct_query(
                     package_name=ve.metadata.package.name,
                     registry_digest=ve.metadata.registry.digest))

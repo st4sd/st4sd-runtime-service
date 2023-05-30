@@ -12,6 +12,7 @@ from flask import current_app
 from flask_restx import Resource
 
 import apis.models
+import apis.models.constants
 import utils
 
 api = apis.models.api_url_map
@@ -78,6 +79,9 @@ class UrlMapAll(Resource):
 
         Prioritizes global Datastore routes (if available).
         """
+        if apis.models.constants.LOCAL_DEPLOYMENT:
+            api.abort(400, "The API is running in LOCAL_DEPLOYMENT mode", localDeployment=True)
+
         try:
             return get_all_routes()
         except Exception as e:
@@ -106,6 +110,9 @@ class UrlService(Resource):
 
         Prioritizes global Datastore routes (if available).
         """
+        if apis.models.constants.LOCAL_DEPLOYMENT:
+            api.abort(400, "The API is running in LOCAL_DEPLOYMENT mode", localDeployment=True)
+
         try:
             all_urs = get_all_routes()
             try:

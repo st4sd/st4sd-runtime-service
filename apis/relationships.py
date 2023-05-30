@@ -77,7 +77,7 @@ class Relationships(Resource):
         entries = []
         problems = []
 
-        with utils.database_relationships_open() as db:
+        with utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
             for doc in db.query():
                 try:
                     obj = apis.models.relationships.Relationship.parse_obj(doc)
@@ -101,9 +101,10 @@ class Relationships(Resource):
         try:
             rel = apis.kernel.relationships.api_push_relationship(
                 rel=doc,
-                db_relationships=utils.database_relationships_open(),
-                db_experiments=utils.database_experiments_open(),
-                packages=apis.storage.PackagesDownloader(ve=None),
+                db_relationships=utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT),
+                db_experiments=utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT),
+                packages=apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+                    local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)),
             )
             return {
                 "entry": rel.dict()
@@ -145,12 +146,13 @@ class TransformDSLPreview(Resource):
         try:
             args = self._my_parser.parse_args()
 
-            db_relationships = utils.database_relationships_open()
-            db_experiments = utils.database_experiments_open()
+            db_relationships = utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT)
+            db_experiments = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
 
             ret = apis.kernel.relationships.api_preview_synthesize_dsl(
                 identifier=identifier,
-                packages=apis.storage.PackagesDownloader(ve=None),
+                packages=apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+                    local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)),
                 db_relationships=db_relationships,
                 db_experiments=db_experiments,
                 dsl_version=args.dslVersion
@@ -197,9 +199,10 @@ class TransformSynthesize(Resource):
             ret = apis.kernel.relationships.api_synthesize_from_transformation(
                 identifier=identifier,
                 new_package_name=new_package_name,
-                packages=apis.storage.PackagesDownloader(ve=None),
-                db_relationships=utils.database_relationships_open(),
-                db_experiments=utils.database_experiments_open(),
+                packages=apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+                    local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)),
+                db_relationships=utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT),
+                db_experiments=utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT),
                 synthesize=synthesize,
                 path_multipackage=apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
             )
@@ -235,7 +238,7 @@ class TransformSynthesize(Resource):
 class Relationship(Resource):
     def get(self, identifier: str):
         try:
-            with utils.database_relationships_open() as db:
+            with utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 ql = db.construct_query(identifier)
                 docs = db.query(ql)
 
@@ -261,7 +264,7 @@ class Relationship(Resource):
 
     def delete(self, identifier: str):
         try:
-            with utils.database_relationships_open() as db:
+            with utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
                 ql = db.construct_query(identifier)
                 num_docs = db.delete(ql)
             if num_docs == 0:

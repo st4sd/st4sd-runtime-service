@@ -27,6 +27,7 @@ import six
 import yaml
 
 import apis.db.exp_packages
+import apis.db.secrets
 import apis.k8s
 import apis.models.common
 import apis.models.constants
@@ -38,7 +39,6 @@ import apis.storage
 import binascii
 import base64
 
-import kubernetes.client
 
 ROOT_VOLUME_MOUNTS = '/tmp/st4sd-volumes/'
 ROOT_DATASET_WORKFLOW_DEFINITIONS = "/tmp/st4sd-workflow-definitions/"
@@ -1083,10 +1083,17 @@ def b64_encode(which: str) -> str:
     return base64.encodebytes(which.encode('utf-8')).decode('utf-8')
 
 
-def may_create_oauth_secret_and_update_base(base: apis.models.virtual_experiment.BasePackage):
+def may_create_oauth_secret_and_update_base(
+        base: apis.models.virtual_experiment.BasePackage,
+        db_secrets: apis.db.secrets.SecretsStorageTemplate,
+):
     """Inspects an experiment definition and if it contains the field package.type.git.oauth-token it
     validates that it's also cloning a https:// url. Then it creates a Secret object to hold that token
     and rewrites the experiment definition to use the new Secret object
+
+    Arguments:
+        base: The description of a base package - may be updated to reflect new security options
+        db_secrets: The database of secrets
     """
     source = base.source
     if source.git is None:
@@ -1106,9 +1113,9 @@ def may_create_oauth_secret_and_update_base(base: apis.models.virtual_experiment
             # VV: The base package contains an oauth-token, we need to create a secret for it
             pass
         else:
-            raise NotImplementedError(f"Not implemented git source.security {type(security)}")
+            raise apis.models.errors.ApiError(f"Not implemented git source.security {type(security)}")
     elif security.oauth is None and len(security.dict(exclude_none=True).keys()) > 0:
-        raise NotImplementedError(f"Not implemented git source.security {type(security)}")
+        raise apis.models.errors.ApiError(f"Not implemented git source.security {type(security)}")
 
     # VV: this is an embedded oauth-token, convert it
     url: str = source.location.url
@@ -1117,19 +1124,26 @@ def may_create_oauth_secret_and_update_base(base: apis.models.virtual_experiment
     name = os.path.splitext(os.path.basename(url))[0]
     name = f"git-oauth-{name}-{binascii.b2a_hex(os.urandom(6)).decode('utf-8')}"
 
-    api_instance_core = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())
-    secret = kubernetes.client.V1Secret(metadata=kubernetes.client.V1ObjectMeta(name=name),
-                                        data={'oauth-token': b64_encode(oauth_token)})
+    if isinstance(db_secrets, apis.db.secrets.KubernetesSecrets):
+        secret = apis.db.secrets.SecretKubernetes(
+            name=name,
+            data={'oauth-token': oauth_token},
+            secretKind="generic")
+    else:
+        secret = apis.db.secrets.Secret(name=name, data={'oauth-token': oauth_token})
 
-    api_instance_core.create_namespaced_secret(namespace=apis.models.constants.MONITORED_NAMESPACE, body=secret)
-    logger.warning(f"secret: {secret.metadata.name} created prior to git-token validation, use cautiously")
+    with db_secrets:
+        db_secrets.secret_create(secret)
 
     source.security.oauth = apis.models.common.Option(
         valueFrom=apis.models.common.OptionValueFrom(
             secretKeyRef=apis.models.common.OptionFromSecretKeyRef(name=name, key="oauth-token")))
 
 
-def prepare_parameterised_package_for_download_definition(ve: apis.models.virtual_experiment.ParameterisedPackage):
+def prepare_parameterised_package_for_download_definition(
+        ve: apis.models.virtual_experiment.ParameterisedPackage,
+        db_secrets: apis.db.secrets.SecretsStorageTemplate
+):
     """Processes parameterised package to securely use credentials for retrieving its definition
 
     For example, if the parameterised package lives on a Git server and contains an oauth-token, the PVEP will be
@@ -1137,11 +1151,12 @@ def prepare_parameterised_package_for_download_definition(ve: apis.models.virtua
 
     Arguments:
         ve: The parameterised package to prepare.
+        db_secrets: The database of secrets
     """
     base_packages = ve.base.packages
     for bp in base_packages:
         try:
-            may_create_oauth_secret_and_update_base(bp)
+            may_create_oauth_secret_and_update_base(bp, db_secrets=db_secrets)
         except Exception as e:
             logger.warning(f"Cannot create OAuth secret for {ve.metadata.package.name}/{bp.name} due to {e}. "
                            f"Traceback {traceback.format_exc()}")
@@ -1329,7 +1344,7 @@ def access_and_validate_virtual_experiment_packages(
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
     """
 
-    prepare_parameterised_package_for_download_definition(ve)
+    prepare_parameterised_package_for_download_definition(ve, db_secrets=packages.db_secrets)
 
     for package in ve.base.packages:
         if not package.graphs:
