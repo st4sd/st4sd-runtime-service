@@ -122,7 +122,7 @@ class InvalidPayloadExperimentStartError(ApiError):
         super(InvalidPayloadExperimentStartError, self).__init__(msg)
 
 
-class OverrideDataFilesError(ApiError):
+class OverrideDataFilesError(InvalidPayloadExperimentStartError):
     def __init__(self, names: List[str], msg: str):
         self.names = names
         if names:
@@ -130,11 +130,25 @@ class OverrideDataFilesError(ApiError):
         super(OverrideDataFilesError, self).__init__(msg)
 
 
-class OverridePlatformError(ApiError):
+class OverridePlatformError(InvalidPayloadExperimentStartError):
     def __init__(self, payload_platform: str, msg: str):
         self.payload_platform = payload_platform
 
         super(OverridePlatformError, self).__init__(msg)
+
+
+class InvalidInputsError(InvalidPayloadExperimentStartError):
+    def __init__(self, missing_inputs: List[str], extra_inputs: List[str]):
+        self.missing_inputs = list(missing_inputs)
+        self.extra_inputs = extra_inputs
+
+        msg = "Invalid experiment start payload."
+        if missing_inputs:
+            msg += f" Missing inputs: {missing_inputs}."
+        if extra_inputs:
+            msg += f" Extra inputs: {extra_inputs}"
+
+        super().__init__(msg)
 
 
 class DBError(ApiError):

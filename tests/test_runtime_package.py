@@ -1193,6 +1193,7 @@ def test_package_store_outputs_s3(ve_sum_numbers: apis.models.virtual_experiment
 def test_read_s3_files_rename(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
 
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="renamed.txt"))
     old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
         'inputs': [
             {
@@ -1223,6 +1224,8 @@ def test_read_s3_files_rename(ve_sum_numbers: apis.models.virtual_experiment.Par
 
 def test_read_dataset_files_rename(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="renamed.txt"))
 
     old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
         'inputs': [
@@ -1279,6 +1282,8 @@ def test_invalid_payload_s3_both_filename_and_target_filename():
 
 def test_read_s3_files_simple(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="file.txt"))
 
     old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
         'inputs': [
@@ -1739,3 +1744,33 @@ def test_extract_all_variables_during_validate(
             apis.runtime.package.validate_parameterised_package(ve=ve_psi4, metadata=metadata)
 
     assert e.value.variable_name == unknown_variable
+
+
+def test_missing_input(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="input_smiles.csv"))
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({})
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+    with pytest.raises(apis.models.errors.InvalidInputsError) as e:
+        apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+
+    e = e.value
+
+    assert e.missing_inputs == ['input_smiles.csv']
+
+
+def test_extra_input(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+        "inputs": [{"filename": "input_smiles.csv", "content": "hello"}]
+    })
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+    with pytest.raises(apis.models.errors.InvalidInputsError) as e:
+        apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+
+    e = e.value
+
+    assert e.extra_inputs == ['input_smiles.csv']

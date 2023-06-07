@@ -206,6 +206,15 @@ class NamedPackage:
         # VV: trigger error checking of orchestrator resources
         _ = self.orchestrator_resources
 
+        # VV: Finally validate the inputs
+        provided_inputs = {x.name for x in payload_config.inputs}
+        expected_inputs = {x.name for x in self._ve.metadata.registry.inputs}
+        missing_inputs = sorted(expected_inputs.difference(provided_inputs))
+        extra_inputs = sorted(provided_inputs.difference(expected_inputs))
+
+        if missing_inputs or extra_inputs:
+            raise apis.models.errors.InvalidInputsError(missing_inputs=missing_inputs, extra_inputs=extra_inputs)
+
     def _validate_and_extract_runtime_args_and_env_vars_from_s3_credentials_output(self):
         """Invoke this AFTER setting environment variables
 

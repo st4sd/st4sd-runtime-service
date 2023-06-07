@@ -1504,10 +1504,8 @@ class ExperimentStart(Resource):
 
             try:
                 package = apis.runtime.package.NamedPackage(ve, namespace_presets, payload_config, extra_options)
-            except (apis.models.errors.ApiError, ValueError) as e:
-                current_app.logger.warning(f"Invalid payload {e}. Traceback: {traceback.format_exc()}")
-                api.abort(400, f"{e} - experiment start payload is invalid", reason=str(e))
-                raise e from e  # VV: Keep linter happy
+            except apis.models.errors.ApiError:
+                raise
             except Exception as e:
                 current_app.logger.warning(f"Invalid payload with anonymous error {e}. Traceback: "
                                            f"{traceback.format_exc()}")
@@ -1575,6 +1573,14 @@ class ExperimentStart(Resource):
                     registry_digest=ve.metadata.registry.digest))
 
             return package.rest_uid
+        except apis.models.errors.InvalidInputsError as e:
+            current_app.logger.warning("Traceback: %s\nException: %s for %s" % (traceback.format_exc(), e, identifier))
+            kargs = {}
+            if e.missing_inputs:
+                kargs['missingInputs'] = e.missing_inputs
+            if e.extra_inputs:
+                kargs['extraInputs'] = e.extra_inputs
+            api.abort(400, f"{e}", **kargs)
         except apis.models.errors.ApiError as e:
             current_app.logger.warning("Traceback: %s\nException: %s for %s" % (traceback.format_exc(), e, identifier))
             api.abort(400, f"Invalid request. {e}")
