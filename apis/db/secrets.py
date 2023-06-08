@@ -110,14 +110,14 @@ class KubernetesSecrets(SecretsStorageTemplate):
 
         api = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())
 
-        kubernetes.client.models.V1Secret(
+        k8s_secret = kubernetes.client.models.V1Secret(
             data=data,
             type=secret.secretKind,
             metadata=kubernetes.client.models.V1ObjectMeta(
                 name=secret.name, labels={'creator': 'st4sd-runtime-service'})
         )
 
-        api.create_namespaced_secret(namespace=self.namespace, body=secret)
+        api.create_namespaced_secret(namespace=self.namespace, body=k8s_secret)
 
     def secret_delete(self, name: str):
         api = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())
