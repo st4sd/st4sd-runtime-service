@@ -180,7 +180,7 @@ def get_list_instances(
                 identifier = (package_name, digest)
                 cache_experiments[identifier] = None
 
-        current_app.logger.info(f"There are {len(item)} instances which are associated with {len(cache_experiments)} "
+        current_app.logger.info(f"There are {len(items)} instances which are associated with {len(cache_experiments)} "
                                 f"parameterised virtual experiment packages")
 
         with database:
