@@ -1096,6 +1096,8 @@ class ExperimentList(Resource):
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while pushing new parameterised package. "
+                                       f"Traceback: {traceback.format_exc()}")
             api.abort(400, f"Invalid payload, reason: {str(e)}", problem=str(e))
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while pushing new parameterised package. "

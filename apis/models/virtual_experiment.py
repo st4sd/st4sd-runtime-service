@@ -1025,6 +1025,8 @@ class GraphBinding(apis.models.common.Digestable):
                           "must not contain string !!! or \\n. "
                           "If None then reference and optionally stages must be provided")
     reference: Optional[str] = pydantic.Field(None, description="A FlowIR reference to associate with binding")
+    text: Optional[str] = pydantic.Field(None, description="The text to associate with binding, may contain "
+                                                           "references to variables of the owner graph")
     type: Optional[str] = pydantic.Field(
         None, description="Valid types are input and output, if left None and binding belongs to a collection "
                           "the type field receives the approriate default value")
@@ -1049,6 +1051,15 @@ class GraphBinding(apis.models.common.Digestable):
         if value is not None:
             apis.models.from_core.DataReference(value)
             return value
+
+    @pydantic.root_validator()
+    def exclusive_variable_reference(cls, values: Dict[str, Any]):
+        # if values.get('reference') is None and values.get('variable') is None:
+        #     raise ValueError("Must have either reference or variable", values)
+        if values.get('reference') and values.get('text'):
+            raise ValueError("reference and text are mutually exclusive")
+
+        return values
 
 
 class GraphBindingCollection(apis.models.common.Digestable):
@@ -1145,9 +1156,8 @@ class BindingOptionValueFromGraph(apis.models.common.Digestable):
 
     @validator('binding')
     def check_source_binding_name(cls, binding: GraphBinding):
-        if binding.name is None:
-            if binding.reference is None:
-                raise ValueError("Binding must have a name OR a reference (and optionally stages)")
+        if binding.name is None and binding.reference is None and binding.text is None:
+            raise ValueError("Binding must have at least a name OR a text OR a reference-with-optional-stages")
         return binding
 
     @validator('binding')
@@ -1202,6 +1212,7 @@ class BasePackageGraphInstance(apis.models.common.Digestable):
     graph: BasePackageGraph = pydantic.Field(
         ..., description="The graph to instantiate, its name must be ${basePackage.name}/${graph.name}")
     bindings: List[BindingOption] = []
+
 
     @validator('graph')
     def check_just_graph_name(cls, value: BasePackageGraph):
@@ -1290,8 +1301,10 @@ class VirtualExperimentBase(apis.models.common.Digestable):
                 raise ValueError(f"Output {bo.name} must have valueFrom.graph")
             if len(bo.valueFrom.dict(exclude_none=True)) != 1:
                 raise ValueError(f"Output {bo.name} must only have valueFrom.graph")
-            if not (bo.valueFrom.graph.binding.name or bo.valueFrom.graph.binding.reference):
-                raise ValueError(f"Output {bo.name} does not have valueFrom.graph.binding.[name or reference]")
+            if not (bo.valueFrom.graph.binding.name or bo.valueFrom.graph.binding.reference
+                    or bo.valueFrom.graph.binding.text):
+                raise ValueError(f"Output {bo.name} does not have valueFrom.graph.binding."
+                                 f"[name or reference or text]")
             if bo.valueFrom.graph.name is None:
                 raise ValueError(f"Output {bo.name} does not reference a graph")
             pkg_name, graph_name = bo.valueFrom.graph.partition_name()
@@ -1475,7 +1488,7 @@ def characterize_variables(
     ret = VariableCharacterization(platforms=platforms)
 
     for platform in platforms:
-        platform_vars = dsl.get_platform_global_variables(platform)
+        platform_vars = dsl.get_platform_variables(platform)['global']
         for (k, v) in platform_vars.items():
             if k in ret.multipleValues:
                 continue

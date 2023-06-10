@@ -11,4 +11,4 @@ COPY tests /tests
 
 ENV LOCAL_DEPLOYMENT=True
 
-RUN python -m pytest -n 4 --real-packages /tests
+RUN python -m pytest -n 4 --real-packages --rest-api /tests

@@ -1088,10 +1088,6 @@ class NamedPackage:
         return body
 
 
-def b64_encode(which: str) -> str:
-    return base64.encodebytes(which.encode('utf-8')).decode('utf-8')
-
-
 def may_create_oauth_secret_and_update_base(
         base: apis.models.virtual_experiment.BasePackage,
         db_secrets: apis.db.secrets.SecretsStorageTemplate,
@@ -1300,21 +1296,16 @@ def update_registry_metadata_of_parameterised_package(
                                    f"will assume that this is not a problem")
                     p_value = str(p_vars[key])
 
-                for x in merged.executionOptionsDefaults.variables:
-                    if x.name == key:
-                        for pv in x.valueFrom:
-                            if pv.platform == p:
-                                break
-                            else:
-                                x.valueFrom.append(apis.models.virtual_experiment.ValueInPlatform(
-                                    value=p_value, platform=p))
-                        break
-                else:
+                try:
+                    v = merged.executionOptionsDefaults.get_variable(key)
+                except KeyError:
                     merged.executionOptionsDefaults.variables.append(
                         apis.models.virtual_experiment.VariableWithDefaultValues(name=key, valueFrom=[
-                            apis.models.virtual_experiment.ValueInPlatform(value=p_value, platform=p)
-                        ])
-                    )
+                            apis.models.virtual_experiment.ValueInPlatform(value=p_value, platform=p)]))
+                else:
+                    if not any(filter(lambda pv: pv.platform == p, v.valueFrom)):
+                        # VV: There is no information about this platform for this variable
+                        v.valueFrom.append(apis.models.virtual_experiment.ValueInPlatform(value=p_value, platform=p))
 
         ve.metadata.registry.inputs = merged.inputs
         ve.metadata.registry.data = merged.data

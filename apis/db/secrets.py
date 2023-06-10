@@ -31,10 +31,7 @@ class SecretKubernetes(Secret):
 
 def b64_encode(which):
     # type: (str) -> str
-    try:
-        return base64.encodebytes(which.encode('utf-8')).decode('utf-8')
-    except AttributeError:
-        return base64.encodestring(which)
+    return base64.standard_b64encode(which.encode('utf-8')).decode('utf-8')
 
 
 class SecretsStorageTemplate:
@@ -101,7 +98,7 @@ class KubernetesSecrets(SecretsStorageTemplate):
 
         k8s_secret: kubernetes.client.V1Secret = secrets.items[0]
 
-        data = {key: base64.b64decode(k8s_secret.data[key]).decode() for key in k8s_secret.data}
+        data = {key: base64.standard_b64decode(k8s_secret.data[key]).decode() for key in k8s_secret.data}
 
         return {"name": name, "data": data}
 

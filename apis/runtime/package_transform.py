@@ -6,12 +6,15 @@
 
 from __future__ import annotations
 
-import json
+import re
 import logging
+import traceback
 from typing import List
 from typing import Optional
-from typing import Set
+from typing import Tuple
 from typing import Union
+from typing import Any
+from typing import Iterable
 
 from typing import Callable
 import pydantic
@@ -26,6 +29,7 @@ import apis.models.errors
 import apis.models.from_core
 import apis.models.relationships
 import apis.models.virtual_experiment
+import apis.runtime.errors
 import apis.runtime.package_derived
 import apis.storage
 
@@ -37,14 +41,32 @@ def get_parameters_of_component(
     return sorted(component.get('references', []))
 
 
+class ManyParameters(pydantic.BaseModel):
+    class Config:
+        arbitrary_types_allowed = True
+
+    references: List[apis.models.from_core.DataReference] = []
+    variables: List[str] = []
+
+
 def get_workflow_parameter_names(
         concrete: experiment.model.frontends.flowir.FlowIRConcrete,
-        cb_filter: Callable[[str], bool] | None = None
-) -> Set[str]:
+        cb_filter: Callable[[str], bool] | None = None,
+        comp_ids: Optional[List[Tuple[int, str]]] = None,
+) -> ManyParameters:
     """Extracts the top-level parameters in the workflow (assumes that references are the only parameters)"""
-    ret = set()
+    aggregate = set()
 
-    comp_ids = concrete.get_component_identifiers(recompute=False)
+    if comp_ids is None:
+        comp_ids = concrete.get_component_identifiers(recompute=False)
+
+    platform_vars = {
+        p: {
+            str(k): str(v) for (k, v) in concrete.get_platform_variables(p)['global'].items()
+        } for p in concrete.platforms
+    }
+
+    problems: List[str] = []
 
     for cid in comp_ids:
         comp = concrete.get_component(cid)
@@ -53,7 +75,35 @@ def get_workflow_parameter_names(
         if cb_filter is not None:
             parameters = [p for p in parameters if cb_filter(p)]
 
-        ret.update(parameters)
+        aggregate.update(parameters)
+
+        def record_references_to_variables(what: Any, label: str):
+            if not isinstance(what, str):
+                return
+
+            more_variables = []
+
+            for p in concrete.platforms:
+                try:
+                    variables = experiment.model.frontends.flowir.FlowIR.discover_indirect_dependencies_to_variables(
+                        what, context=platform_vars[p], out_missing_variables=more_variables)
+                    aggregate.update({f'%({x})s' for x in variables + more_variables})
+                except Exception as e:
+                    logging.getLogger("visit").warning(f"Exception while extracting variable reference: {e} "
+                                                       f"- {traceback.format_exc()}")
+                    problems.append(experiment.model.graph.ComponentIdentifier(cid[1], cid[0]).identifier)
+
+        experiment.model.frontends.flowir.FlowIR.visit_all(comp, record_references_to_variables)
+
+    if problems:
+        raise apis.runtime.errors.RuntimeError(f"Error while extracting variable parameters for components {problems}")
+
+    ret = ManyParameters()
+    for w in sorted(aggregate):
+        if w.startswith('%('):
+            ret.variables.append(w[2:-2])
+        else:
+            ret.references.append(apis.models.from_core.DataReference(w))
 
     return ret
 
@@ -82,8 +132,8 @@ class TransformRelationship:
     def __init__(
             self,
             transformation: apis.models.relationships.Transform,
-            output_graph_name: str = "Foundation",
-            input_graph_name: str = "Surrogate",
+            output_graph_name: str = "outputGraph",
+            input_graph_name: str = "inputGraph",
     ):
         self._transform = transformation
         self._input_graph_name = input_graph_name
@@ -129,22 +179,26 @@ class TransformRelationship:
     def get_ve_outputgraph(self) -> Union[apis.models.virtual_experiment.ParameterisedPackage, None]:
         return self._ve_outputgraph
 
-    def guess_parameter_of_surrogate(
+    def guess_reference_parameter_of_surrogate(
             self,
             foundation: experiment.model.frontends.flowir.DictFlowIRComponent,
             surrogate: experiment.model.frontends.flowir.DictFlowIRComponent,
-            parameter_name: str,
+            surrogate_dref: apis.models.from_core.DataReference,
     ) -> str:
         surrogate_name = experiment.model.graph.ComponentIdentifier(surrogate['name']).identifier
         foundation_params = get_parameters_of_component(foundation)
-        surrogate_dref = apis.models.from_core.DataReference(parameter_name)
+        parameter_name = surrogate_dref.absoluteReference
 
         surrogate_pathref = surrogate_dref.pathRef
         matching = []
         self._log.info(f"Guessing parameter {parameter_name} of surrogate {surrogate_name}")
 
         for param_foundation in foundation_params:
-            foundation_dref = apis.models.from_core.DataReference(param_foundation)
+            try:
+                foundation_dref = apis.models.from_core.DataReference(param_foundation)
+            except ValueError:
+                # VV: This parameter is actually a variable not a reference
+                continue
 
             if foundation_dref.pathRef == surrogate_pathref:
                 self._log.info(
@@ -186,7 +240,11 @@ class TransformRelationship:
             excl_components = list(components or [])
 
             def filter_out_components(parameter: str) -> bool:
-                dref = apis.models.from_core.DataReference(parameter)
+                try:
+                    dref = apis.models.from_core.DataReference(parameter)
+                except ValueError:
+                    # VV: This parameter is not a reference, must be a variable
+                    return True
 
                 return dref.externalProducerName is None and \
                     (dref.producerIdentifier.identifier not in excl_components)
@@ -202,16 +260,23 @@ class TransformRelationship:
                 not_in_inputgraph.append(ref)
 
         # VV: Foundation (i.e. output) and Surrogate (i.e. input) parameters
-        p_found = get_workflow_parameter_names(
-            concrete_found, cb_filter=exclude_components(transform.outputGraph.components))
-        parameters_found = [apis.models.from_core.DataReference(ref) for ref in p_found]
+        try:
+            parameters_found = get_workflow_parameter_names(
+                concrete_found, cb_filter=exclude_components(transform.outputGraph.components))
+        except Exception as e:
+            raise apis.runtime.errors.RuntimeError(f"Could not extract parameters of outputGraph "
+                                                   f"- underlying error {e}")
 
-        self._log.info(f"Parameters Foundation {parameters_found}")
+        variables_found_all = set()
+        for p in concrete_found.platforms:
+            variables_found_all.update(concrete_found.get_platform_global_variables(p))
 
-        known_mappings = set()
+        self._log.info(f"Parameters Foundation {parameters_found.references} and {parameters_found.variables}")
+
+        known_mappings_surr = set()
         for m in transform.relationship.graphParameters:
-            if m.inputGraphParameter.name and (m.outputGraphParameter.default or m.outputGraphParameter.name):
-                known_mappings.update(m.inputGraphParameter.name)
+            if m.inputGraphParameter.name and (m.outputGraphParameter.value or m.outputGraphParameter.name):
+                known_mappings_surr.add(m.inputGraphParameter.name)
 
         # VV: First prepare the mappings between graph parameters. If we find an inputGraph parameter for which
         # there is no mapping to an outputGraph then try to find if there's an outputGraph component which:
@@ -223,60 +288,102 @@ class TransformRelationship:
         for x in transform.relationship.graphParameters:
             all_graph_input_parameters.add(x.inputGraphParameter.name)
 
-        for surrogate in transform.inputGraph.components:
-            cid = experiment.model.graph.ComponentIdentifier(surrogate)
-            comp_params = get_parameters_of_component(concrete_surr.get_component((cid.stageIndex, cid.componentName)))
+        comp_ids = []
+        for x in transform.inputGraph.components:
+            cid = experiment.model.graph.ComponentIdentifier(x)
+            comp_ids.append((cid.stageIndex, cid.componentName))
+        try:
+            parameters_surr = get_workflow_parameter_names(concrete_surr, cb_filter=None, comp_ids=comp_ids)
+        except Exception as e:
+            raise apis.runtime.errors.RuntimeError(f"Could not extract parameters of inputGraph "
+                                                   f"- underlying error {e}")
 
-            for p in filter(lambda x: x not in known_mappings, comp_params):
-                dref_surr = apis.models.from_core.DataReference(p)
-                # VV: External dependencies (e.g. input, or  application dependency) are special,
-                # we don't need to care for them at all. They will just point to a directory under $INSTANCE_DIR
-                # We also don't care about parameters which are satisfied by components in the inputGraph
-                if dref_surr.externalProducerName \
-                        or dref_surr.producerIdentifier.identifier in transform.inputGraph.components:
-                    continue
+        self._log.info(f"Parameters surrogate {parameters_surr.references} and {parameters_surr.variables}")
 
-                for dref_found in parameters_found:
-                    if dref_found.producerIdentifier == dref_surr.producerIdentifier:
-                        # VV: There's a component in the outputGraph that the relationship does not remove
-                        # it has the same name as a component that was satisfying the dependency in inputGraph
-                        # let's infer that the 2 components are equal
-
-                        # VV: Here we use the foundation stage/index and the expected reference method (from surrogate)
-                        ref_surr = apis.models.from_core.DataReference.from_parts(
-                            stage=dref_surr.stageIndex, producer=dref_surr.producerName, fileRef='',
-                            method=dref_surr.method).absoluteReference
-                        ref_found = apis.models.from_core.DataReference.from_parts(
-                            stage=dref_found.stageIndex, producer=dref_found.producerName, fileRef='',
-                            method=dref_surr.method).absoluteReference
-
-                        self._log.info(
-                            f"   Matching {dref_found.absoluteReference} with "
-                            f"{dref_surr.absoluteReference} on pathRef= {dref_surr.pathRef}")
-
-                        if ref_surr not in all_graph_input_parameters:
-                            all_graph_input_parameters.add(ref_surr)
-
-                            transform.relationship.graphParameters.append(
-                                apis.models.relationships.RelationshipParameters(
-                                    inputGraphParameter=apis.models.relationships.GraphValue(name=ref_surr),
-                                    outputGraphParameter=apis.models.relationships.GraphValue(name=ref_found)))
-
-        # VV: We can do something similar for graphResults
-        # - If there is a parameter in the outputGraph referencing a component that the transformation removes, AND
-        # - there is no graphResult mapping for this parameter, AND
-        # - there is a component in the inputGraph with the same name, THEN
-
-        known_mappings = set()
-        for m in transform.relationship.graphResults:
-            if m.outputGraphResult.name and (m.inputGraphResult.default or m.inputGraphResult.name):
-                known_mappings.update(m.outputGraphResult.name)
-
-        cids_found = concrete_found.get_component_identifiers(recompute=True, include_documents=False)
-
+        # VV: The 2 graphs may contain variables with the same name. variablesMergePolicy dictates how to handle this:
+        # If variablesMergePolicy is OutputGraphOverridesInputGraph (default) (and inferParameters is True)
+        #   Use the outputGraph variables as parameters of the inputGraph
+        # If variablesMergePolicy is InputGraphOverridesOutputGraph (and inferResults is True)
+        #   Use the inputGraph variables as results that the 1-outputGraph consumes
         all_graph_output_results = set()
         for x in transform.relationship.graphResults:
             all_graph_output_results.add(x.outputGraphResult.name)
+
+        var_policy = apis.models.relationships.VariablesMergePolicy
+        for name in parameters_surr.variables:
+            if name not in variables_found_all:
+                # VV: This variable is brought in from the surrogate definition, it's not an actual parameter
+                continue
+
+            if self._transform.relationship.variablesMergePolicy == var_policy.OutputGraphOverridesInputGraph.value:
+                if name in known_mappings_surr:
+                    continue
+
+                if self._transform.relationship.inferParameters:
+                    known_mappings_surr.add(name)
+                    transform.relationship.graphParameters.append(
+                        apis.models.relationships.RelationshipParameters(
+                            inputGraphParameter=apis.models.relationships.GraphValue(name=name),
+                            outputGraphParameter=apis.models.relationships.GraphValue(name=name)))
+            elif self._transform.relationship.variablesMergePolicy == var_policy.InputGraphOverridesOutputGraph.value:
+                if name in all_graph_output_results:
+                    continue
+
+                if self._transform.relationship.inferResults:
+                    all_graph_output_results.add(name)
+                    transform.relationship.graphResults.append(
+                        apis.models.relationships.RelationshipResults(
+                            inputGraphResult=apis.models.relationships.GraphValue(name=name),
+                            outputGraphResult=apis.models.relationships.GraphValue(name=name)))
+            else:
+                raise apis.runtime.errors.RuntimeError("Unknown variablesMergePolicy: "
+                                                       f"{self._transform.relationship.variablesMergePolicy}")
+
+        for ref in parameters_surr.references:
+            if ref.absoluteReference in known_mappings_surr:
+                continue
+
+            # VV: External dependencies (e.g. input, or  application dependency) are special,
+            # we don't need to care for them at all. They will just point to a directory under $INSTANCE_DIR
+            # We also don't care about parameters which are satisfied by components in the inputGraph
+            if ref.externalProducerName \
+                    or ref.producerIdentifier.identifier in transform.inputGraph.components:
+                continue
+
+            for dref_found in parameters_found.references:
+                if dref_found.producerIdentifier == ref.producerIdentifier:
+                    # VV: There's a component in the outputGraph that the relationship does not remove
+                    # it has the same name as a component that was satisfying the dependency in inputGraph
+                    # let's infer that the 2 components are equal
+
+                    # VV: Here we use the foundation stage/index and the expected reference method (from surrogate)
+                    ref_surr = apis.models.from_core.DataReference.from_parts(
+                        stage=ref.stageIndex, producer=ref.producerName, fileRef='',
+                        method=ref.method).absoluteReference
+
+                    if ref_surr not in all_graph_input_parameters:
+                        ref_found = apis.models.from_core.DataReference.from_parts(
+                            stage=dref_found.stageIndex, producer=dref_found.producerName, fileRef='',
+                            method=ref.method).absoluteReference
+
+                        self._log.info(
+                            f"   Matching {dref_found.absoluteReference} with "
+                            f"{ref.absoluteReference} on pathRef= {ref.pathRef}")
+
+                        all_graph_input_parameters.add(ref_surr)
+
+                        transform.relationship.graphParameters.append(
+                            apis.models.relationships.RelationshipParameters(
+                                inputGraphParameter=apis.models.relationships.GraphValue(name=ref_surr),
+                                outputGraphParameter=apis.models.relationships.GraphValue(name=ref_found)))
+
+        # VV: We can do something similar for graphResults DataReferences
+        # - If there is a parameter in the outputGraph referencing a component that the transformation removes, AND
+        # - there is no graphResult mapping for this parameter, AND
+        # - there is a component in the inputGraph with the same name, THEN
+        # Use the inputGraph component instead of the one that outputGraph removes
+
+        cids_found = concrete_found.get_component_identifiers(recompute=True, include_documents=False)
 
         self._log.info(f"Foundation components are: {cids_found} known graphResults are {all_graph_output_results}")
 
@@ -341,13 +448,14 @@ class TransformRelationship:
         comp_surrogate = concrete_surrogate.get_component(
             (cid_surrogate.stageIndex, cid_surrogate.componentName))
 
-        parameters_surrogate = get_parameters_of_component(comp_surrogate)
+        parameters_surrogate = get_workflow_parameter_names(
+            concrete_surrogate, comp_ids=[(cid_surrogate.stageIndex, cid_surrogate.componentName)])
 
         if transform.relationship.inferParameters:
-            for name_in in parameters_surrogate:
+            for surr_dref in parameters_surrogate.references:
                 try:
-                    value = transform.relationship.get_parameter_relationship_by_name_input(name_in)
-                    if value.outputGraphParameter.default or value.inputGraphParameter.name:
+                    value = transform.relationship.get_parameter_relationship_by_name_input(surr_dref.absoluteReference)
+                    if value.outputGraphParameter.value or value.inputGraphParameter.name:
                         # VV: No need to infer anything for this graphParameter
                         continue
                 except KeyError:
@@ -356,9 +464,9 @@ class TransformRelationship:
                     pass
 
                 # VV: If we got here, then we need to infer the relationships for inputGraphParameter
-                self._log.log(15, f"Try infer relationships of inputGraphParameter.{name_in})")
+                self._log.log(15, f"Try infer relationships of inputGraphParameter.{surr_dref.absoluteReference})")
 
-                inferred = self.guess_parameter_of_surrogate(comp_foundation, comp_surrogate, name_in)
+                inferred = self.guess_reference_parameter_of_surrogate(comp_foundation, comp_surrogate, surr_dref)
 
                 if inferred is not None:
                     transform.relationship.graphParameters.append(
@@ -366,7 +474,7 @@ class TransformRelationship:
                             outputGraphParameter=apis.models.relationships.GraphValue(
                                 name=inferred),
                             inputGraphParameter=apis.models.relationships.GraphValue(
-                                name=name_in)
+                                name=surr_dref.absoluteReference)
                         ))
 
         if transform.relationship.inferResults and not transform.relationship.graphResults:
@@ -458,7 +566,10 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             self,
             transformation: apis.models.relationships.Transform,
     ):
-        super(TransformRelationshipToDerivedPackage, self).__init__(transformation=transformation)
+        output_graph_name = transformation.outputGraph.identifier or "outputGraph"
+        input_graph_name = transformation.inputGraph.identifier or "inputGraph"
+        super(TransformRelationshipToDerivedPackage, self).__init__(
+            transformation=transformation, output_graph_name=output_graph_name, input_graph_name=input_graph_name)
 
     def _ensure_base_packages(
             self,
@@ -532,7 +643,123 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             apis.models.virtual_experiment.BasePackageGraphNode(reference=x) for x in all_comp_ids
         ]
 
-    def _populate_graph_bindings_for_foundation(self, graph: apis.models.virtual_experiment.BasePackageGraph):
+    @classmethod
+    def _validate_reference_variable_name_or_string_in_concrete_context(
+            cls,
+            parameter_name: str,
+            value_reference_or_variable: str,
+            value_string_with_variable_refs: str,
+            context_variables: Iterable[str],
+            all_parameter_variables: Iterable[str],
+            package_name_of_parameter: str,
+            package_name_of_context_vars: str,
+            extra_msg_for_exception: str,
+    ) -> List[Exception]:
+        problems = []
+
+        try:
+            apis.models.from_core.DataReference(parameter_name)
+        except ValueError:
+            # VV: The parameter is not a DatareReference, therefore it *must* be the name of a variable
+            if parameter_name not in all_parameter_variables:
+                problems.append(
+                    apis.models.errors.TransformationUnknownVariableError(
+                        variable=parameter_name,
+                        package=package_name_of_parameter,
+                        extra_msg=extra_msg_for_exception))
+
+        if value_reference_or_variable:
+            try:
+                apis.models.from_core.DataReference(value_reference_or_variable)
+            except ValueError:
+                # VV: The value is not a DataReference, it *MUST* be the name of a variable in inputGraph
+                if value_reference_or_variable not in context_variables:
+                    problems.append(
+                        apis.models.errors.TransformationUnknownVariableError(
+                            variable=value_reference_or_variable,
+                            package=package_name_of_context_vars,
+                            extra_msg=extra_msg_for_exception))
+        elif value_string_with_variable_refs:
+            # VV: This is a string value evaluated in the context of a package, it MAY contain many
+            # variable references
+            ref_vars = experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(
+                value_string_with_variable_refs)
+            for unknown_var in set(ref_vars).difference(context_variables):
+                problems.append(
+                    apis.models.errors.TransformationUnknownVariableError(
+                        variable=unknown_var,
+                        package=package_name_of_context_vars,
+                        extra_msg=extra_msg_for_exception))
+        else:
+            problems.append(apis.models.errors.TransformationError(
+                msg=f"There is no value for parameter {parameter_name}. {extra_msg_for_exception}"))
+
+        return problems
+
+    def _validate_graph_parameters_and_results(
+            self,
+            outputgraph_concrete: experiment.model.frontends.flowir.FlowIRConcrete,
+            inputgraph_concrete: experiment.model.frontends.flowir.FlowIRConcrete,
+    ):
+        problems = []
+        outputgraph_variables = set()
+        for p in outputgraph_concrete.platforms:
+            outputgraph_variables.update(outputgraph_concrete.get_platform_global_variables(p))
+
+        inputgraph_variables = set()
+        for p in inputgraph_concrete.platforms:
+            inputgraph_variables.update(inputgraph_concrete.get_platform_global_variables(p))
+
+        for x in self._transform.relationship.graphParameters:
+            # VV: graphParameters use the value of either a reference, a variable, or a string containing variables
+            # in the outputGraph to set the value of a parameter in the inputGraph
+            if not x.inputGraphParameter.name:
+                problems.append(apis.models.errors.TransformationError(
+                    f"graphParameter {x.dict()} does not contain a valid inputGraphParameter name"))
+
+            problems.extend(self._validate_reference_variable_name_or_string_in_concrete_context(
+                parameter_name=x.inputGraphParameter.name,
+                value_reference_or_variable=x.outputGraphParameter.name,
+                value_string_with_variable_refs=x.outputGraphParameter.value,
+                context_variables=outputgraph_variables,
+                all_parameter_variables=inputgraph_variables,
+                extra_msg_for_exception=f"graphParameters entry {x.dict()} references the variable",
+                package_name_of_parameter="inputGraph",
+                package_name_of_context_vars="outputGraph",
+            ))
+
+        for x in self._transform.relationship.graphResults:
+            if not x.outputGraphResult.name:
+                problems.append(apis.models.errors.TransformationError(
+                    f"graphResult {x.dict()} does not contain a valid outputGraphResult name"))
+
+            problems.extend(self._validate_reference_variable_name_or_string_in_concrete_context(
+                parameter_name=x.outputGraphResult.name,
+                value_reference_or_variable=x.inputGraphResult.name,
+                value_string_with_variable_refs=x.inputGraphResult.value,
+                context_variables=inputgraph_variables,
+                all_parameter_variables=outputgraph_variables,
+                extra_msg_for_exception=f"graphResults entry {x.dict()} references the variable",
+                package_name_of_parameter="outputGraph",
+                package_name_of_context_vars="inputGraph",
+            ))
+
+        problems_unique = {}
+        for p in problems:
+            if str(p) in problems_unique:
+                continue
+            problems_unique[str(p)] = p
+
+        if len(problems_unique) > 1:
+            raise apis.models.errors.TransformationManyErrors(list(problems_unique.values()))
+        elif problems_unique:
+            _, exc = problems_unique.popitem()
+            raise exc
+
+    def _populate_graph_bindings_for_outputgraph(
+            self,
+            graph: apis.models.virtual_experiment.BasePackageGraph
+    ):
         """Adds graphBindings to connect the components in the Foundation to those in the Surrogate
 
         The Foundation is the parameterised virtual experiment package whose sub-graph is outputGraph.
@@ -541,7 +768,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         @self._transform explains how to substitute an occurrence of outputGraph with transform(inputGraph)
 
         Arguments:
-            graph: Foundation graph to populate with bindings (input and output). The method updates the @graph in-place.
+            graph: Foundation graph to populate with bindings (input and output). The method updates @graph in-place.
 
         Returns:
             The method returns None, it updates @graph in-place.
@@ -550,34 +777,54 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         # to whatever is populating MY input parameters. Therefore, I'll create output "bindings" that point
         # to what's populating MY input parameters
         # I also need to consume the outputs of the inputGraph therefore I need to create inputBindings
+
         for x in self._transform.relationship.graphParameters:
+            # VV: graphParameters use the value of either a reference, a variable, or a string containing variables
+            # in the outputGraph to set the value of a parameter in the inputGraph
             v = x.outputGraphParameter
 
-            # VV: For the time being we can assume that parameters are references,
-            if not v.name:
-                raise apis.models.errors.ApiError(f"We do not know how to create an output binding for "
-                                                  f"{graph.name} using graphParameter {x}")
-
             # VV :"input" refs are external, we do not need to have an output binding for those
-            dref = apis.models.from_core.DataReference(v.name)
-            if dref.externalProducerName:
-                continue
-
-            graph.bindings.output.append(
-                # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+            if v.name:
+                try:
+                    dref = apis.models.from_core.DataReference(v.name)
+                except ValueError:
+                    # VV: This is not a DataReference, it is the name of a variable which must exist in the outputGraph
+                    graph.bindings.output.append(
+                        # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                        apis.models.virtual_experiment.GraphBinding(name=v.name, text=f'%({v.name})s'))
+                else:
+                    if dref.externalProducerName:
+                        continue
+                    graph.bindings.output.append(
+                        # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                        apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+            elif v.value:
+                # VV: This is a string which may contain a bunch of variable references
+                graph.bindings.output.append(
+                    # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                    apis.models.virtual_experiment.GraphBinding(name=v.value, text=v.value))
 
         for x in self._transform.relationship.graphResults:
             v = x.outputGraphResult
 
-            if not v.name:
-                raise apis.models.errors.ApiError(f"We do not know how to create an input binding for "
-                                                  f"{graph.name} using graphResult {x}")
+            # VV: The binding can either be a DataReference or the name of a Variable
+            try:
+                _ = apis.models.from_core.DataReference(v.name)
+            except ValueError:
+                reference = None
+                text = v.name
+            else:
+                reference = v.name
+                text = None
+
             graph.bindings.input.append(
                 # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=reference, text=text))
 
-    def _populate_graph_bindings_for_surrogate(self, graph: apis.models.virtual_experiment.BasePackageGraph):
+    def _populate_graph_bindings_for_inputgraph(
+            self,
+            graph: apis.models.virtual_experiment.BasePackageGraph
+    ):
         """Adds graphBindings to connect the components in the Surrogate to those in the Foundation
 
         The Foundation is the parameterised virtual experiment package whose sub-graph is outputGraph.
@@ -593,28 +840,43 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         """
         # VV: I am the inputGraph - the foundation is going to populate my inputs with its outputs
         # and my outputs will populate its inputs
+
+
         for x in self._transform.relationship.graphParameters:
             v = x.inputGraphParameter
-
-            if not v.name:
-                raise apis.models.errors.ApiError(f"We do not know how to create an input binding for "
-                                                  f"{graph.name} using graphParameter {x}")
+            # VV: The binding can either be a DataReference or the name of a Variable
+            try:
+                _ = apis.models.from_core.DataReference(v.name)
+            except ValueError:
+                reference = None
+                text = v.name
+            else:
+                reference = v.name
+                text = None
 
             graph.bindings.input.append(
                 # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=reference, text=text))
 
         # VV: The inputGraph results are probably consumed by the foundation so create output bindings for those
         for x in self._transform.relationship.graphResults:
             v = x.inputGraphResult
-
-            if not v.name:
-                raise apis.models.errors.ApiError(f"We do not know how to create an output binding for "
-                                                  f"{graph.name} using graphParameter {x}")
-
-            graph.bindings.output.append(
-                # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
-                apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+            if v.name:
+                try:
+                    _ = apis.models.from_core.DataReference(v.name)
+                except ValueError:
+                    # VV: This is not a DataReference, it is a string which may contain multiple "%(variable references)s"
+                    graph.bindings.output.append(
+                        # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                        apis.models.virtual_experiment.GraphBinding(name=v.name, text=f'%({v.name})s'))
+                else:
+                    graph.bindings.output.append(
+                        # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                        apis.models.virtual_experiment.GraphBinding(name=v.name, reference=v.name))
+            elif v.value:
+                graph.bindings.output.append(
+                    # VV: FIXME FlowIR 2.0 will give us a way to define these bindings better
+                    apis.models.virtual_experiment.GraphBinding(name=v.value, text=v.value))
 
     def _add_base_graphs_with_dangling_bindings(
             self,
@@ -639,8 +901,11 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             surrogate_concrete, surrogate_graph, components_exclusively_include=transform.inputGraph.components)
         surrogate_package.graphs.append(surrogate_graph)
 
-        self._populate_graph_bindings_for_foundation(foundation_graph)
-        self._populate_graph_bindings_for_surrogate(surrogate_graph)
+        self._validate_graph_parameters_and_results(
+            outputgraph_concrete=foundation_concrete,
+            inputgraph_concrete=surrogate_concrete)
+        self._populate_graph_bindings_for_outputgraph(graph=foundation_graph)
+        self._populate_graph_bindings_for_inputgraph(graph=surrogate_graph)
 
     def _connect_foundation_and_surrogate_graphs(
             self,
@@ -653,28 +918,70 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                                               f"have exactly 1 graph, but it has {len(foundation_package.graphs)}\n"
                                               f"{foundation_package.json(indent=2)}")
 
-        foundation_graph = foundation_package.graphs[0]
-        foundation_connection = apis.models.virtual_experiment.BasePackageGraphInstance(
+        foundation_connections = apis.models.virtual_experiment.BasePackageGraphInstance(
             graph=apis.models.virtual_experiment.BasePackageGraph(
                 name="/".join((transform.outputGraph.identifier, self._output_graph_name)),
-            ),
-            bindings=[
-                apis.models.virtual_experiment.BindingOption(
-                    name=x.name,
-                    valueFrom=apis.models.virtual_experiment.BindingOptionValueFrom(
-                        graph=apis.models.virtual_experiment.BindingOptionValueFromGraph(
-                            name="/".join((transform.inputGraph.identifier, self._input_graph_name)),
-                            binding=apis.models.virtual_experiment.GraphBinding(
-                                name=transform.relationship
-                                .get_result_relationship_by_name_output(x.name)
-                                .inputGraphResult.name
-                            )
+            ), bindings=[])
+
+        surrogate_connections = apis.models.virtual_experiment.BasePackageGraphInstance(
+            graph=apis.models.virtual_experiment.BasePackageGraph(
+                name="/".join((transform.inputGraph.identifier, self._input_graph_name)),
+            ), bindings=[])
+
+        name_graph_outputgraph = "/".join((transform.outputGraph.identifier, self._output_graph_name))
+        name_graph_inputgraph = "/".join((transform.inputGraph.identifier, self._input_graph_name))
+
+        for x in transform.relationship.graphParameters:
+            # VV: Connect the outputs of outputGraph to the inputs of the inputGraph
+            if x.outputGraphParameter.name:
+                # VV: This may be a datareference
+                try:
+                    dref = apis.models.from_core.DataReference(x.outputGraphParameter.name)
+                except ValueError:
+                    pass
+                else:
+                    if dref.externalProducerName == "input":
+                        continue
+
+            binding = apis.models.virtual_experiment.BindingOption(
+                name=x.inputGraphParameter.name,
+                valueFrom=apis.models.virtual_experiment.BindingOptionValueFrom(
+                    graph=apis.models.virtual_experiment.BindingOptionValueFromGraph(
+                        name=name_graph_outputgraph,
+                        binding=apis.models.virtual_experiment.GraphBinding(
+                            name=x.outputGraphParameter.name or x.outputGraphParameter.value
                         )
                     )
                 )
-                for x in foundation_graph.bindings.input
-            ]
-        )
+            )
+
+            surrogate_connections.bindings.append(binding)
+
+        for x in transform.relationship.graphResults:
+            # VV: Connect the outputs of inputGraph to the inputs of the outputGraph
+
+            if x.inputGraphResult.name:
+                # VV: This may be a datareference
+                try:
+                    dref = apis.models.from_core.DataReference(x.inputGraphResult.name)
+                except ValueError:
+                    pass
+                else:
+                    if dref.externalProducerName == "input":
+                        continue
+
+            binding = apis.models.virtual_experiment.BindingOption(
+                name=x.outputGraphResult.name,
+                valueFrom=apis.models.virtual_experiment.BindingOptionValueFrom(
+                    graph=apis.models.virtual_experiment.BindingOptionValueFromGraph(
+                        name=name_graph_inputgraph,
+                        binding=apis.models.virtual_experiment.GraphBinding(
+                            name=x.inputGraphResult.name or x.inputGraphResult.value
+                        )
+                    )
+                )
+            )
+            foundation_connections.bindings.append(binding)
 
         surrogate_package = derived.base.get_package(transform.inputGraph.identifier)
         if len(surrogate_package.graphs) != 1:
@@ -682,45 +989,17 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                 f"Expected Surrogate graph of {surrogate_package.name} to have exactly 1 "
                 f"graph, but it has {len(surrogate_package.graphs)}")
 
-        surrogate_graph = surrogate_package.graphs[0]
-        surrogate_connections = apis.models.virtual_experiment.BasePackageGraphInstance(
-            graph=apis.models.virtual_experiment.BasePackageGraph(
-                name="/".join((transform.inputGraph.identifier, self._input_graph_name)),
-            ),
-            bindings=[
-                apis.models.virtual_experiment.BindingOption(
-                    name=x.name,
-                    valueFrom=apis.models.virtual_experiment.BindingOptionValueFrom(
-                        graph=apis.models.virtual_experiment.BindingOptionValueFromGraph(
-                            name="/".join((transform.outputGraph.identifier, self._output_graph_name)),
-                            binding=apis.models.virtual_experiment.GraphBinding(
-                                name=transform.relationship
-                                .get_parameter_relationship_by_name_input(x.name)
-                                .outputGraphParameter.name
-                            )
-                        )
-                    )
-                )
-                # VV: Parameters to surrogate that end up pointing to `input` application-dependency should NOT
-                # be wired to the foundation graph
-                for x in surrogate_graph.bindings.input if apis.models.from_core.DataReference(
-                    transform.relationship
-                    .get_parameter_relationship_by_name_input(x.name)
-                    .outputGraphParameter.name
-                ).externalProducerName != "input"
-            ]
-        )
-
         # VV: The Derived package uses the ordering of `connections` to layer variables.
         # The idea is that each connection explains how to "instantiate" a Graph and instantiating a Graph last
         # indicates that we want to use that Graph's global variables in the final (derived) FlowIR
+        # FIXME: This is now redundant when inferParameters/inferResults is set to True
         policy_foundation = apis.models.relationships.VariablesMergePolicy.OutputGraphOverridesInputGraph.value
         policy_surrogate = apis.models.relationships.VariablesMergePolicy.InputGraphOverridesOutputGraph.value
 
         if self._transform.relationship.variablesMergePolicy == policy_foundation:
-            derived.base.connections.extend([surrogate_connections, foundation_connection])
+            derived.base.connections.extend([surrogate_connections, foundation_connections])
         elif self._transform.relationship.variablesMergePolicy == policy_surrogate:
-            derived.base.connections.extend([foundation_connection, surrogate_connections])
+            derived.base.connections.extend([foundation_connections, surrogate_connections])
         else:
             raise apis.models.errors.ApiError(
                 "Cannot interpret relationship because variablesMergePolicy"
@@ -792,7 +1071,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                 )
             )
 
-        DerivedPackage = apis.runtime.package_derived.DerivedPackage
+        InstructionRewireSymbol = apis.runtime.package_derived.InstructionRewireSymbol
         for name in foundation_key_outputs:
             ref = foundation_key_outputs[name]['data-in']
             stages = foundation_key_outputs[name].get('stages', [])
@@ -820,7 +1099,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                     dref_replace = apis.models.from_core.DataReference(result.inputGraphResult.name)
 
                     if dref_match.producerIdentifier.identifier == dref.producerIdentifier.identifier:
-                        replacement = DerivedPackage.check_if_can_replace_reference(
+                        replacement = InstructionRewireSymbol.infer_replace_reference_with_reference(
                             dref.absoluteReference, dref_match.absoluteReference,
                             dref_replace.absoluteReference
                         )

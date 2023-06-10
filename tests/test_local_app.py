@@ -21,7 +21,11 @@ import experiment.service.errors
 import pytest
 import contextlib
 
+import apis.models.relationships
+
 logger = logging.getLogger("tapp")
+
+rest_api = pytest.mark.skipif("not config.getoption('rest_api')")
 
 
 @pytest.fixture(scope="function")
@@ -136,6 +140,7 @@ def dummy_payload():
 
 
 # /authorisation/token
+@rest_api()
 def test_authorisation_token(api_wrapper):
     # GET /authorisation/token
     with pytest.raises(experiment.service.errors.InvalidHTTPRequest):
@@ -143,6 +148,7 @@ def test_authorisation_token(api_wrapper):
 
 
 # /datasets/
+@rest_api()
 def test_datasets(api_wrapper):
     # GET /datasets/
     with pytest.raises(experiment.service.errors.InvalidHTTPRequest):
@@ -161,6 +167,7 @@ def test_datasets(api_wrapper):
 
 
 # /experiments/
+@rest_api()
 def test_experiments(api_wrapper, dummy_payload):
     # GET /experiments/
     experiments = api_wrapper.api_experiment_list()
@@ -222,6 +229,7 @@ def test_experiments(api_wrapper, dummy_payload):
         ),  # PUT /image_pull_secrets/{id}
     ],
 )
+@rest_api()
 def test_image_pull_secrets_payload(api_fixture, api_request, request):
     api_wrapper = request.getfixturevalue(api_fixture)
     api_wrapper_call = getattr(api_wrapper, api_request)
@@ -235,6 +243,7 @@ def test_image_pull_secrets_payload(api_fixture, api_request, request):
         )
 
 
+@rest_api()
 def test_image_pull_secrets_get_secrets(api_wrapper):
     # GET /image_pull_secrets/
 
@@ -247,12 +256,14 @@ def test_image_pull_secrets_get_secrets(api_wrapper):
 
 
 # /instances/
+@rest_api()
 def test_instances_list(api_wrapper):
     # GET /instances/
     instances = api_wrapper.api_request_get("/instances")
     assert instances == []
 
 
+@rest_api()
 @pytest.mark.parametrize(
     "api_fixture,api_request,endpoint",
     [
@@ -283,6 +294,7 @@ def test_instances_list(api_wrapper):
         ),  # DELETE /instances/{id
     ],
 )
+@rest_api()
 def test_instances_exceptions(api_fixture, api_request, endpoint, request):
     api_wrapper = request.getfixturevalue(api_fixture)
     api_wrapper_call = getattr(api_wrapper, api_request)
@@ -292,12 +304,14 @@ def test_instances_exceptions(api_fixture, api_request, endpoint, request):
 
 
 # /query/experiments/
+@rest_api()
 def test_query(api_wrapper):
     # POST /query/experiments/
     api_wrapper.api_request_post("/query/experiments", {})
     pass
 
 
+@rest_api()
 def test_relationships(api_wrapper, dummy_payload):
     # GET /relationships/
     relationships = api_wrapper.api_relationship_list()
@@ -542,6 +556,37 @@ def test_relationships(api_wrapper, dummy_payload):
     # GET /relationships/{identifier}
     relationship = api_wrapper.api_request_get("/relationships/ani-to-band-gap-dft")
     logger.info(relationship)
+
+    rel = apis.models.relationships.Relationship.parse_obj(relationship['entry'])
+
+    parameters = {
+        x.inputGraphParameter.name: x.outputGraphParameter.name for x in rel.transform.relationship.graphParameters
+    }
+
+    assert parameters == {
+        "stage0.SMILESToXYZ:ref": "stage0.SMILESToXYZ:ref",
+        "stage0.XYZToGAMESS:ref": "stage0.SMILESToGAMESSInput:ref",
+        "input/input_molecule.txt:ref": "stage0.SetFunctional/input_molecule.txt:ref",
+        "stage0.GetMoleculeIndex:output": "stage0.GetMoleculeIndex:output",
+        "backend": "backend",
+        "mem": "mem",
+        "number-processors": "number-processors",
+    }
+
+    assert len(parameters) == len(rel.transform.relationship.graphParameters)
+
+    results = {
+        x.outputGraphResult.name: x.inputGraphResult.name for x in rel.transform.relationship.graphResults
+    }
+    assert results == {
+        "stage0.XYZToGAMESS/molecule.inp:copy": "stage0.XYZToGAMESS/molecule.inp:copy",
+        "stage0.XYZToGAMESS:ref": "stage0.XYZToGAMESS:ref"
+    }
+
+    assert len(results) == len(rel.transform.relationship.graphResults)
+
+    del relationship['entry']['transform']['relationship']
+
     assert relationship == {
         "entry": {
             "identifier": "ani-to-band-gap-dft",
@@ -594,57 +639,6 @@ def test_relationships(api_wrapper, dummy_payload):
                         "stage0.XYZToGAMESS",
                     ],
                 },
-                "relationship": {
-                    "graphParameters": [
-                        {
-                            "outputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"},
-                            "inputGraphParameter": {"name": "stage0.SMILESToXYZ:ref"},
-                        },
-                        {
-                            "outputGraphParameter": {
-                                "name": "stage0.SMILESToGAMESSInput:ref"
-                            },
-                            "inputGraphParameter": {"name": "stage0.XYZToGAMESS:ref"},
-                        },
-                        {
-                            "outputGraphParameter": {
-                                "name": "stage0.SetFunctional/input_molecule.txt:ref"
-                            },
-                            "inputGraphParameter": {
-                                "name": "input/input_molecule.txt:ref"
-                            },
-                        },
-                        {
-                            "outputGraphParameter": {
-                                "name": "stage0.GetMoleculeIndex:output"
-                            },
-                            "inputGraphParameter": {
-                                "name": "stage0.GetMoleculeIndex:output"
-                            },
-                        },
-                    ],
-                    "graphResults": [
-                        {
-                            "outputGraphResult": {
-                                "name": "stage0.XYZToGAMESS/molecule.inp:copy"
-                            },
-                            "inputGraphResult": {
-                                "name": "stage0.XYZToGAMESS/molecule.inp:copy"
-                            },
-                        },
-                        {
-                            "inputGraphResult": {
-                                "name": "stage0.XYZToGAMESS:ref"
-                            },
-                            "outputGraphResult": {
-                                "name": "stage0.XYZToGAMESS:ref"
-                            }
-                        }
-                    ],
-                    "inferParameters": True,
-                    "inferResults": True,
-                    "variablesMergePolicy": "outputGraphOverridesInputGraph",
-                },
             },
         },
         "problems": [],
@@ -663,6 +657,7 @@ def test_relationships(api_wrapper, dummy_payload):
 
 
 # /url-map/
+@rest_api()
 def test_url_map(api_wrapper):
     # GET /url-map/
     with pytest.raises(experiment.service.errors.InvalidHTTPRequest):

@@ -59,8 +59,8 @@ class GraphDescription(apis.models.common.Digestable):
 
 
 class GraphValue(apis.models.common.Digestable):
-    name: str
-    default: Optional[str]
+    name: Optional[str]
+    value: Optional[str]
 
 
 class RelationshipParameters(apis.models.common.Digestable):

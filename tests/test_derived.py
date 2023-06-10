@@ -136,10 +136,7 @@ def test_extract_graphs_and_metadata(
         'rep_key': 'smiles',
         'startIndex': '0'}
 
-    from_platform = graph_meta.aggregate_variables.platforms['default'].vGlobal.copy()
-    from_platform['backend'] = "kubernetes"
-
-    assert graph_meta.aggregate_variables.platforms['openshift'].vGlobal == from_platform
+    assert graph_meta.aggregate_variables.platforms['openshift'].vGlobal == {"backend": "kubernetes"}
 
     for x in graph_meta.aggregate_variables.platforms:
         assert graph_meta.aggregate_variables.platforms[x].stages == {0: {}}
@@ -221,7 +218,7 @@ def test_synthesize_gamess_homo_lumo_dft_and_ANI(
     package.persist_to_directory(dir_persist, packages_metadata)
 
 
-def test_replace_references():
+def test_simple_reference_with_reference():
     conf = yaml.load("""
     name: GeometryOptimisation
     command:
@@ -230,29 +227,40 @@ def test_replace_references():
       executable: rungms
     references:
     - stage0.AnionSMILESToGAMESSInput/molecule.inp:copy
-    """, Loader=yaml.FullLoader)
+    """, Loader=yaml.SafeLoader)
 
-    replaced = apis.runtime.package_derived.DerivedPackage.try_replace_all_references_in_component(
-        conf,
-        "stage0.AnionSMILESToGAMESSInput:ref",
-        "stage0.GenerateOptimizedConfiguration:ref",
-        pkg_name="fake"
+    instruction = apis.runtime.package_derived.InstructionRewireSymbol(
+        source=apis.runtime.package_derived.RewireSymbol(
+            reference="stage0.GeometryGenerator/molecule.inp:copy"),
+        destination=apis.runtime.package_derived.RewireSymbol(
+            reference="stage0.AnionSMILESToGAMESSInput/molecule.inp:copy")
     )
 
-    assert replaced is True
+    instruction.apply_to_component(conf)
 
-    assert conf['references'] == ["stage0.GenerateOptimizedConfiguration/molecule.inp:copy"]
-
+    assert conf['references'] == ["stage0.GeometryGenerator/molecule.inp:copy"]
     assert conf['command']['arguments'] == "molecule.inp %(gamess-version-number)s %(number-processors)s"
 
-    assert apis.runtime.package_derived.DerivedPackage.check_if_can_replace_reference(
-        "stage0.AnionSMILESToGAMESSInput/molecule.inp:copy",
-        "stage0.AnionSMILESToGAMESSInput:ref",
-        "stage0.GenerateOptimizedConfiguration:ref",
-    ) == "stage0.GenerateOptimizedConfiguration/molecule.inp:copy"
 
-    assert apis.runtime.package_derived.DerivedPackage.check_if_can_replace_reference(
-        "stage0.AnionSMILESToGAMESSInput/molecule.inp:copy",
-        "stage0.AnionSMILESToGAMESSInput/molecule.inp:ref",
-        "stage0.GenerateOptimizedConfiguration/molecule.inp:ref",
-    ) == "stage0.GenerateOptimizedConfiguration/molecule.inp:copy"
+def test_simple_reference_with_text():
+    conf = yaml.load("""
+    name: GeometryOptimisation
+    command:
+      arguments: stage0.AnionSMILESToGAMESSInput/molecule.inp:ref %(gamess-version-number)s %(number-processors)s
+      environment: gamess
+      executable: rungms
+    references:
+    - stage0.AnionSMILESToGAMESSInput/molecule.inp:ref
+    """, Loader=yaml.SafeLoader)
+
+    instruction = apis.runtime.package_derived.InstructionRewireSymbol(
+        source=apis.runtime.package_derived.RewireSymbol(
+            text="hello %(world)s"),
+        destination=apis.runtime.package_derived.RewireSymbol(
+            reference="stage0.AnionSMILESToGAMESSInput/molecule.inp:ref")
+    )
+
+    instruction.apply_to_component(conf)
+
+    assert conf['references'] == []
+    assert conf['command']['arguments'] == "hello %(world)s %(gamess-version-number)s %(number-processors)s"

@@ -46,18 +46,12 @@ class ImagePullSecretAlreadyExists(SecretObjectAlreadyExists):
 
 def b64_decode(which):
     # type: (str) -> str
-    try:
-        return base64.decodebytes(which.encode('utf-8')).decode('utf-8')
-    except AttributeError:
-        return base64.decodestring(which)
+    return base64.standard_b64decode(which.encode('utf-8')).decode('utf-8')
 
 
 def b64_encode(which):
     # type: (str) -> str
-    try:
-        return base64.encodebytes(which.encode('utf-8')).decode('utf-8')
-    except AttributeError:
-        return base64.encodestring(which)
+    return base64.standard_b64encode(which.encode('utf-8')).decode('utf-8')
 
 
 def get_all_image_pull_secrets(which=None, out_config=None):

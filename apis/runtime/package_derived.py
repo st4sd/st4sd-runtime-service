@@ -10,11 +10,14 @@ import distutils.dir_util
 import logging
 import os
 import shutil
+import re
+
 from typing import Any
 from typing import Dict
 from typing import List
 from typing import Tuple
 from typing import Union
+from typing import Optional
 
 import experiment.model.errors
 import experiment.model.frontends.flowir
@@ -29,6 +32,7 @@ import apis.models.errors
 import apis.models.from_core
 import apis.models.virtual_experiment
 import apis.storage
+import apis.runtime.errors
 
 
 class DerivedVirtualExperimentMetadata(apis.models.virtual_experiment.VirtualExperimentMetadata):
@@ -45,6 +49,488 @@ class _book(pydantic.BaseModel):
     package: str
     value: Any
 
+
+class VariableOverride(apis.models.common.Digestable):
+    variableName: str
+    ownerPackageName: str
+
+
+class RewireSymbol(apis.models.common.Digestable):
+    reference: Optional[str] = pydantic.Field(None, description="The reference that this parameter points to")
+    text: Optional[str] = pydantic.Field(None, description="The literal text that this parameter points to, "
+                                                           "can contain %(parameters of caller)s")
+    ownerGraphName: Optional[str] = pydantic.Field(
+        None, description="The identifier of the graph that this symbol belongs to")
+
+
+class RewireResults(apis.models.common.Digestable):
+    variables: Dict[str, RewireSymbol] = {}
+    references: Dict[str, RewireSymbol] = {}
+
+
+class InstructionRewireSymbol(apis.models.common.Digestable):
+    """Describes an instruction to rewire a parameter from @source into @destination"""
+    source: Optional[RewireSymbol] = None
+    destination: Optional[RewireSymbol] = None
+
+    @classmethod
+    def generate_instruction_to_rewire_parameter(
+            cls,
+            ve: apis.models.virtual_experiment.ParameterisedPackage,
+            connection: apis.models.virtual_experiment.BasePackageGraphInstance,
+            dest_symbol: apis.models.virtual_experiment.BindingOption,
+    ) -> InstructionRewireSymbol:
+        dest_pkg_name, dest_graph_name = connection.graph.partition_name()
+        dest_package = ve.base.get_package(dest_pkg_name)
+        dest_graph = dest_package.get_graph(dest_graph_name)
+
+        try:
+            resolved_dest_symbol = dest_graph.bindings.get_input_binding(dest_symbol.name)
+        except KeyError as e:
+            raise apis.runtime.errors.RuntimeError(
+                f"The binding {dest_symbol.name} does not exist for graph {connection.graph.name}. "
+                f"Underlying error: {e}")
+
+        rewire_symbol_dest = RewireSymbol(reference=resolved_dest_symbol.reference, text=resolved_dest_symbol.text)
+        rewire_symbol_source = RewireSymbol()
+
+        rewire = InstructionRewireSymbol(source=rewire_symbol_source, destination=rewire_symbol_dest)
+
+        if dest_symbol.valueFrom.graph:
+            source_pkg_name, source_graph_name = dest_symbol.valueFrom.graph.partition_name()
+            source_package = ve.base.get_package(source_pkg_name)
+            source_graph = source_package.get_graph(source_graph_name)
+
+            if dest_symbol.valueFrom.graph.binding.type != "output":
+                raise apis.runtime.errors.RuntimeError(
+                    f"Expected input binding to point to output binding a name "
+                    f"but input binding definition is {dest_symbol.dict()}")
+
+            if not dest_symbol.valueFrom.graph.binding.name:
+                raise apis.runtime.errors.RuntimeError(
+                    f"Expected input binding to contain a name but it is {dest_symbol.dict()}")
+
+            try:
+                bind = source_graph.bindings.get_output_binding(dest_symbol.valueFrom.graph.binding.name)
+                rewire_symbol_source.text = bind.text
+                rewire_symbol_source.reference = bind.reference
+            except KeyError:
+                # VV: The outputGraph parameter does not exist, this is problematic if the producer
+                # of the reference is a component. However, if the producer is an application-dependency
+                # or an input, data file then this is fine because the synthesized virtual experiment
+                # will contain the producer
+                dref = apis.models.from_core.DataReference(dest_symbol.valueFrom.graph.binding.name)
+                if dref.externalProducerName:
+                    rewire_symbol_source.reference = dref.absoluteReference
+                else:
+                    raise apis.runtime.errors.RuntimeError(
+                        f"The parameter {dest_symbol.valueFrom.graph.binding.name} does not exist for"
+                        f"the graph {dest_symbol.valueFrom.graph.name}")
+        elif dest_symbol.valueFrom.applicationDependency:
+            rewire_symbol_source.reference = dest_symbol.valueFrom.applicationDependency.reference
+        else:
+            raise apis.runtime.errors.RuntimeError(f"Cannot rewire symbols using {dest_symbol.json(indent=2)}")
+
+        return rewire
+
+    @classmethod
+    def rewrite_reference_in_arguments_of_component(
+            cls,
+            component: experiment.model.frontends.flowir.DictFlowIRComponent,
+            reference: str,
+            new: str
+    ):
+        """Replaces a @reference in the arguments of a component with some @new text
+
+        Arguments:
+            component: The DSL of the component to update
+            reference: The string representation of a DataReference to replace with @new
+            new: The text to use when replacing the @reference in the arguments of the @component
+        """
+        args: str = component.get('command', {}).get('arguments', {})
+
+        if args:
+            dref_old = apis.models.from_core.DataReference(reference, stageIndex=component.get('stage', 0))
+            for old in [dref_old.absoluteReference, dref_old.relativeReference]:
+                if old in args:
+                    args = args.replace(old, new)
+                    break
+
+            component['command']['arguments'] = args
+
+    @classmethod
+    def infer_replace_reference_with_text(
+            cls,
+            ref: str,
+            rule_match: str,
+            text: str,
+    ) -> str | None:
+        """Returns a string that could replace a reference that matches a rule
+
+        A rule_match "matches" ref if they both point to the same producer and they reference the exact same path
+        (i.e. :<method> could be the only difference between the 2 DataReferences)
+
+        Arguments:
+            ref: The reference that could be replaced
+            rule_match: The rule to use - it is a string representation of a DataReference
+            text: The string that could replace @ref if @rule_match is a hit
+
+        Returns:
+            @text if ref "matches" rule_match otherwise None
+        """
+        if rule_match == ref:
+            return text
+
+        dref = apis.models.from_core.DataReference(ref)
+        dref_match = apis.models.from_core.DataReference(rule_match)
+
+        if (dref_match.trueProducer == dref.trueProducer and
+                dref_match.pathRef == dref.pathRef):
+            return text
+
+    @classmethod
+    def infer_replace_reference_with_reference(
+            cls,
+            ref: str,
+            rule_match: str,
+            rule_replace: str,
+    ) -> str | None:
+        """Returns a DataReference string representation that could replace a reference that matches a rule
+
+        A rule_match "matches" ref if they both point to the same producer and:
+            they reference the exact same path
+                (i.e. :<method> could be the only difference between the 2 DataReferences), OR
+            rule_replace points to the root of a producer
+                (i.e both <:method> and [/filepath] could differ provided that rule_replace points to root of producer)
+
+        Arguments:
+            ref: The reference that could be replaced
+            rule_match: The rule to use - it is a string representation of a DataReference
+            rule_replace: The DataReference string representation that could replace @ref if @rule_match is a hit
+
+        Returns:
+            a DataReference string representation if ref "matches" rule_match otherwise None
+        """
+        if rule_match == ref:
+            return rule_replace
+
+        dref = apis.models.from_core.DataReference(ref)
+        dref_replace = apis.models.from_core.DataReference(rule_replace)
+        dref_match = apis.models.from_core.DataReference(rule_match)
+
+        if dref_replace.pathRef in ['/', ''] and dref_match.trueProducer == dref.trueProducer:
+            replacement = apis.models.from_core.DataReference.from_parts(
+                stage=dref_replace.stageIndex, producer=dref_replace.trueProducer,
+                fileRef=dref.pathRef, method=dref.method
+            )
+            return replacement.absoluteReference
+
+        if (dref_match.trueProducer == dref.trueProducer and
+                dref_match.pathRef == dref.pathRef):
+            replacement = apis.models.from_core.DataReference.from_parts(
+                stage=dref_replace.stageIndex, producer=dref_replace.trueProducer,
+                fileRef=dref_match.pathRef, method=dref.method
+            )
+            return replacement.absoluteReference
+
+    @classmethod
+    def replace_reference_with_reference(
+            cls,
+            conf: experiment.model.frontends.flowir.DictFlowIRComponent,
+            rule_match: str,
+            rule_ref_replace: str
+    ) -> Dict[str, str]:
+        """Replaces references of a component that match a rule, using a replacement rule and returns the mapping
+        of old references to new
+
+        Arguments:
+            conf: The DSL of the component
+            rule_match: A string representation of a DataReference to replace
+            rule_ref_replace: A string representation of a DataReference to use as a replacement
+
+        Returns:
+            A Dictionary whose keys are old references of the component and values are the replacement references
+        """
+        references: List[str] = conf.get('references', [])
+
+        ret = {}
+
+        if not references:
+            return ret
+
+        # VV: First try to find a reference that directly matches `rule_match`
+        try:
+            index = references.index(rule_match)
+        except ValueError:
+            # VV: This component does not have this **EXACT** reference
+            index = None
+
+        def replace_index_with(index: int, replacement: str):
+            dref = apis.models.from_core.DataReference(replacement)
+            old = references[index]
+            if dref.method not in ['link', 'copy']:
+                cls.rewrite_reference_in_arguments_of_component(conf, references[index], dref.absoluteReference)
+            ret[old] = dref.absoluteReference
+            conf['references'][index] = ret[old]
+
+        try:
+            # VV: We are replacing a specific reference with another reference
+            if index is not None:
+                replace_index_with(index, rule_ref_replace)
+        except Exception:
+            raise apis.runtime.errors.RuntimeError(f"Replacement rule {rule_ref_replace} is not a valid DataReference")
+
+        # VV: Regardless of whether we found the `rule_match` as is or not, we can try out a
+        # couple more things
+        for index, ref in enumerate(references):
+            replacement = cls.infer_replace_reference_with_reference(
+                ref=ref, rule_match=rule_match, rule_replace=rule_ref_replace)
+
+            if replacement is not None:
+                replace_index_with(index, replacement)
+
+        return ret
+
+    @classmethod
+    def replace_reference_with_text(
+            cls,
+            conf: experiment.model.frontends.flowir.DictFlowIRComponent,
+            rule_match: str,
+            text: str
+    ) -> Dict[str, str]:
+        """Replaces references of a component that match a rule, using a replacement rule and returns the mapping
+        of old references to new
+
+        Arguments:
+            conf: The DSL of the component
+            rule_match: A string representation of a DataReference to replace
+            text: A string, may contain %(references to variables)s
+
+        Returns:
+            A Dictionary whose keys are old references of the component and values are the replacement strings
+        """
+        references: List[str] = conf.get('references', [])
+
+        ret = {}
+
+        if not references:
+            return ret
+
+        # VV: First try to find a reference that directly matches `rule_match`
+        try:
+            index = references.index(rule_match)
+        except ValueError:
+            # VV: This component does not have this **EXACT** reference
+            index = None
+
+        to_remove = set()
+
+        def replace_index_with(index: int, replacement: str):
+            old = references[index]
+            ret[old] = replacement
+            cls.rewrite_reference_in_arguments_of_component(conf, references[index], replacement)
+            to_remove.add(index)
+
+        # VV: We are replacing a specific reference with a string
+        if index is not None:
+            replace_index_with(index, text)
+
+        # VV: Regardless of whether we found the `rule_match` as is or not, we can try out a
+        # couple more things
+        for index, ref in enumerate(references):
+            replacement = cls.infer_replace_reference_with_text(ref=ref, rule_match=rule_match, text=text)
+
+            if replacement is not None:
+                replace_index_with(index, replacement)
+
+        for index in sorted(to_remove, reverse=True):
+            references.pop(index)
+
+        return ret
+
+    @classmethod
+    def replace_variable_with_text(
+            cls,
+            conf: experiment.model.frontends.flowir.DictFlowIRComponent,
+            variable: str,
+            text: str,
+    ) -> Dict[str, str]:
+        """Replaces references to a @variable with a @text
+
+        If the component contains a variable @variable it will be removed
+
+        Arguments:
+            conf: The DSL of the component
+            variable: The name of the variable for which to replace %(variable)s with @text
+            text: A string, may contain %(references to variables)s
+
+        Returns:
+            A Dictionary which may have up to 1 key (@variable) and the value will be @text
+        """
+
+        variables = conf.get('variables', {})
+
+        try:
+            del variables[variable]
+        except KeyError:
+            pass
+
+        ret = {}
+
+        old = f'%({variable})s'
+
+        def update_references_to_variable(what: Any, label: str):
+            if isinstance(what, dict):
+                for key in what:
+                    value = what[key]
+
+                    if isinstance(value, str) and old in value:
+                        value = value.replace(old, text)
+                        what[key] = value
+                        ret[variable] = value
+            elif isinstance(what, list) and not isinstance(what, str):
+                for key in range(len(what)):
+                    value = what[key]
+
+                    if isinstance(value, str) and old in value:
+                        value = value.replace(old, text)
+                        what[key] = value
+                        ret[variable] = value
+
+        experiment.model.frontends.flowir.FlowIR.visit_all(conf, update_references_to_variable, label="component")
+
+        return ret
+
+    def replace_variable_with_reference(
+            cls,
+            conf: experiment.model.frontends.flowir.DictFlowIRComponent,
+            variable: str,
+            reference: str,
+    ) -> Dict[str, str]:
+        """Replaces references to a @variable with a @reference
+
+        If the component contains a variable @variable it will be removed
+        If the component does not contain a reference @reference it will after this method IF it references
+            the variable
+
+        Arguments:
+            conf: The DSL of the component
+            variable: The name of the variable for which to replace %(variable)s with @text
+            reference: An absolute string representation of a DataReference
+
+        Returns:
+            A Dictionary which may have up to 1 key (@variable) and the value will be @reference
+        """
+
+        variables = conf.get('variables', {})
+
+        try:
+            del variables[variable]
+        except KeyError:
+            pass
+
+        ret = {}
+
+        old = f'%({variable})s'
+
+        problems = []
+
+        # VV: We should only replace a variable with a reference if the variable is referenced in the
+        # command-line arguments. Everything else should be flagged as a Problem
+        def identify_problems(what: Any, label: str):
+            if isinstance(what, str):
+                if old in what and label != "component.command.arguments":
+                    problems.append(label)
+
+        if problems:
+            comp_name = f"stage{conf.get('stage', 0)}.{conf.get('name', '**unknown**')}"
+            raise apis.runtime.errors.RuntimeError(f"Cannot replace variable {variable} with reference {reference} "
+                                                   f"in component {comp_name} because the component uses the "
+                                                   f"variable in {sorted(set(problems))}")
+
+        experiment.model.frontends.flowir.FlowIR.visit_all(conf, identify_problems, label="component")
+        args = conf.get('command', {}).get('arguments', '')
+
+        if old in args:
+            args = args.replace(old, reference)
+            conf['command']['arguments'] = args
+            ret[variable] = reference
+
+            references = conf.get('references', [])
+            # VV: HACK We probably need to find a good way to check both absolute and relative forms of references
+            if reference not in references:
+                references.append(reference)
+            conf['references'] = references
+
+        return ret
+
+    def is_use_reference_for_reference(self) -> bool:
+        return bool(self.source.reference) and bool(self.destination.reference)
+
+    def is_use_text_for_reference(self) -> bool:
+        if not self.destination.reference:
+            return False
+        return self.source.text is not None
+
+    def is_use_reference_for_variable(self) -> bool:
+        p_variables = re.compile(experiment.model.frontends.flowir.FlowIR.VariablePattern)
+        return bool(self.source.reference) and bool(self.destination.text)
+
+    def is_use_text_for_variable(self) -> bool:
+        return bool(self.source.text) and bool(self.destination.text)
+
+    def apply_to_component(
+            self,
+            component: experiment.model.frontends.flowir.DictFlowIRComponent,
+            comp_label: Optional[str] = None,
+    ) -> RewireResults:
+        """Attempts to apply this rewire symbol instruction to 1 component
+
+        Arguments:
+            component: The DSL of the component to update
+            comp_label: An optional name for the component to use when raising exceptions
+
+        Returns:
+            A RewireResults object explaining the changes made to the @component
+        """
+        comp_label = comp_label or f"stage{component.get('stage', 0)}.{component.get('name', '*unknown*')}"
+        logger = logging.getLogger('RewireSymbol')
+        ret = RewireResults()
+
+        if self.is_use_reference_for_reference():
+            logger.info(f"May rewire REF {self.destination.reference} with REF {self.source.reference} in {comp_label}")
+            op = self.replace_reference_with_reference(
+                conf=component,
+                rule_match=self.destination.reference,
+                rule_ref_replace=self.source.reference)
+            for (key, value) in op.items():
+                ret.references[key] = RewireSymbol(reference=value)
+        elif self.is_use_text_for_reference():
+            logger.info(f"May rewire REF {self.destination.reference} with TEXT {self.source.text} in {comp_label}")
+            op = self.replace_reference_with_text(conf=component, rule_match=self.destination.reference,
+                                                  text=self.source.text)
+            for (key, value) in op.items():
+                ret.references[key] = RewireSymbol(text=value)
+        elif self.is_use_text_for_variable():
+            logger.info(f"May rewire VAR {self.destination.text} with TEXT {self.source.text} in {comp_label}")
+            op = self.replace_variable_with_text(conf=component, variable=self.destination.text,
+                                                 text=self.source.text)
+            for (key, value) in op.items():
+                ret.variables[key] = RewireSymbol(text=value)
+        elif self.is_use_reference_for_variable():
+            logger.info(
+                f"May rewire VAR {self.destination.text} with REF {self.source.reference} in {comp_label}")
+            op = self.replace_variable_with_reference(conf=component, variable=self.destination.text,
+                                                      reference=self.source.reference)
+            for (key, value) in op.items():
+                ret.variables[key] = RewireSymbol(reference=value)
+        else:
+            raise apis.runtime.errors.RuntimeError(f"Unable to rewire symbols of {comp_label} with "
+                                                   f"{self.json(indent=2)}")
+
+        logger.info(f"Rewiring results: {ret.json(indent=2)} {op}")
+
+        return ret
 
 
 class PackageConflict(apis.models.common.Digestable):
@@ -209,92 +695,35 @@ class DerivedPackage:
     def concrete_synthesized(self) -> experiment.model.frontends.flowir.FlowIRConcrete:
         return self._synthesized_concrete.copy()
 
-    @classmethod
-    def check_if_can_replace_reference(
-            cls,
-            ref: str,
-            rule_match: str,
-            rule_replace: str,
-    ) -> str | None:
-        if rule_match == ref:
-            return rule_replace
+    def _rewire_component_parameters(
+            self,
+            component: experiment.model.frontends.flowir.DictFlowIRComponent,
+            connection: apis.models.virtual_experiment.BasePackageGraphInstance,
+    ) -> RewireResults:
+        comp_label = f"{connection.graph.name}/stage{component.get('stage', 0)}.{component.get('name', '*unknown*')}"
 
-        dref = apis.models.from_core.DataReference(ref)
-        dref_replace = apis.models.from_core.DataReference(rule_replace)
-        dref_match = apis.models.from_core.DataReference(rule_match)
+        ret = RewireResults()
 
-        if dref_replace.pathRef in ['/', ''] and dref_match.trueProducer == dref.trueProducer:
-            replacement = apis.models.from_core.DataReference.from_parts(
-                stage=dref_replace.stageIndex, producer=dref_replace.trueProducer,
-                fileRef=dref.pathRef, method=dref.method
-            )
-            return replacement.absoluteReference
+        for dest_symbol in connection.bindings:
+            instruction = InstructionRewireSymbol.generate_instruction_to_rewire_parameter(
+                ve=self._ve, dest_symbol=dest_symbol, connection=connection)
 
-        if (dref_match.trueProducer == dref.trueProducer and
-                dref_match.pathRef == dref.pathRef):
-            replacement = apis.models.from_core.DataReference.from_parts(
-                stage=dref_replace.stageIndex, producer=dref_replace.trueProducer,
-                fileRef=dref_match.pathRef, method=dref.method
-            )
-            return replacement.absoluteReference
+            self._log.info(f"Generated InstructionRewireSymbol {instruction.json(indent=2)} "
+                           f"from {dest_symbol.json(indent=2)}")
 
-    @classmethod
-    def try_replace_all_references_in_component(
-            cls,
-            conf: experiment.model.frontends.flowir.DictFlowIRComponent,
-            rule_match: str,
-            rule_replace: str,
-            pkg_name: str,
-            logger: logging.Logger | None = None
-    ) -> bool:
-        if logger is None:
-            try:
-                logger = cls._log
-            except AttributeError:
-                logger = logging.getLogger('replace')
+            x = instruction.apply_to_component(component=component, comp_label=comp_label)
 
-        logger.info(f"  Trying to replace {rule_match} with {rule_replace} in "
-                    f"{pkg_name}/stage{conf.get('stage', 0)}/{conf['name']}")
+            if dest_symbol.valueFrom.graph:
+                for r in x.references:
+                    x.references[r].ownerGraphName = dest_symbol.valueFrom.graph.name
+                for v in x.variables:
+                    x.variables[v].ownerGraphName = dest_symbol.valueFrom.graph.name
 
-        def perform_replace(index: int, replacement: str):
-            logger.info(
-                f"{pkg_name}/stage{conf.get('stage', 0)}/{conf['name']} --- {rule_match} -> {replacement}")
-            old_ref = conf['references'][index]
-            conf['references'][index] = replacement
-
-            args: str = conf.get('command', {}).get('arguments', {})
-            dref = apis.models.from_core.DataReference(replacement)
-
-            dref_old = apis.models.from_core.DataReference(old_ref, stageIndex=conf.get('stage', 0))
-
-            if args and dref.method not in ['link', 'copy']:
-                args = args.replace(dref_old.absoluteReference, dref.absoluteReference)
-                args = args.replace(dref_old.absoluteReference, dref.relativeReference)
-
-                args = args.replace(dref_old.relativeReference, dref.absoluteReference)
-                args = args.replace(dref_old.relativeReference, dref.relativeReference)
-
-                conf['command']['arguments'] = args
-
-        references: List[str] = conf['references']
-        ret = False
-        # VV: First try to find a reference that directly matches `rule_match`
-        try:
-            index = references.index(rule_match)
-            perform_replace(index, rule_replace)
-            ret = True
-        except ValueError:
-            pass
-
-        # VV: Regardless of whether we found the `rule_match` as is or not, we can try out a
-        # couple more things
-        for index, ref in enumerate(references):
-            replacement = cls.check_if_can_replace_reference(ref, rule_match, rule_replace)
-            if replacement is not None:
-                perform_replace(index, replacement)
-                ret = True
+            ret.references.update(x.references)
+            ret.variables.update(x.variables)
 
         return ret
+
 
     def extract_graphs(
             self,
@@ -347,6 +776,8 @@ class DerivedPackage:
 
         }
 
+        variable_overrides: Dict[str, VariableOverride] = {}
+
         for c in self._ve.base.connections:
             pkg_name, graph_name = c.graph.partition_name()
             concrete = package_metadata.get_concrete_of_package(pkg_name)
@@ -373,57 +804,28 @@ class DerivedPackage:
                 all_components[pkg_name][node.reference] = conf
                 self._log.info(f"Adding {pkg_name}/{node.reference}={yaml.dump(conf)}")
 
-                # VV: Rewrite references to point them to where the associated inputBindings are pointing to
-                # VV: References in .references are always in "absolute" form however, references in .command.arguments
-                #     MAY be in relative form!
+                # VV: Rewrite parameters (references and variables) to point them to where the associated
+                # inputBindings are pointing to
+                rewire = self._rewire_component_parameters(component=conf, connection=c)
 
-                if conf.get('references', {}):
-                    for b in c.bindings:
-                        self._log.info(f"Processing input binding {b.name} for {conf['name']}")
-                        input_binding = graph_template.bindings.get_input_binding(b.name)
-                        if not input_binding.reference:
-                            raise NotImplementedError(f"Input binding of {pkg_name}/{graph_name} "
-                                                      f"does not point to a reference")
-                        rule_match = input_binding.reference
+                for name in rewire.variables:
+                    meta = rewire.variables[name]
+                    if meta.text:
+                        # VV: FIXME what about indirect variables?
+                        other_vars = experiment.model.frontends.flowir.FlowIR.discover_references_to_variables(
+                            meta.text)
 
-                        if b.valueFrom.graph:
-                            other_pkg_name, other_graph_name = b.valueFrom.graph.partition_name()
-                            other_pkg = self._ve.base.get_package(other_pkg_name)
-                            other_graph_template = other_pkg.get_graph(other_graph_name)
+                        if not other_vars:
+                            continue
 
-                            if b.valueFrom.graph.binding.type != "output":
-                                raise NotImplementedError(f"Expected input binding to point to output binding a name "
-                                                          f"but input binding definition is {b.dict()}")
-
-                            if not b.valueFrom.graph.binding.name:
-                                raise NotImplementedError(
-                                    f"Expected input binding to contain a name but it is {b.dict()}")
-                            try:
-                                binding = other_graph_template.bindings.get_output_binding(
-                                    b.valueFrom.graph.binding.name)
-                                rule_replace = binding.reference
-                                if not rule_replace:
-                                    raise NotImplementedError(f"Binding {b.name} of graph {b.valueFrom.graph.name} "
-                                                              f"does not point to a reference")
-                            except KeyError:
-                                # VV: The outputGraph parameter does not exist, this is problematic if the producer
-                                # of the reference is a component. However, if the producer is an application-dependency
-                                # or an input, data file then this is fine because the synthesized virtual experiment
-                                # will contain the producer
-                                dref = apis.models.from_core.DataReference(b.valueFrom.graph.binding.name)
-                                if dref.externalProducerName:
-                                    continue
-                                else:
-                                    raise
-
-                        elif b.valueFrom.applicationDependency:
-                            rule_replace = b.valueFrom.applicationDependency.reference
-                        else:
-                            raise NotImplementedError(
-                                f"Expected input binding to contain valueFrom.[graph,applicationDependency] "
-                                f"but it is {b.dict()}")
-                        self.try_replace_all_references_in_component(
-                            conf, rule_match, rule_replace, pkg_name)
+                        if not meta.ownerGraphName:
+                            raise apis.runtime.errors.RuntimeError(
+                                f"InstructionRewireSymbol results {meta.json(indent=2)} does not contain an "
+                                f"ownerGraphName")
+                        owner_package, _ = meta.ownerGraphName.split('/')
+                        for var_name in other_vars:
+                            variable_overrides[var_name] = VariableOverride(
+                                variableName=var_name, ownerPackageName=owner_package)
 
                 missing_variables = []
 
@@ -505,6 +907,36 @@ class DerivedPackage:
                 conf = all_components[pkg_name][comp_name]
                 aggregate_components.append(conf)
 
+        # VV: As a final step apply @variable_overrides
+        for v in variable_overrides.values():
+            for p in aggregate_vars.platforms:
+                concrete = package_metadata.get_concrete_of_package(v.ownerPackageName)
+
+                if p not in concrete.platforms:
+                    continue
+
+                platform_vars = concrete.get_platform_variables(p)
+                try:
+                    aggregate_vars.platforms[p].vGlobal[v.variableName] = platform_vars['global'][v.variableName]
+                except KeyError as e:
+                    self._log.warning(f"Cannot copy {v.json(indent=2)} for platform {p} - will ignore")
+                    continue
+                self._log.info(f"Copied {v.json(indent=2)} = {platform_vars['global'][v.variableName]} from "
+                               f"platform {p}")
+
+        # VV: Finally trim the aggregate variables to remove variables whose value is identical to the variable value
+        # in the default platform
+
+        default_values = aggregate_vars.platforms['default'].vGlobal
+
+        for platform in aggregate_vars.platforms:
+            if platform == 'default':
+                continue
+
+            for (name, value) in list(aggregate_vars.platforms[platform].vGlobal.items()):
+                if name in default_values and str(default_values[name]) == str(value):
+                    del aggregate_vars.platforms[platform].vGlobal[name]
+
         return GraphsFromManyPackagesMetadata(
             variables=all_vars,
             blueprints=all_blueprints,
@@ -565,7 +997,7 @@ class DerivedPackage:
         self._log.info(f"Synthesizing parameterised virtual experiment package for Derived (platforms: {platforms})")
         graphs_meta = self.extract_graphs(package_metadata, platforms)
 
-        self._log.info(f"Extracted graphsMetadata: {graphs_meta.dict()}")
+        self._log.info(f"Extracted graphsMetadata: {graphs_meta.json(indent=2)}")
 
         # VV: Step 2 -  identify conflicts between variables and blueprints in the many base-packages
         # We have a conflict, when more than 1 packages define a variable/blueprintField with more than 1 unique value

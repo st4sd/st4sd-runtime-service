@@ -136,10 +136,6 @@ def validate_secret_git_ssh(name):
 def validate_secret_git_oauth(name):
     return validate_secret(name, ['oauth-token'])
 
-def decode_secret_git_oauth(name):
-    secret = get_k8s_object('secret', name)
-    return base64.b64decode(secret.data['oauth-token']).decode()
-
 def validate_secret_imagepull(name):
     return validate_secret(name, ['.dockerconfigjson'])
 

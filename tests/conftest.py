@@ -34,6 +34,8 @@ rootLogger = logging.getLogger()
 def pytest_addoption(parser):
     parser.addoption('--real-packages', action='store_true', dest="real_packages",
                      default=False, help="Enable tests that involve real packages")
+    parser.addoption('--rest-api', action='store_true', dest="rest_api",
+                     default=False, help="Enable tests that involve spinning up the REST-API")
 
 
 @pytest.fixture()
@@ -1978,6 +1980,10 @@ variables:
 @pytest.fixture()
 def flowir_simple_foundation() -> str:
     return """
+variables:
+  default:
+    global:
+      option: FROM_FOUNDATION
 components:
   - name: generate-inputs
     command:
@@ -1986,7 +1992,7 @@ components:
   - name: simulation
     command: 
       executable: echo
-      arguments: slow simulation
+      arguments: slow simulation %(option)s
     references:
     - stage0.generate-inputs:output
   - name: analysis
@@ -2001,6 +2007,10 @@ components:
 @pytest.fixture()
 def flowir_simple_surrogate() -> str:
     return """
+variables:
+  default:
+    global:
+      option: FROM_SURROGATE
 components:
   - name: generate-inputs
     command:
@@ -2009,7 +2019,7 @@ components:
   - name: simulation
     command: 
       executable: echo
-      arguments: fast simulation of stage0.generate-inputs:output
+      arguments: fast simulation of stage0.generate-inputs:output %(option)s
     references:
     - stage0.generate-inputs:output
 """

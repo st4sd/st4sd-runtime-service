@@ -59,6 +59,35 @@ class CannotMergeMetadataRegistryError(ApiError):
         super(CannotMergeMetadataRegistryError, self).__init__(msg)
 
 
+class TransformationError(ApiError):
+    def __init__(self, msg: str):
+        super().__init__(msg)
+
+
+class TransformationUnknownVariableError(TransformationError):
+    def __init__(self, variable: str, package: str, extra_msg: str):
+        self.variable = variable
+        self.package = package
+        self.extra_msg = extra_msg
+
+        msg = f"The package {package} does not contain the variable {variable}"
+
+        if extra_msg:
+            msg = ". ".join((msg, extra_msg))
+
+        super().__init__(msg=msg)
+
+
+class TransformationManyErrors(TransformationError):
+    def __init__(self, problems: List[Exception]):
+        self.problems = list(problems)
+
+        msg = f"There are {len(problems)} problems. Problems follow:\n"
+        msg += "\n".join((str(e) for e in problems))
+
+        super().__init__(msg=msg)
+
+
 class InvalidElaunchParameter(ApiError):
     pass
 

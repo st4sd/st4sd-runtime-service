@@ -14,7 +14,10 @@ import json
 import logging
 import os
 import tempfile
+
+import experiment.model.frontends.flowir
 import pytest
+import yaml
 
 import apis.db.relationships
 import apis.db.exp_packages
@@ -119,13 +122,18 @@ def test_gamess_homo_lumo_dft_surrogate_ani_single_component_graphs_flesh_out(
     x = transform.relationship.get_result_relationship_by_name_output("stage0.AnionSMILESToGAMESSInput:ref")
     assert x.inputGraphResult.name == "stage0.GenerateOptimizedConfiguration:ref"
 
-    assert len(transform.relationship.graphParameters) == 2
-    x = transform.relationship.get_parameter_relationship_by_name_input("input/pag_data.csv:copy")
-    assert x.outputGraphParameter.name == "input/pag_data.csv:copy"
+    parameters = {
+        x.inputGraphParameter.name: x.outputGraphParameter.name for x in transform.relationship.graphParameters
+    }
 
-    x = transform.relationship.get_parameter_relationship_by_name_input("input/input_molecule.txt:copy")
-    assert x.outputGraphParameter.name == "stage0.SetFunctional/input_molecule.txt:copy"
+    assert parameters == {
+        "input/pag_data.csv:copy": "input/pag_data.csv:copy",
+        "input/input_molecule.txt:copy": "stage0.SetFunctional/input_molecule.txt:copy",
+        "backend": "backend",
+        "conflicting": "conflicting",
+    }
 
+    assert len(transform.relationship.graphParameters) == len(parameters)
 
 def test_gamess_homo_lumo_dft_surrogate_ani_stable_digest(
         ve_homo_lumo_dft_gamess_us: apis.models.virtual_experiment.ParameterisedPackage,
@@ -163,7 +171,7 @@ def test_gamess_homo_lumo_dft_surrogate_ani_stable_digest(
         logger.info(x.source.path)
         logger.info(packages_metadata.get_root_directory_containing_package(x.source.packageName))
 
-    assert derived_ve.metadata.registry.digest == "sha256x752b0e70a8f9aafc4507f3926ffb71021e3c9a035ba3f7bfbeb415b5"
+    assert derived_ve.metadata.registry.digest == "sha256x025cafd8675294cbb12e973d257c0c299f2e69ea3c8f5525f78ef368"
 
 
 @pytest.mark.parametrize("variable_merge_policy", [
@@ -441,8 +449,6 @@ def test_generate_parameterisation_for_derived_from_optimizer_and_bandgap(
 ):
     synthesize = apis.models.relationships.PayloadSynthesize()
 
-    # synthesize.parameterisation.executionOptions.platform = ['default', 'openshift', 'makis']
-
     metadata = apis.kernel.relationships.synthesize_from_transformation(
         rel=rel_optimizer_band_gap,
         new_package_name="synthetic",
@@ -461,6 +467,80 @@ def test_generate_parameterisation_for_derived_from_optimizer_and_bandgap(
     assert len(parameterisation.presets.variables) == len(all_vars.uniqueValues)
     assert len(all_vars.uniqueValues) > 0
     assert all([x.name != "backend" for x in parameterisation.presets.variables])
+
+
+def test_characterize_variables():
+    flowir = """
+variables:
+  default:
+    global:
+      # VV: References python script in hooks directory to use for restartHook of GeometryOptimisation
+      gamess-restart-hook-file: dft_restart.py
+      gamess-image: nvcr.io/hpc/gamess:17.09-r2-libcchem
+      gamess-command: bin/run-gamess.sh
+      mem: '4295000000'
+      backend: local
+      number-processors: '8'
+      startIndex: '0'
+      numberMolecules: '1'
+      basis: GBASIS=N31 NGAUSS=6 NDFUNC=2 NPFUNC=1 DIFFSP=.TRUE. DIFFS=.TRUE.
+      functional: B3LYP
+      collabel: label
+      # VV: how long k8s should let the pod run before it sends it a SIGTERM
+      gamess-walltime-minutes: 700
+      # VV: how long k8s should wait between SIGTERM and SIGKILL
+      gamess-grace-period-seconds: 1800
+      gamess-gpus: 0
+      gamess-version: "00"
+    stages:
+      0:
+        stage-name: SMILES_to_GAMESS
+      1:
+        stage-name: GeometryOptimisationRun
+  openshift:
+    global:
+      backend: kubernetes
+  openshift-kubeflux:
+    global:
+      backend: kubernetes
+  openshift-cpu:
+    global:
+      backend: kubernetes
+      gamess-restart-hook-file: cpu_dft_restart.py
+      gamess-image: docker-na-public.artifactory.swg-devops.com/res-st4sd-community-team-applications-docker-virtual/gamess-st4sd:2019.11.30
+      gamess-command: rungms
+      gamess-version: "01"
+components:
+- name: dummy
+  command:
+    executable: echo
+    arguments: hello world
+    """
+
+    flowir = yaml.load(flowir, Loader=yaml.SafeLoader)
+    concrete = experiment.model.frontends.flowir.FlowIRConcrete(flowir, 'default', {})
+    all_vars = apis.models.virtual_experiment.characterize_variables(
+        concrete, ['openshift', 'openshift-kubeflux', 'openshift-cpu'])
+
+    assert all_vars.dict() == {
+        'multipleValues': {
+            'gamess-command',
+            'gamess-image',
+            'gamess-restart-hook-file',
+            'gamess-version'},
+        'platforms': ['openshift', 'openshift-kubeflux', 'openshift-cpu'],
+        'uniqueValues': {
+            'backend': 'kubernetes',
+            'basis': 'GBASIS=N31 NGAUSS=6 NDFUNC=2 NPFUNC=1 DIFFSP=.TRUE. DIFFS=.TRUE.',
+            'collabel': 'label',
+            'functional': 'B3LYP',
+            'gamess-gpus': 0,
+            'gamess-grace-period-seconds': 1800,
+            'gamess-walltime-minutes': 700,
+            'mem': '4295000000',
+            'number-processors': '8',
+            'numberMolecules': '1',
+            'startIndex': '0'}}
 
 
 def validate_band_gap_optimizer_dsl_args(
@@ -689,7 +769,90 @@ def test_simple_relationship(
     assert rel.transform.relationship.graphResults[0].inputGraphResult.name == "stage0.simulation:ref"
     assert rel.transform.relationship.graphResults[0].outputGraphResult.name == "stage0.simulation:ref"
 
-    # VV: The inputGraph components consume 1 component from 1-outputGraph
-    assert len(rel.transform.relationship.graphParameters) == 1
-    assert rel.transform.relationship.graphParameters[0].inputGraphParameter.name == "stage0.generate-inputs:output"
-    assert rel.transform.relationship.graphParameters[0].outputGraphParameter.name == "stage0.generate-inputs:output"
+    # VV: The inputGraph components consume 1 component from 1-outputGraph and 1 variable %(option)s
+
+    input_params = {
+        x.inputGraphParameter.name: x.outputGraphParameter.name for x in rel.transform.relationship.graphParameters
+    }
+
+    assert input_params == {
+        "stage0.generate-inputs:output": "stage0.generate-inputs:output",
+        "option": "option",
+    }
+
+    assert len(rel.transform.relationship.graphParameters) == 2
+
+
+def test_simple_relationship_with_variables(
+        ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage,
+        package_metadata_simple: apis.storage.PackageMetadataCollection,
+        rel_simple_relationship: Dict[str, Any],
+        output_dir: str,
+):
+    rel = apis.models.relationships.Relationship.parse_obj(rel_simple_relationship)
+
+    rel.transform.relationship.graphParameters.append(
+        apis.models.relationships.RelationshipParameters(
+            inputGraphParameter=apis.models.relationships.GraphValue(name="option"),
+            outputGraphParameter=apis.models.relationships.GraphValue(value="use foundation %(option)s")
+        )
+    )
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "experiments.txt"))
+    db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationship.txt"))
+
+    ve_fake_slow = ve_sum_numbers.copy(deep=True)
+    ve_fake_slow.metadata.package.name = "simple-slow"
+
+    ve_fake_fast = ve_sum_numbers.copy(deep=True)
+    ve_fake_fast.metadata.package.name = "simple-fast"
+
+    with db_experiments:
+        db_experiments.push_new_entry(ve_fake_slow)
+        db_experiments.push_new_entry(ve_fake_fast)
+
+    rel = apis.kernel.relationships.push_relationship(
+        rel=rel,
+        db_relationships=db_relationships,
+        db_experiments=db_experiments,
+        packages=package_metadata_simple)
+
+    logger.info(f"Updated relationship: {rel.json(indent=2)}")
+
+    # VV: The 1-outputGraph components consume 1 component from outputGraph
+    assert len(rel.transform.relationship.graphResults) == 1
+    assert rel.transform.relationship.graphResults[0].inputGraphResult.name == "stage0.simulation:ref"
+    assert rel.transform.relationship.graphResults[0].outputGraphResult.name == "stage0.simulation:ref"
+
+    # VV: The inputGraph components consume 1 component from 1-outputGraph and 1 variable wrapped inside some text
+    parameters = {
+        x.inputGraphParameter.name: x.outputGraphParameter.dict() for x in rel.transform.relationship.graphParameters
+    }
+
+    assert parameters == {
+        'option': {'value': 'use foundation %(option)s'},
+        'stage0.generate-inputs:output': {'name': 'stage0.generate-inputs:output'}
+    }
+    assert len(rel.transform.relationship.graphParameters) == 2
+
+    synthesize = apis.models.relationships.PayloadSynthesize()
+    synthesize.options.generateParameterisation = True
+
+    metadata = apis.kernel.relationships.synthesize_from_transformation(
+        rel=rel,
+        new_package_name="synthetic",
+        packages=package_metadata_simple,
+        db_experiments=db_experiments,
+        synthesize=synthesize,
+        update_experiments_database=True,
+        path_multipackage=output_dir,
+    )
+
+    concrete = metadata.metadata.concrete
+
+    comp = concrete.get_component((0, 'simulation'))
+    assert comp['command']['arguments'] == "fast simulation of stage0.generate-inputs:output use foundation %(option)s"
+
+    all_vars = concrete.get_platform_variables()
+
+    assert all_vars['global']['option'] == 'FROM_FOUNDATION'
