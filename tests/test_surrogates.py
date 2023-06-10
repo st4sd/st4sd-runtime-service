@@ -782,6 +782,51 @@ def test_simple_relationship(
 
     assert len(rel.transform.relationship.graphParameters) == 2
 
+    synthesize = apis.models.relationships.PayloadSynthesize()
+    synthesize.options.generateParameterisation = True
+
+    metadata = apis.kernel.relationships.synthesize_from_transformation(
+        rel=rel,
+        new_package_name="synthetic",
+        packages=package_metadata_simple,
+        db_experiments=db_experiments,
+        synthesize=synthesize,
+        update_experiments_database=True,
+        path_multipackage=output_dir,
+    )
+
+    concrete = metadata.metadata.concrete
+
+    comp = concrete.get_component((0, 'simulation'))
+    assert comp['command']['arguments'] == "fast simulation of stage0.generate-inputs:output %(option)s"
+
+    all_vars = concrete.get_platform_variables()
+
+    assert all_vars['global']['option'] == 'FROM_FOUNDATION'
+
+    explained = apis.runtime.package_derived.explain_choices_in_derived(
+        ve=metadata.package, packages=package_metadata_simple)
+
+    assert explained.dict() == {
+        'variables': {
+            'option': {
+                'fromBasePackage': 'simple-slow:latest',
+                'preset': 'FROM_FOUNDATION',
+                'values': [
+                    {
+                        'overrides': [
+                            {
+                                'fromBasePackage': 'simple-fast:latest',
+                                'value': 'FROM_SURROGATE'
+                            }
+                        ],
+                        'platform': 'default',
+                        'value': 'FROM_FOUNDATION'
+                    }]
+            }
+        }
+    }
+
 
 def test_simple_relationship_with_variables(
         ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage,
@@ -856,3 +901,26 @@ def test_simple_relationship_with_variables(
     all_vars = concrete.get_platform_variables()
 
     assert all_vars['global']['option'] == 'FROM_FOUNDATION'
+
+    explained = apis.runtime.package_derived.explain_choices_in_derived(
+        ve=metadata.package, packages=package_metadata_simple)
+
+    assert explained.dict() == {
+        'variables': {
+            'option': {
+                'fromBasePackage': 'simple-slow:latest',
+                'preset': 'FROM_FOUNDATION',
+                'values': [
+                    {
+                        'overrides': [
+                            {
+                                'fromBasePackage': 'simple-fast:latest',
+                                'value': 'FROM_SURROGATE'
+                            }
+                        ],
+                        'platform': 'default',
+                        'value': 'FROM_FOUNDATION'
+                    }]
+            }
+        }
+    }

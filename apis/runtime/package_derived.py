@@ -654,6 +654,267 @@ class GraphsFromManyPackagesMetadata(apis.models.common.Digestable):
     aggregate_environments: Any = None
 
 
+class ExplanationManifestDir(apis.models.common.Digestable):
+    name: str = pydantic.Field(..., description="The directory name")
+    origin: str = pydantic.Field(..., description="The identifier of the original owner of the directory")
+    paths: List[str] = pydantic.Field(..., description="A list of paths relative to the directory")
+
+
+class VariableValueFromBasePackage(apis.models.common.Digestable):
+    fromBasePackage: str = pydantic.Field(..., description="The package from which the variable receive the value")
+    value: str = pydantic.Field(..., description="The value of the variable")
+
+
+class ExplanationVariableValue(apis.models.common.Digestable):
+    value: str = pydantic.Field(..., description="The value of the variable")
+    platform: str = pydantic.Field(..., description="The name of the platform")
+    overrides: Optional[List[VariableValueFromBasePackage]] = pydantic.Field(
+        None, description="The values that .value overrides from the other graph. If None then this variable does "
+                          "not exist in the other graph for the implied platform")
+
+
+class ExplanationVariable(apis.models.common.Digestable):
+    fromBasePackage: str = pydantic.Field(..., description="The package from which the variable receive these values")
+    values: List[ExplanationVariableValue] = pydantic.Field(
+        [], description="Explains how the variable receives its value for that platform in the DSL")
+    preset: Optional[str] = pydantic.Field(
+        None, description="The preset value set in the parameterisation.presets field. Overrides .dslValues")
+    executionOptions: Optional[str] = pydantic.Field(
+        None, description="The default value from the parameterisation.executionOptions field. Cannot specify this "
+                          "if .preset is also defined. Overrides .dslValues")
+
+    def get_platform_value(self, platform: str) -> ExplanationVariableValue:
+        platforms = []
+        for v in self.values:
+            if v.platform == platform:
+                return v
+            platforms.append(v.platform)
+
+        raise KeyError(f"Unknown platform {platform} - platforms are {platforms}")
+
+    def update_platform_value(self, platform: str, value: ExplanationVariableValue):
+        try:
+            existing = self.get_platform_value(platform)
+            existing.value = value.value
+            existing.overrides = value.overrides
+            existing.platform = platform
+        except KeyError:
+            self.values.append(value)
+
+    def get_default_value(self, platform: str) -> str:
+        if self.preset is not None:
+            return self.preset
+        if self.executionOptions is not None:
+            return self.executionOptions
+
+        return self.get_platform_value(platform).value
+
+
+class ExplanationDerived(apis.models.common.Digestable):
+    # manifest: List[ExplanationManifestDir] = []
+    variables: Dict[str, ExplanationVariable] = {}
+
+    def try_add_overriden_value_for_package(self, variable: str, value: str, platform: str, package: str):
+        existing = self.variables[variable]
+
+        for ev in existing.values:
+            if ev.platform == platform:
+                matching = [x for x in ev.overrides or [] if x.fromBasePackage == package]
+                if matching:
+                    matching[0].value = ev
+                    return
+                else:
+                    overrides = ev.overrides or []
+                    overrides.append(VariableValueFromBasePackage(fromBasePackage=package, value=value))
+                    return
+
+        raise KeyError(f"The variable {variable} does not have a value for platform {platform} and therefore "
+                       f"it cannot override the value {value} from package {package}")
+
+    def register_override_values(
+            self,
+            variable: str,
+            platform_vars: Dict[str, Dict[str, str]],
+            from_base_package: str,
+            override_other_base_package: str,
+            overriden_concrete: experiment.model.frontends.flowir.FlowIRConcrete,
+            preset: Optional[str],
+            execution_options: Optional[str],
+    ):
+        dsl_values = []
+        for platform in platform_vars:
+            if variable not in platform_vars[platform]:
+                continue
+
+            if platform in overriden_concrete.platforms:
+                gp = platform
+            else:
+                gp = 'default'
+
+            val = overriden_concrete.get_platform_variables(gp)['global'].get(variable)
+            over = None
+            if val is not None:
+                over = [VariableValueFromBasePackage(value=val, fromBasePackage=override_other_base_package)]
+
+            e = ExplanationVariableValue(value=platform_vars[platform][variable], platform=platform,
+                                         overrides=over)
+            # if e.overrides.value == e.value:
+            #     e.overrides = None
+
+            dsl_values.append(e)
+
+        expl = ExplanationVariable(
+            fromBasePackage=from_base_package, values=dsl_values,
+            preset=preset, executionOptions=execution_options)
+
+        if variable not in self.variables:
+            self.variables[variable] = expl
+        else:
+            existing = self.variables[variable]
+
+            # VV: Migrate old overrides into new explanation - IF old overrides did not involve the new fromBasePackage
+            for old_value in existing.values:
+                matching = [x for x in expl.values if x.platform == old_value.platform]
+                if not matching:
+                    continue
+                matching = matching[0]
+                for ov in (old_value.overrides or []):
+                    if ov.fromBasePackage != from_base_package:
+                        matching.overrides.append(ov)
+
+            self.variables[variable] = expl
+
+            for new_value in expl.values:
+                old_value = [old for old in existing.values if old.platform == new_value.platform]
+                if old_value:
+                    old_value = old_value[0]
+
+                    self.try_add_overriden_value_for_package(
+                        variable=variable,
+                        value=old_value.value,
+                        platform=old_value.platform,
+                        package=existing.fromBasePackage
+                    )
+
+
+def explain_choices_in_derived(
+        ve: apis.models.virtual_experiment.ParameterisedPackage,
+        packages: apis.storage.PackageMetadataCollection,
+        all_platforms: Optional[List[str]] = None
+) -> ExplanationDerived:
+    log = logging.getLogger("explain")
+    ret = ExplanationDerived()
+
+    if all_platforms is None:
+        all_platforms = ve.get_known_platforms() or []
+
+    if 'default' not in all_platforms:
+        all_platforms = list(all_platforms)
+        all_platforms.append('default')
+
+    presets = {x.name: x.value for x in ve.parameterisation.presets.variables}
+
+    def get_value(v: apis.models.common.OptionMany):
+        if v.value is not None:
+            return v.value
+
+        if v.valueFrom:
+            return v.valueFrom[0].value
+
+    execution_options = {x.name: get_value(x) for x in ve.parameterisation.executionOptions.variables}
+
+    # VV: Names of variables that graphs do not explicitly define as inputBindings
+    # key is variable name, value is the last graph that had this variable in its definition
+    implicit_variables: Dict[str, str] = {}
+
+    for connection in ve.base.connections:
+        last_package, graph_name = connection.graph.partition_name()
+        graph_concrete = packages.get_concrete_of_package(last_package)
+
+        graph_variables = set()
+
+        for platform in all_platforms:
+            try:
+                platform_vars = graph_concrete.get_platform_variables(platform)
+            except experiment.model.errors.FlowIRPlatformUnknown:
+                continue
+            graph_variables.update(platform_vars['global'])
+
+            for name in platform_vars['global']:
+                name = str(name)
+
+                if name not in ret.variables:
+                    implicit_variables[name] = last_package
+
+        for dest_symbol in connection.bindings:
+            if dest_symbol.valueFrom.applicationDependency:
+                # VV: We are setting this variable to a reference i.e. there won't be a variable anymore
+                continue
+
+            if dest_symbol.valueFrom.graph is None:
+                raise apis.runtime.errors.RuntimeError(f'inputBinding {dest_symbol.json(indent=2)} is invalid')
+
+            graph = ve.base.get_package(last_package).get_graph(graph_name)
+
+            input_binding = graph.bindings.get_input_binding(dest_symbol.name)
+            if input_binding.reference:
+                # VV: The destination symbol is a reference, we don't care about it
+                continue
+
+            if input_binding.text not in graph_variables:
+                raise apis.runtime.errors.RuntimeError(f'inputBinding {input_binding.json(indent=2)} in '
+                                                       f'{connection.graph.name} is an invalid Variable definition '
+                                                       f'it points to a variable that does not exist')
+            dest_name = input_binding.text
+            # VV: We are setting the value of `dest_name` based on the values of 0+ variables in another graph
+            other_package, other_graph_name = dest_symbol.valueFrom.graph.partition_name()
+            other_concrete = packages.get_concrete_of_package(other_package)
+            other_graph = ve.base.get_package(other_package).get_graph(other_graph_name)
+            source_symbol = other_graph.bindings.get_output_binding(dest_symbol.valueFrom.graph.binding.name)
+
+            if source_symbol.reference:
+                continue
+
+            value = source_symbol.text
+            if value is None:
+                raise apis.runtime.errors.RuntimeError(
+                    f'The value to {input_binding.json(indent=2)} in {connection.graph.name} does not '
+                    f'have .text but {source_symbol.json(indent=2)}')
+
+            # VV: FIXME what about indirect variables?
+            platform_vars = {
+                platform: {
+                    str(k): str(v) for k, v in other_concrete.get_platform_variables(platform)['global'].items()
+                } for platform in all_platforms if platform in other_concrete.platforms
+            }
+
+            other_vars = set()
+            for platform in platform_vars:
+                missing = []
+                ref_vars = experiment.model.frontends.flowir.FlowIR.discover_indirect_dependencies_to_variables(
+                    value, platform_vars[platform], missing)
+                other_vars.update(ref_vars)
+                if missing:
+                    log.warning(f"The value {value} references the variables {missing} which do not exist in the "
+                                f"platform {platform} of package {other_package} - will ignore them")
+
+            if not other_vars:
+                continue
+
+            for dest_name in sorted(other_vars):
+                ret.register_override_values(
+                    variable=dest_name,
+                    platform_vars=platform_vars,
+                    from_base_package=other_graph_name,
+                    overriden_concrete=graph_concrete,
+                    override_other_base_package=last_package,
+                    preset=presets.get(dest_name),
+                    execution_options=execution_options.get(dest_name),
+                )
+
+    return ret
+
+
 class DerivedPackage:
     """Putting this here because I don't know what else I'll need, I'll move around this code later
 

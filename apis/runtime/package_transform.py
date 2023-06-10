@@ -275,7 +275,7 @@ class TransformRelationship:
 
         known_mappings_surr = set()
         for m in transform.relationship.graphParameters:
-            if m.inputGraphParameter.name and (m.outputGraphParameter.value or m.outputGraphParameter.name):
+            if m.inputGraphParameter.name:
                 known_mappings_surr.add(m.inputGraphParameter.name)
 
         # VV: First prepare the mappings between graph parameters. If we find an inputGraph parameter for which
@@ -283,10 +283,6 @@ class TransformRelationship:
         # 1. does not get removed by transform
         # 2. has the same name as the inputGraph parameter
         # If there's such an outputGraph then generate a graphParameters mapping between the 2 components
-
-        all_graph_input_parameters = set()
-        for x in transform.relationship.graphParameters:
-            all_graph_input_parameters.add(x.inputGraphParameter.name)
 
         comp_ids = []
         for x in transform.inputGraph.components:
@@ -361,7 +357,7 @@ class TransformRelationship:
                         stage=ref.stageIndex, producer=ref.producerName, fileRef='',
                         method=ref.method).absoluteReference
 
-                    if ref_surr not in all_graph_input_parameters:
+                    if ref_surr not in known_mappings_surr:
                         ref_found = apis.models.from_core.DataReference.from_parts(
                             stage=dref_found.stageIndex, producer=dref_found.producerName, fileRef='',
                             method=ref.method).absoluteReference
@@ -370,7 +366,7 @@ class TransformRelationship:
                             f"   Matching {dref_found.absoluteReference} with "
                             f"{ref.absoluteReference} on pathRef= {ref.pathRef}")
 
-                        all_graph_input_parameters.add(ref_surr)
+                        known_mappings_surr.add(ref_surr)
 
                         transform.relationship.graphParameters.append(
                             apis.models.relationships.RelationshipParameters(

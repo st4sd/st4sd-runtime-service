@@ -5,14 +5,11 @@
 
 from __future__ import annotations
 
-import os
-import logging
 import pprint
 import traceback
 from typing import Any
 from typing import Dict
 
-import experiment.model.graph
 import pydantic.error_wrappers
 import werkzeug.exceptions
 from flask import request, current_app
@@ -140,6 +137,7 @@ class TransformDSLPreview(Resource):
                 "dsl": { the dictionary representing the DSL of the computational graph },
                 "experiment": { the dictionary representing the parameterised virtual experiment package that
                                 would have been created in the registry },
+                "explanation": { the dictionary explaining how variables in the graph receive their value },
                 "problems": [ a list of potential issues/warnings ]
             }
         """
@@ -149,18 +147,29 @@ class TransformDSLPreview(Resource):
             db_relationships = utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT)
             db_experiments = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
 
+            downloader = apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+                local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
+
             ret = apis.kernel.relationships.api_preview_synthesize_dsl(
                 identifier=identifier,
-                packages=apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
-                    local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)),
+                packages=downloader,
                 db_relationships=db_relationships,
                 db_experiments=db_experiments,
                 dsl_version=args.dslVersion
             )
 
+            try:
+                explanation = apis.runtime.package_derived.explain_choices_in_derived(
+                    ret.package, packages=downloader).dict()
+            except Exception as e:
+                current_app.logger.warning(f"Run into {e} while explaining synthesize {identifier}. "
+                                           f"Traceback: {traceback.format_exc()}")
+                explanation = {"message": "Unable to explain package inheritance"}
+
             return {
                 "dsl": ret.dsl,
                 "experiment": ret.package.dict(),
+                "package-inheritance": explanation,
                 "problems": []
             }
         except werkzeug.exceptions.HTTPException:
@@ -196,18 +205,33 @@ class TransformSynthesize(Resource):
 
         # VV: TODO FIX ME
         try:
+            downloader = apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+                local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
+
             ret = apis.kernel.relationships.api_synthesize_from_transformation(
                 identifier=identifier,
                 new_package_name=new_package_name,
-                packages=apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
-                    local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)),
+                packages=downloader,
                 db_relationships=utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT),
                 db_experiments=utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT),
                 synthesize=synthesize,
                 path_multipackage=apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
             )
+            problems = []
+            try:
+                explanation = apis.runtime.package_derived.explain_choices_in_derived(
+                    ret.package, packages=downloader).dict()
+            except Exception as e:
+                current_app.logger.warning(f"Run into {e} while explaining synthesize {identifier}. "
+                                           f"Traceback: {traceback.format_exc()}")
+                problems = [{"message": "Unable to explain package inheritance"}]
+                explanation = {}
 
-            return {"result": ret.package.dict(), "problems": []}
+            return {
+                "result": ret.package.dict(),
+                "package-inheritance": explanation,
+                "problems": problems,
+            }
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.RelationshipNotFoundError as e:

@@ -1190,6 +1190,90 @@ class ExperimentDSL(Resource):
             api.abort(500, f"Run into internal error while querying for {identifier}")
 
 
+@api.route('/<identifier>/package-inheritance/', doc=False)
+@api.route('/<identifier>/package-inheritance')
+@api.param('identifier', 'The package identifier. It must contain a $packageName and may include either '
+                         'a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`). If both suffixes are missing '
+                         'then the identifier implies the `:latest` tag suffix.')
+@api.response(404, 'Unknown experiment')
+class ExperimentExplain(Resource):
+    def get(self, identifier: str):
+        """Explain how variables of multi-base-package experiments receive their values
+
+        It returns a Dictionary with the format ::
+
+            {
+                "result": {
+                    "variables": {
+                        "<variable name>": {
+                            "fromBasePackage": "name of base package from which variable receives its value",
+                            "values": [
+                                {
+                                    "value": "the value of the variable in the platform",
+                                    "platform": "the platform name",
+
+                                    "overrides": [
+                                        # Optional - explains which values in other basePackages this value overrides
+                                        {
+                                            "fromBasePackage": "the other base package which is overridden",
+                                            "value": "the value of this variable, in the other base package
+                                                      for this platform",
+                                        }
+                                    [
+                                },
+                            ]
+                        }
+                    }
+                }
+            }
+
+        """
+
+        try:
+            # VV: If identifier has neither @ or : it rewrites it to "${identifier}:latest}
+            identifier = apis.models.common.PackageIdentifier(identifier).identifier
+
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
+                docs = db.query_identifier(identifier)
+
+                if len(docs) == 0:
+                    api.abort(404, message=f"There is no entry in the experiment registry "
+                                           f"that matches {identifier}")
+
+                try:
+                    ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
+                        .parse_obj(docs[0])
+                except pydantic.error_wrappers.ValidationError as e:
+                    raise apis.models.errors.ApiError(f"Invalid experiment. Underlying problems {e.errors()}")
+
+            if len(ve.base.packages) == 1:
+                api.abort(400, "Experiment has a single base package, there is no inheritance to explain")
+                raise NotImplementedError()  # keep linter happy
+            elif len(ve.base.packages) > 1:
+
+                downloader = apis.storage.PackagesDownloader(ve=ve, db_secrets=utils.secrets_git_open(
+                    local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
+
+                with downloader:
+                    explanation = apis.runtime.package_derived.explain_choices_in_derived(ve, packages=downloader)
+
+                return {"result": explanation.dict()}
+            else:
+                api.abort(400, "Parameterised virtual experiment package does not contain any base packages")
+                raise NotImplementedError()  # keep linter happy
+
+        except werkzeug.exceptions.HTTPException:
+            raise
+        except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while explaining package-inheritance in {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(400, message=f"Unable to explain package inheritance. Underlying error: {e}")
+        except Exception as e:
+            current_app.logger.warning(f"Run into {e} while explaining package-inheritance in {identifier}. "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(500, f"Run into internal error while explaining package-inheritance in {identifier}")
+
+
 @api.route('/<identifier>/', doc=False)
 @api.route('/<identifier>')
 @api.param('identifier', 'The package identifier. It must contain a $packageName and may include either '
