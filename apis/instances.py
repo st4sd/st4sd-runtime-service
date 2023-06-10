@@ -23,11 +23,14 @@ from flask_restx import Resource, reqparse, inputs
 from kubernetes import client
 
 import apis.models
+import apis.models.errors
 import apis.models.common
 import apis.models.constants
 import apis.models.virtual_experiment
 import apis.storage
+import apis.db.exp_packages
 import utils
+
 from utils import setup_config, WORKING_VOLUME_MOUNT
 
 api = apis.models.api_instances
@@ -121,13 +124,15 @@ def postprocess_workflow_dictionary(k8s_workflow: DictWorkflow, ve_def: Optional
     return instance
 
 
-def extract_virtual_experiment_entry(item) -> Dict[str, Any] | None:
-    instance_id = item.get('metadata', {}).get('name')
-    package_name = item.get('metadata', {}).get('labels', {}).get('st4sd-package-name')
-    digest = item.get('metadata', {}).get('labels', {}).get('st4sd-package-digest')
-
+def extract_virtual_experiment_entry(
+        package_name: str,
+        tag: str,
+        digest: str,
+        db: apis.db.exp_packages.DatabaseExperiments,
+        instance_id: str,
+) -> Dict[str, Any] | None:
     if package_name and digest:
-        with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
+        with db:
             identifier = apis.models.common.PackageIdentifier.from_parts(
                 package_name=package_name, tag=None, digest=digest)
             docs = db.query_identifier(identifier.identifier)
@@ -143,7 +148,11 @@ def extract_virtual_experiment_entry(item) -> Dict[str, Any] | None:
             f"- will not populate experiment field of instance")
 
 
-def get_list_instances(api_instance, namespace):
+def get_list_instances(
+        api_instance: client.CustomObjectsApi,
+        namespace: str,
+        database: apis.db.exp_packages.DatabaseExperiments
+) -> List[Dict[str, Any]]:
     to_ret = []
 
     if apis.models.constants.LOCAL_DEPLOYMENT:
@@ -153,13 +162,54 @@ def get_list_instances(api_instance, namespace):
     try:
         api_response = api_instance.list_namespaced_custom_object(
             utils.K8S_WORKFLOW_GROUP, utils.K8S_WORKFLOW_VERSION, namespace, utils.K8S_WORKFLOW_PLURAL)
-        if ("items" in api_response):
-            for item in api_response["items"]:
-                ve_def = extract_virtual_experiment_entry(item)
-                to_ret.append(postprocess_workflow_dictionary(item, ve_def))
+        cache_experiments = {}
+
+        # VV: Here we need to query the database almost as many times as the experiment instances to identify
+        # their associated experiments. To reduce the number of queries we keep a record of all the experiment
+        # identifiers, query those identifiers and then use them to augment the instance workflow dictionaries
+        items: List[Dict[str, Any]] = api_response.get("items", [])
+
+        if not items:
+            return []
+
+        for item in items:
+            package_name = item.get('metadata', {}).get('labels', {}).get('st4sd-package-name')
+            digest = item.get('metadata', {}).get('labels', {}).get('st4sd-package-digest')
+
+            if package_name and digest:
+                identifier = (package_name, digest)
+                cache_experiments[identifier] = None
+
+        current_app.logger.info(f"There are {len(item)} instances which are associated with {len(cache_experiments)} "
+                                f"parameterised virtual experiment packages")
+
+        with database:
+            for (package_name, digest) in cache_experiments:
+                cache_experiments[(package_name, digest)] = extract_virtual_experiment_entry(
+                    package_name=package_name,
+                    tag=None,
+                    digest=digest,
+                    db=database,
+                    instance_id="*many*")
+
+        for item in items:
+            package_name = item.get('metadata', {}).get('labels', {}).get('st4sd-package-name')
+            digest = item.get('metadata', {}).get('labels', {}).get('st4sd-package-digest')
+
+            if package_name and digest:
+                identifier = (package_name, digest)
+                try:
+                    ve_def = cache_experiments[identifier]
+                except KeyError as e:
+                    current_app.logger.info(f"No cached experiment for instance "
+                                            f"{item.get('metadata', {}).get('name')}")
+                    ve_def = None
+            to_ret.append(postprocess_workflow_dictionary(item, ve_def))
+    except apis.models.errors.ApiError:
+        current_app.logger.info(f"Ran into {e} while getting list of instances - Traceback: {traceback.format_exc()}")
+        raise
     except Exception as e:
-        print(traceback.format_exc())
-        print(e)
+        current_app.logger.info(f"Ran into {e} while getting list of instances - Traceback: {traceback.format_exc()}")
 
     return to_ret
 
@@ -188,8 +238,18 @@ def get_instance(instance_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     instance = api_response[0]
+    database = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
+    package_name = instance.get('metadata', {}).get('labels', {}).get('st4sd-package-name')
+    digest = instance.get('metadata', {}).get('labels', {}).get('st4sd-package-digest')
 
-    ve_def = extract_virtual_experiment_entry(instance)
+    with database:
+        ve_def = extract_virtual_experiment_entry(
+            package_name=package_name,
+            tag=None,
+            digest=digest,
+            db=database,
+            instance_id=instance_id)
+
     return postprocess_workflow_dictionary(instance, ve_def)
 
 
@@ -214,7 +274,8 @@ class InstanceExperimentList(Resource):
 
         configuration = setup_config(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
         api_instance = client.CustomObjectsApi(client.ApiClient())
-        return get_list_instances(api_instance, utils.MONITORED_NAMESPACE)
+        database = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
+        return get_list_instances(api_instance, utils.MONITORED_NAMESPACE, database=database)
 
         # experiment_instance_list = populate_from("instances.txt")
         # return experiment_instance_list
