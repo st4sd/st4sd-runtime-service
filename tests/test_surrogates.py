@@ -15,13 +15,16 @@ import logging
 import os
 import tempfile
 
+import experiment.model.errors
 import experiment.model.frontends.flowir
+
 import pytest
 import yaml
 
 import apis.db.relationships
 import apis.db.exp_packages
 import apis.models
+import apis.models.errors
 import apis.models.common
 import apis.kernel.relationships
 import apis.models.relationships
@@ -924,3 +927,45 @@ def test_simple_relationship_with_variables(
             }
         }
     }
+
+
+def test_surface_invalid_transformation_dangling_component(
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str,
+):
+    path_db_experiments = os.path.join(output_dir, "experiments.json")
+    path_db_relationships = os.path.join(output_dir, "relationships.json")
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
+    db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
+
+    # VV: Remove a component and forget to specify how to fill in the hole left behind
+    rel_optimizer_band_gap.transform.outputGraph.components = ["stage0.XYZToGAMESS", "stage1.GeometryOptimisation"]
+
+    with pytest.raises(apis.models.errors.TransformationManyErrors) as e:
+        metadata = simple_push_and_synthesize(
+            packages=package_metadata_modular_optimizer_band_gap_gamess,
+            rel_optimizer_band_gap=rel_optimizer_band_gap,
+            ve_modular_band_gap_gamess=ve_modular_band_gap_gamess,
+            db_experiments=db_experiments,
+            db_relationships=db_relationships,
+            new_package_name="synthetic",
+            output_dir=output_dir,
+        )
+
+    exc = e.value
+    assert len(exc.problems) == 2
+
+    assert isinstance(exc.problems[0], experiment.model.errors.FlowIRUnknownReferenceInArguments)
+    assert isinstance(exc.problems[1], experiment.model.errors.FlowIRReferenceToUnknownComponent)
+
+    unknown_ref_vars: experiment.model.errors.FlowIRUnknownReferenceInArguments = exc.problems[0]
+    unknown_comp: experiment.model.errors.FlowIRReferenceToUnknownComponent = exc.problems[1]
+
+    assert unknown_ref_vars.ref_unknown == "GeometryOptimisation:ref"
+    assert unknown_ref_vars.stage == 1
+    assert unknown_ref_vars.component == "ExtractEnergies"
+
+    assert unknown_comp.references == ["stage1.GeometryOptimisation"]

@@ -17,6 +17,7 @@ import experiment.model.frontends.flowir
 import pydantic.error_wrappers
 import apis.models.errors
 
+import experiment.model.errors
 import apis.db.exp_packages
 import apis.db.relationships
 import apis.models.common
@@ -227,9 +228,16 @@ def synthesize_from_transformation(
         ve.parameterisation = synthesize.parameterisation
         transform.synthesize_derived_package(packages, ve)
 
-        metadata: apis.runtime.package_derived.DerivedVirtualExperimentMetadata = \
-            apis.runtime.package.access_and_validate_virtual_experiment_packages(
-                ve=ve, packages=packages, path_multipackage=path_multipackage)
+        try:
+            metadata: apis.runtime.package_derived.DerivedVirtualExperimentMetadata = \
+                apis.runtime.package.access_and_validate_virtual_experiment_packages(
+                    ve=ve, packages=packages, path_multipackage=path_multipackage)
+        except experiment.model.errors.FlowIRConfigurationErrors as e:
+            unique_errors = {str(e): e for e in e.underlyingErrors}
+            raise apis.models.errors.TransformationManyErrors([unique_errors[k] for k in sorted(unique_errors)])
+        except experiment.model.errors.FlowIRException as e:
+            raise apis.models.errors.TransformationError(
+                f"The transformation would produce invalid FlowIR. Underlying errors are: {e}")
 
         if synthesize.options.generateParameterisation:
             param_outputgraph = parameterisation_of_synthesized_from_outputgraph(
