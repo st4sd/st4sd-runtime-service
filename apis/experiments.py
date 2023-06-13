@@ -1297,6 +1297,8 @@ class Experiment(Resource):
             }
         except werkzeug.exceptions.HTTPException:
             raise
+        except apis.models.errors.ParameterisedPackageNotFoundError as e:
+            api.abort(404, e.message, packageNotFound=identifier)
         except apis.models.errors.InvalidModelError as e:
             current_app.logger.warning(f"Run into {e} while getting {identifier}. "
                                        f"Traceback: {traceback.format_exc()}")

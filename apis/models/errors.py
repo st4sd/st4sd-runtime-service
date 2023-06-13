@@ -188,7 +188,7 @@ class ParameterisedPackageNotFoundError(DBError):
     def __init__(self, identifier: str):
         self.identifier = identifier
         super(ParameterisedPackageNotFoundError, self).__init__(
-            f"Cannot find Parameterised Package \"{identifier}\"")
+            f"Cannot find Parameterised Virtual Experiment Package \"{identifier}\"")
 
 
 class CannotRemoveLatestTagError(DBError):
