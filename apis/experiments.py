@@ -1141,8 +1141,6 @@ class ExperimentDSL(Resource):
             if platforms and len(platforms) > 0:
                 platform_name = platforms[0]
 
-            ve.parameterisation.get_available_platforms()
-
             if len(ve.base.packages) == 1:
                 download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
                     local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
@@ -1150,7 +1148,7 @@ class ExperimentDSL(Resource):
                 with download:
                     metadata = download.get_metadata(ve.base.packages[0].name)
                     manifest = {x: x for x in metadata.top_level_folders}
-                    dsl = apis.models.virtual_experiment.dsl_from_concrete(metadata.concrete, manifest)
+                    dsl = apis.models.virtual_experiment.dsl_from_concrete(metadata.concrete, manifest, platform_name)
             elif len(ve.base.packages) > 1:
                 # VV: FIXME This is a hack, the derived packages currently live on a PVC
                 path = os.path.join(
