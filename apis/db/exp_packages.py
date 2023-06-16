@@ -87,7 +87,7 @@ class DatabaseExperiments(apis.db.base.Database):
         ql = entry.metadata.package.name == package_name
 
         if registry_tag:
-            ql &= entry.metadata.registry.tags.any(registry_tag)
+            ql &= entry.metadata.registry.tags.any([registry_tag])
 
         if registry_digest:
             ql &= entry.metadata.registry.digest == registry_digest

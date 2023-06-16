@@ -211,6 +211,31 @@ def test_update_tags_with_single_parameterised_package(
         assert sorted(many[0].metadata.registry.tags) == sorted(["latest", f"lbl-9"])
 
 
+def test_query_tag(
+        ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
+        with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
+            ve_sum_numbers.metadata.package.tags = ["test", "foo"]
+            ve_sum_numbers.metadata.registry.tags = ["test", "foo"]
+            db.insert_many([ve_sum_numbers.dict()])
+
+            docs = db.query_identifier(apis.models.common.PackageIdentifier.from_parts(
+                package_name=ve_sum_numbers.metadata.package.name,
+                tag="test",
+                digest=None
+            ).identifier)
+
+            assert len(docs) == 1
+
+            docs = db.query_identifier(apis.models.common.PackageIdentifier.from_parts(
+                package_name=ve_sum_numbers.metadata.package.name,
+                tag="latest",
+                digest=None
+            ).identifier)
+
+            assert len(docs) == 0
+
+
 def test_update_tags_with_many_parameterised_packages(
         ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     orig = list(ve_sum_numbers.metadata.package.tags)
