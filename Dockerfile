@@ -13,10 +13,9 @@ ENV PYTHONUNBUFFERED 0
 COPY requirements.txt /requirements.txt
 RUN apt-get update && \
     export DEBIAN_FRONTEND=noninteractive && \
-    apt-get install -y --no-install-recommends python3.7-dev git && \
+    apt-get install -y --no-install-recommends git && \
     pip install --upgrade wheel pip setuptools && \
     pip install -r /requirements.txt && \
-    apt-get remove build-essential python3.7-dev -y && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /gunicorn && \
     chgrp -R 0 /gunicorn && \
