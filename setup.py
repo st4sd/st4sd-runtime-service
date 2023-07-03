@@ -75,7 +75,7 @@ setup(
     # VV: Add `st4sd-runtime-core` here in the future
     install_requires=[
         'pytest', 'flask<=2.1.2', 'flask_restx', 'werkzeug<=2.1.2', 'flask-cors', 'tinydb',
-        'kubernetes', 'stream_zip', 'six', 'pydantic',
+        'kubernetes', 'stream_zip', 'six', 'pydantic<2.0',
     ],
 
     # List additional groups of dependencies here (e.g. development
