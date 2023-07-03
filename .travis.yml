@@ -34,7 +34,9 @@ matrix:
       script:
         - docker login -u "${DOCKER_USERNAME}" -p "${DOCKER_TOKEN}" "${DOCKER_REGISTRY}"
         - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION} -f Dockerfile .
-        - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-test -f Dockerfile.test .
+        - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-test
+          --build-arg base_image=${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-latest-`arch`
+          -f Dockerfile.test .
 
     - stage: test
       services:
@@ -45,7 +47,9 @@ matrix:
         - docker login -u "${DOCKER_USERNAME}" -p "${DOCKER_TOKEN}" "${DOCKER_REGISTRY}"
         - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-latest -f Dockerfile .
           --build-arg base_image=${RUNTIMECORE_URL}:py${BUILD_PYTHON_VERSION}-latest-`arch`
-        - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-test -f Dockerfile.test .
+        - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-test
+          --build-arg base_image=${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-latest-`arch`
+          -f Dockerfile.test .
 
     - stage: image
       os: linux
