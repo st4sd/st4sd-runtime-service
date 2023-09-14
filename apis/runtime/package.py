@@ -1195,15 +1195,24 @@ def get_and_validate_parameterised_package(
     with package_metadata_collection:
         # VV: Test parameterisation platforms and if not provided, find common platforms of base packages
         known_platforms = ve.get_known_platforms() or package_metadata_collection.get_common_platforms()
+        valid_platforms = set()
+        invalid_platforms = set()
 
         for bp in ve.base.packages:
             metadata = package_metadata_collection.get_metadata(bp.name)
             concrete = metadata.concrete.copy()
-            for p in known_platforms:
+            # VV: An experiment (e.g. a derived one from a relationship) may contain multiple base-packages
+            # we must check each individual base-package for the platforms it contains.
+            # We must also make sure that all the platforms that are in the parameterisation of the experiment
+            # have been validated. If a platform is invalid even for just 1 of the packages then we consider
+            # the entire experiment to be broken.
+            for p in set(known_platforms).intersection(concrete.platforms):
                 try:
                     concrete.configure_platform(p)
                     errors = concrete.validate(metadata.top_level_folders)
+                    valid_platforms.add(p)
                 except Exception as e:
+                    invalid_platforms.add(p)
                     errors = [e]
 
                 if len(errors) and all([
@@ -1218,6 +1227,11 @@ def get_and_validate_parameterised_package(
                           f"configuration to exclude invalid platforms - {errors}"
                     logger.warning(msg)
                     raise apis.models.errors.ApiError(msg)
+        if sorted(valid_platforms) != sorted(known_platforms):
+            raise apis.models.errors.ApiError(
+                f"The experiment parameterisation involves platforms {sorted(known_platforms)} but the "
+                f"base package(s) contain only these valid platforms "
+                f"{sorted(valid_platforms.difference(invalid_platforms))}")
 
 
 def combine_multipackage_parameterised_package(

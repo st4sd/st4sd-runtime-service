@@ -1100,7 +1100,30 @@ class DerivedPackage:
                         is_primitive=True)
 
                     env_name = conf_with_bp['command'].get('environment')
-                    if env_name:
+
+                    # VV: The special environment "none" or "" is not actually present in the FlowIR
+                    # the "environment" (or None) environment can be auto-generated if it doesn't exist
+                    # in the FlowIR
+                    all_env_names = list(concrete.get_environments(platform=platform).keys())
+
+                    # VV: Components which do not request a specific environment get the "environment"
+                    # environment
+                    if env_name is None:
+                        env_name = "environment"
+
+                    # VV: environment names are case-insensitive
+                    env_name = env_name.lower()
+
+                    if env_name in [None, "environment"]:
+                        # VV: If the FlowIR contains the "environment" environment then grab it,
+                        # otherwise let st4sd-runtime-core auto-generate it at the time of execution
+                        extract_env = "environment" in all_env_names
+                    else:
+                        # VV: "" and "none" will never appear in the FlowIR therefore we won't try to extract them
+                        # VV: We expect to have the definitions of all other envs
+                        extract_env = env_name.lower() not in ["", "none"]
+
+                    if extract_env:
                         env = concrete.get_environment(env_name, platform=platform)
                         if platform not in aggregate_environments:
                             aggregate_environments[platform] = {}

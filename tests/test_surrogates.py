@@ -447,7 +447,6 @@ def test_modular_optimizer_band_gap_reference_data(
 def test_generate_parameterisation_for_derived_from_optimizer_and_bandgap(
         package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
         rel_optimizer_band_gap: apis.models.relationships.Relationship,
-        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
         output_dir: str,
 ):
     synthesize = apis.models.relationships.PayloadSynthesize()
@@ -750,9 +749,11 @@ def test_simple_relationship(
     db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationship.txt"))
 
     ve_fake_slow = ve_sum_numbers.copy(deep=True)
+    ve_fake_slow.parameterisation.executionOptions.platform = ['default']
     ve_fake_slow.metadata.package.name = "simple-slow"
 
     ve_fake_fast = ve_sum_numbers.copy(deep=True)
+    ve_fake_fast.parameterisation.executionOptions.platform = ['default']
     ve_fake_fast.metadata.package.name = "simple-fast"
 
     with db_experiments:
@@ -850,9 +851,11 @@ def test_simple_relationship_with_variables(
     db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationship.txt"))
 
     ve_fake_slow = ve_sum_numbers.copy(deep=True)
+    ve_fake_slow.parameterisation.executionOptions.platform = ['default']
     ve_fake_slow.metadata.package.name = "simple-slow"
 
     ve_fake_fast = ve_sum_numbers.copy(deep=True)
+    ve_fake_fast.parameterisation.executionOptions.platform = ['default']
     ve_fake_fast.metadata.package.name = "simple-fast"
 
     with db_experiments:
