@@ -1086,11 +1086,7 @@ class ExperimentList(Resource):
             download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
                 local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
             db = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
-
-            metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(ve, download, db)
-            apis.runtime.package.validate_parameterised_package(ve=ve, metadata=metadata)
-            with db:
-                db.push_new_entry(ve)
+            apis.kernel.experiments.validate_and_store_pvep_in_db(download, ve, db)
 
             return {"result": ve.dict()}
         except werkzeug.exceptions.HTTPException:

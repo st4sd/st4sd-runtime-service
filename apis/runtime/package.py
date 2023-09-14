@@ -1326,6 +1326,7 @@ def update_registry_metadata_of_parameterised_package(
         ve.metadata.registry.containerImages = merged.containerImages
         ve.metadata.registry.executionOptionsDefaults = merged.executionOptionsDefaults
         ve.metadata.registry.interface = concrete.get_interface() or {}
+        ve.metadata.registry.platforms = merged.platforms
     except apis.models.errors.ApiError as e:
         logger.warning(f"Could not extract registry metadata due to {e}. "
                        f"Traceback: {traceback.format_exc()}")

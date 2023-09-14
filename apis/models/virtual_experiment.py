@@ -732,6 +732,7 @@ class MetadataRegistry(apis.models.common.Digestable):
     data: Optional[List[apis.models.common.Option]] = []
     containerImages: Optional[List[apis.models.common.Option]] = []
     executionOptionsDefaults: ExecutionOptionDefaults = ExecutionOptionDefaults()
+    platforms: List[str] = []
 
     @classmethod
     def get_time_now_as_str(self) -> str:
@@ -911,6 +912,7 @@ class MetadataRegistry(apis.models.common.Digestable):
                 except Exception as e:
                     raise apis.models.errors.InconsistentPlatformError(platform, f"Unexpected {type(e)}: {e}", e) from e
 
+        merged.platforms = concrete.platforms
         merged.data = [apis.models.common.Option(name=filename) for filename in data_files]
         return merged
 

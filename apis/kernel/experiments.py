@@ -23,6 +23,8 @@ import apis.models.errors
 import apis.models.query_experiment
 import apis.models.relationships
 import apis.models.virtual_experiment
+import apis.storage
+import apis.runtime.package
 import utils
 
 
@@ -202,3 +204,14 @@ def api_get_experiment(
                 f"Parameterised virtual experiment package {identifier} is invalid", problems)
 
     return ParameterisedPackageAndProblems(experiment=ve, problems=problems)
+
+
+def validate_and_store_pvep_in_db(package_metadata_collection: apis.storage.PackageMetadataCollection,
+                                  parameterised_package: apis.models.virtual_experiment.ParameterisedPackage,
+                                  db: apis.db.exp_packages.DatabaseExperiments):
+    metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(parameterised_package,
+                                                                                    package_metadata_collection,
+                                                                                    db)
+    apis.runtime.package.validate_parameterised_package(ve=parameterised_package, metadata=metadata)
+    with db:
+        db.push_new_entry(parameterised_package)

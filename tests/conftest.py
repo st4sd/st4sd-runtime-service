@@ -475,6 +475,75 @@ def ve_toxicity_pred() -> apis.models.virtual_experiment.ParameterisedPackage:
 
 
 @pytest.fixture
+def ve_toxicity_pred_one_executionoption_platform() -> apis.models.virtual_experiment.ParameterisedPackage:
+    desc = {
+        "base": {
+            "packages": [
+                {
+                    "config": {},
+                    "dependencies": {"imageRegistries": []},
+                    "name": "main",
+                    "source": {"git": {
+                        "location": {
+                            "commit": "5a9982b6a780c09f4f65f0c83064be2829df58dd",
+                            "url": "https://github.ibm.com/st4sd-contrib-experiments/"
+                                   "Toxicity-prediction.git"}
+                    }}}]
+        },
+        "metadata": {"package": {
+            "description": "Provides QSAR predictions of physio-chemical properties of "
+                           "molecules using OPERA",
+            "keywords": ["smiles", "computational chemistry", "toxicity", "opera", "QSAR"],
+            "maintainer": "michaelj@ie.ibm.com", "name": "toxicity-prediction-opera", "tags": []}},
+        "parameterisation": {
+            "executionOptions": {
+                "data": [],
+                "platform": ["openshift"],
+                "runtime": {"args": [], "resources": {}},
+                "variables": [{'name': 'number-processors'}]
+            },
+            "presets": {"data": [], "environmentVariables": [],
+                        "runtime": {"args": ["--registerWorkflow=yes"], "resources": {}},
+                        "variables": []}}}
+
+    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(desc)
+
+
+@pytest.fixture
+def ve_toxicity_pred_preset_platform() -> apis.models.virtual_experiment.ParameterisedPackage:
+    desc = {
+        "base": {
+            "packages": [
+                {
+                    "config": {},
+                    "dependencies": {"imageRegistries": []},
+                    "name": "main",
+                    "source": {"git": {
+                        "location": {
+                            "commit": "5a9982b6a780c09f4f65f0c83064be2829df58dd",
+                            "url": "https://github.ibm.com/st4sd-contrib-experiments/"
+                                   "Toxicity-prediction.git"}
+                    }}}]
+        },
+        "metadata": {"package": {
+            "description": "Provides QSAR predictions of physio-chemical properties of "
+                           "molecules using OPERA",
+            "keywords": ["smiles", "computational chemistry", "toxicity", "opera", "QSAR"],
+            "maintainer": "michaelj@ie.ibm.com", "name": "toxicity-prediction-opera", "tags": []}},
+        "parameterisation": {
+            "executionOptions": {
+                "data": [],
+                "runtime": {"args": [], "resources": {}},
+                "variables": [{'name': 'number-processors'}]
+            },
+            "presets": {"platform": "openshift", "data": [], "environmentVariables": [],
+                        "runtime": {"args": ["--registerWorkflow=yes"], "resources": {}},
+                        "variables": []}}}
+
+    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(desc)
+
+
+@pytest.fixture
 def str_toxicity_pred():
     flowir = """
     interface:
@@ -832,6 +901,43 @@ def ve_sum_numbers():
     assert ve.metadata.registry.digest is not None
     return ve
 
+
+@pytest.fixture
+def ve_sum_numbers_executionoptions_platform_no_values():
+    sum_numbers_def = {
+        "base": {
+            "packages": [{
+                "source": {
+                    "git": {
+                        "location": {
+                            "url": "https://github.ibm.com/st4sd/sum-numbers.git",
+                            "branch": "main",
+                        }
+                    }
+                },
+            }]
+        },
+        "metadata": {
+            "package": {
+                "name": "http-sum-numbers",
+                "tags": ["latest"],
+                "maintainer": "st4sd@st4sd.st4sd"
+            }
+        },
+        "parameterisation": {
+            "presets": {
+                "runtime": {
+                    "args": [
+                        "--failSafeDelays=no"
+                    ]
+                }
+            },
+            "executionOptions": {
+                "platform": []
+            }
+        }
+    }
+    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(sum_numbers_def)
 
 @pytest.fixture(scope="function")
 def sum_numbers_ve_dataset():

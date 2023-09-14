@@ -9,16 +9,23 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import os
 import pprint
+import tempfile
+import typing
 
 import experiment.model.errors
 import experiment.model.frontends.flowir
 import pytest
 import yaml
 
+import apis.db.exp_packages
+import apis.kernel.experiments
 import apis.models.common
 import apis.models.errors
 import apis.models.virtual_experiment
+import apis.runtime.package
+import apis.storage
 from tests import conftest
 
 
@@ -435,3 +442,51 @@ def test_check_execution_options_data_invalid(
 
     logging.getLogger().info(f"ValueError message was {e.value}")
     assert 'cat_me.txt' in str(e.value)
+
+
+@pytest.mark.parametrize("flowir_fixture_name,ve_fixture_name,expected_platforms", [
+    ("str_toxicity_pred", "ve_toxicity_pred_preset_platform", ['default', 'hermes', 'openshift', 'sandbox']),
+    ("str_toxicity_pred", "ve_toxicity_pred_one_executionoption_platform",
+     ['default', 'hermes', 'openshift', 'sandbox']),
+    ("str_sum_numbers", "ve_sum_numbers_executionoptions_platform_no_values",
+     ['artifactory', 'default', 'openshift', 'scafellpike']),
+])
+def test_check_metadata_registry_platforms(flowir_fixture_name: str,
+                                           ve_fixture_name: str,
+                                           expected_platforms: typing.List[str],
+                                           output_dir: str,
+                                           request):
+    # AP - pytest inbuilt to get fixture by name
+    wf_flowir = request.getfixturevalue(flowir_fixture_name)
+    wf_ve = request.getfixturevalue(ve_fixture_name)
+
+    #
+    flowir = yaml.load(wf_flowir, Loader=yaml.FullLoader)
+    concrete = experiment.model.frontends.flowir.FlowIRConcrete(flowir, platform=None, documents=None)
+    meta = apis.models.virtual_experiment.MetadataRegistry.from_flowir_concrete_and_data(
+        concrete,
+        ['cat_me.txt'],
+        platforms=None,
+        variable_names=[]
+    )
+
+    assert sorted(meta.platforms) == sorted(expected_platforms)
+
+    # Create a PackageMetadataCollection by hand
+    pkg_location = conftest.package_from_files(
+        location=os.path.join(output_dir, "current_ve"),
+        files={'conf/flowir_package.yaml': wf_flowir, }
+    )
+
+    StorageMetadata = apis.models.virtual_experiment.StorageMetadata
+    collection = apis.storage.PackageMetadataCollection({
+        wf_ve.base.packages[0].name: StorageMetadata.from_config(
+            prefix_paths=pkg_location, config=apis.models.virtual_experiment.BasePackageConfig(),
+        )})
+
+    with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
+        with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
+            apis.kernel.experiments.validate_and_store_pvep_in_db(collection, wf_ve, db)
+            res = db.query_identifier(wf_ve.metadata.package.name)
+            retrieved_pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(res[0])
+            assert sorted(retrieved_pvep.metadata.registry.platforms) == sorted(expected_platforms)
