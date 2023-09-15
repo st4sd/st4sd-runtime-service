@@ -104,7 +104,10 @@ api_experiments = Namespace("experiments", description="Experiments related oper
 
 mOptionValueFromSecretKeyRef = api_experiments.model(
     "option-valuefrom-secretkeyref",
-    {"key": fields.String(required=False), "name": fields.String()},
+    model=
+    {
+        "key": fields.String(required=False, description="Name of the key inside the Kubernetes Secret object"),
+        "name": fields.String(required=True, description="Name of the Kubernetes Secret object")},
 )
 
 
@@ -137,104 +140,142 @@ mOptionValueFromS3Values = api_experiments.model(
     },
 )
 
-
-mOptionValueFromDatasetRef = api_experiments.model(
-    "option-valuefrom-datasetref",
-    {
-        "name": fields.String(),
-        "path": fields.String(required=False),
-        "rename": fields.String(
-            description="If set, and path is not None then this means that the path filename should be renamed "
-            "to match @rename",
-            required=False,
-        ),
-    },
-)
-
-mOptionValueFromUsernamePassword = api_experiments.model(
-    "option-valuefrom-usernamepassword",
-    {
-        "username": fields.String(required=False),
-        "password": fields.String(required=False),
-    },
-)
+# mOptionValueFromDatasetRef = api_experiments.model(
+#     "option-valuefrom-datasetref",
+#     {
+#         "name": fields.String(required=True, description="The name"),
+#         "path": fields.String(required=False),
+#         "rename": fields.String(
+#             description="If set, and @path is not None then this means that the @path filename should be renamed "
+#             "to match @rename",
+#             required=False,
+#         ),
+#     },
+# )
+#
+# mOptionValueFromUsernamePassword = api_experiments.model(
+#     "option-valuefrom-usernamepassword",
+#     {
+#         "username": fields.String(required=False, description="The username"),
+#         "password": fields.String(required=False, description="The password"),
+#     },
+# )
 
 
 mVeBasePackageSourceGitSecurityOauthValueFrom = api_experiments.model(
     "ve-base-package-source-git-security-oauth-valuefrom",
     {
-        "secretKeyRef": fields.Nested(mOptionValueFromSecretKeyRef, required=False),
+        "secretKeyRef": fields.Nested(
+            mOptionValueFromSecretKeyRef,
+            allow_null=True,
+            required=False,
+            description="Description of the Kubernetes Secret key that contains the value of the oauth-token"
+        ),
     },
 )
 
 mVeBasePackageSourceGitSecurityOauth = api_experiments.model(
     "ve-base-package-source-git-security-oauth",
     {
-        "value": fields.String(required=False),
-        "valueFrom": fields.Nested(mVeBasePackageSourceGitSecurityOauthValueFrom, required=False),
+        "value": fields.String(
+            required=False,
+            description="The value of the oauth-token, when using this field the runtime service will store "
+                        "the token in a new Kubernetes Secret and update the Parameterised Virtual Experiment Package "
+                        "to reference the Secret instead of the oauth-token directly. "
+                        "Mutually exclusive with @valueFrom"),
+        "valueFrom": fields.Nested(
+            mVeBasePackageSourceGitSecurityOauthValueFrom,
+            required=False, description="A pointer to the oauth-token. Mutually exclusive with @value"
+        ),
     },
 )
 
 mVeBasePackageSourceGitSecurity = api_experiments.model(
     "ve-base-package-source-git-security",
-    {"oauth": fields.Nested(mVeBasePackageSourceGitSecurityOauth, required=False)},
+    {"oauth": fields.Nested(
+        mVeBasePackageSourceGitSecurityOauth,
+        required=False,
+        description="The oauth-token to use when retrieving the package from git")},
 )
 
 mVeBasePackageSourceGitLocation = api_experiments.model(
     "ve-base-package-source-git-location",
     {
-        "branch": fields.String(description="Git branch name, mutually exclusive with tag and commit", required=False),
-        "tag": fields.String(description="Git tag name, mutually exclusive with branch and commit", required=False),
-        "commit": fields.String(description="Git commit digest, mutually exclusive with branch and tag",
+        "branch": fields.String(description="Git branch name, mutually exclusive with @tag and @commit",
+                                required=False),
+        "tag": fields.String(description="Git tag name, mutually exclusive with @branch and @commit", required=False),
+        "commit": fields.String(description="Git commit digest, mutually exclusive with @branch and @tag",
                                 required=False),
         "url": fields.String(description="Git url, must provide this if package is hosted on a Git server",
-                             required=False),
+                             required=True),
     },
 )
 
 mVeBasePackageSourceGit = api_experiments.model(
     "ve-base-package-source-git",
     {
-        "security": fields.Nested(mVeBasePackageSourceGitSecurity, required=False),
-        "location": fields.Nested(mVeBasePackageSourceGitLocation, required=False),
-        "version": fields.String(required=False),
+        "security": fields.Nested(
+            mVeBasePackageSourceGitSecurity,
+            required=False,
+            description="The information required to get the package from git"),
+        "location": fields.Nested(
+            mVeBasePackageSourceGitLocation,
+            required=True,
+            description="The location of the package on git"),
+        "version": fields.String(required=False, description="The commit id of the package on git"),
     },
 )
 
 
 mVeBasePackageSourceDatasetInfo = api_experiments.model(
-    "ve-base-package-source-dataset-info", {"dataset": fields.String()}
+    "ve-base-package-source-dataset-info",
+    {"dataset": fields.String(required=True, description="The name of the dataset")}
 )
 
 mVeBasePackageSourceDataset = api_experiments.model(
     "ve-base-package-source-dataset",
     {
-        "location": fields.Nested(mVeBasePackageSourceDatasetInfo, required=False),
-        "version": fields.String(required=False),
-        "security": fields.Nested(mVeBasePackageSourceDatasetInfo, required=False),
+        "location": fields.Nested(
+            mVeBasePackageSourceDatasetInfo, required=True, description="The Dataset which holds the package"),
+        "version": fields.String(required=False, description="The version of the package"),
+        "security": fields.Nested(
+            mVeBasePackageSourceDatasetInfo,
+            required=False, description="The information required to get the package from the dataset"),
     },
 )
 
 mVeBasePackageSource = api_experiments.model(
     "ve-base-package-source",
     {
-        "git": fields.Nested(mVeBasePackageSourceGit, required=False),
-        "dataset": fields.Nested(mVeBasePackageSourceDataset, required=False),
+        "git": fields.Nested(
+            mVeBasePackageSourceGit,
+            required=False,
+            description="The configuration for a package that exists on a git server. "
+                        "Mutually exclusive with @dataset"
+        ),
+        "dataset": fields.Nested(
+            mVeBasePackageSourceDataset,
+            required=False,
+            description="The configuration for a package that exists on a Dataset. "
+                        "Mutually exclusive with @git"),
     },
 )
 
 mVeBasePackageConfig = api_experiments.model(
     "ve-base-package-config",
     {
-        "path": fields.String(required=False),
-        "manifestPath": fields.String(required=False),
+        "path": fields.String(required=False, description="The path to the workflow definition in the package"),
+        "manifestPath": fields.String(required=False, description="The path to the manifest file in the package"),
     },
 )
 
 mVeBasePackageDependenciesImageRegistrySecurityValueFromSecretKeyRef = api_experiments.model(
     "ve-base-package-dependencies-imageregistry-security-valuefrom-secretkeyref",
     {
-        "secretKeyRef": fields.Nested(mOptionValueFromSecretKeyRef, required=False),
+        "secretKeyRef": fields.Nested(
+            mOptionValueFromSecretKeyRef,
+            required=False,
+            description="Credentials to use the image registry stored inside a Kubernetes secret"),
     },
 )
 
@@ -250,7 +291,7 @@ mVeBasePackageDependenciesImageRegistrySecurity = api_experiments.model(
 mVeBasePackageDependenciesImageRegistry = api_experiments.model(
     "ve-base-package-dependencies-imageregistry",
     {
-        "serverUrl": fields.String(required=False),
+        "serverUrl": fields.String(required=True),
         "security": fields.Nested(mVeBasePackageDependenciesImageRegistrySecurity, required=False)
     },
 )
@@ -327,8 +368,10 @@ mVeBasePackage = api_experiments.model(
             description='Unique name of base package in this virtual experiment entry. Defaults to "main"',
             default="main",
         ),
-        "source": fields.Nested(mVeBasePackageSource),
-        "config": fields.Nested(mVeBasePackageConfig),
+        "source": fields.Nested(
+            mVeBasePackageSource, required=True, description="Information on the location of the package"),
+        "config": fields.Nested(
+            mVeBasePackageConfig, required=False, description="Configuration options for the package"),
         # VV: these are beta fields, we're hiding them for now
         # "dependencies": (fields.Nested(mVeBasePackageDependencies)),
         # "graph": fields.List(fields.Nested(mVeBasePackageGraph), default=[]),
@@ -339,7 +382,7 @@ mVeBasePackage = api_experiments.model(
 mBindingOptionValueFromApplicationDependency = api_experiments.model(
     "bindingoption-valuefrom-applicationdependency",
     {
-        "referece": fields.String(
+        "reference": fields.String(
             description="Reference to application dependency in the derived package"
         )
     },
@@ -421,23 +464,50 @@ mIncludePath = api_experiments.model(
 mExtractionMethodSource = api_experiments.model(
     "extractionmethodsource",
     {
-        "path": fields.String(required=False),
-        "pathList": fields.List(fields.String(), required=False),
-        "keyOutput": fields.String(required=False),
+        "path": fields.String(
+            required=False,
+            description="A path relative to the root directory of the virtual experiment instance."
+                        "The path points to the file that the property extraction method will read. "
+                        "Mutually exclusive with @pathList and @keyOutput"),
+        "pathList": fields.List(
+            fields.String(),
+            required=False,
+            description="A list of paths relative to the root directory of the virtual experiment instance. "
+                        "The paths point to files that the property extraction method will read. "
+                        "Mutually exclusive with @pathList and @keyOutput"
+        ),
+        "keyOutput": fields.String(
+            required=False,
+            description="The name of a key-output in the experiment. Mutually exclusive with @path"),
+    },
+)
+
+mExtractionMethodSourceInputIds = api_experiments.model(
+    "extractionmethodsourceinputids",
+    {
+        "path": fields.String(
+            required=False,
+            description="A path relative to the root directory of the virtual experiment instance. "
+                        "It points to the CSV file that contains the `input-ids`. "
+                        "Mutually exclusive with @keyOutput"),
+        "keyOutput": fields.String(
+            required=False,
+            description="The name of a key-output in the experiment. Mutually exclusive with @path"),
     },
 )
 
 mFlowIRInterfaceInputExtractionMethodHookGetInputs = api_experiments.model(
     "flowirinterface-inputextractionmethod-hookgetinputs",
-    {"source": fields.Nested(mExtractionMethodSource, required=False)},
+    {"source": fields.Nested(
+        mExtractionMethodSourceInputIds, required=True, description="The location of the input ids CSV file")},
 )
 
 
 mFlowIRInterfaceInputExtractionMethodCsvColumn = api_experiments.model(
     "flowirinterface-inputextractionmethod-csvcolumn",
     {
-        "source": fields.Nested(mExtractionMethodSource, required=False),
-        "args": fields.Raw(default={}),
+        "source": fields.Nested(mExtractionMethodSource, required=True, description="The location of the CSV file"),
+        "args": fields.Raw(default={}, description="Extra arguments to the input extraction method"),
     },
 )
 
@@ -445,10 +515,15 @@ mFlowIRInterfaceInputExtractionMethod = api_experiments.model(
     "flowirinterface-inputextractionmethod",
     {
         "hookGetInputIds": fields.Nested(
-            mFlowIRInterfaceInputExtractionMethodHookGetInputs, required=False
+            mFlowIRInterfaceInputExtractionMethodHookGetInputs,
+            required=False,
+            description="The python function for getting the input ids. Mutually exclusive with @csvColumn"
         ),
         "csvColumn": fields.Nested(
-            mFlowIRInterfaceInputExtractionMethodCsvColumn, required=False
+            mFlowIRInterfaceInputExtractionMethodCsvColumn,
+            required=False,
+            description="Used if the input ids of the experiment are defined in a column of "
+                        "an input CSV file which has column headers."
         ),
     },
 )
@@ -456,9 +531,18 @@ mFlowIRInterfaceInputExtractionMethod = api_experiments.model(
 mFlowIRInterfaceSpec = api_experiments.model(
     "flowirinterface-spec",
     {
-        "namingScheme": fields.String(),
-        "inputExtractionMethod": fields.Nested(mFlowIRInterfaceInputExtractionMethod),
-        "hasAdditionalData": fields.Boolean(default=False),
+        "namingScheme": fields.String(
+            required=True,
+            description="The scheme/specification used to define your inputs e.g. SMILES"
+        ),
+        "inputExtractionMethod": fields.Nested(
+            mFlowIRInterfaceInputExtractionMethod,
+            description="The method to extract the input ids"
+        ),
+        "hasAdditionalData": fields.Boolean(
+            default=False,
+            description="Whether to invoke the get_additional_input_data() hook to get a list of additional "
+                        "data that should be read along with the input ids file(s)"),
     },
 )
 
@@ -475,7 +559,11 @@ mFlowIRInterface = api_experiments.model(
 mVeBase = api_experiments.model(
     "ve-base",
     {
-        "packages": fields.List(fields.Nested(mVeBasePackage), default=[]),
+        "packages": fields.List(
+            fields.Nested(mVeBasePackage),
+            default=[],
+            required=True,
+            description="The packages that make up this parameterised virtual experiment package"),
         # "connections": fields.List(
         #     fields.Nested(mVeBasePackageGraphInstance), default=[]
         # ),
@@ -485,15 +573,22 @@ mVeBase = api_experiments.model(
     },
 )
 
-mVeMedataPackage = api_experiments.model(
+mVeMetadataPackage = api_experiments.model(
     "ve-metadata-package",
     {
-        "name": fields.String(required=False),
-        "tags": fields.List(fields.String(), required=False, default=[]),
-        "keywords": fields.List(fields.String(), default=[]),
-        "license": fields.String(required=False),
-        "maintainer": fields.String(required=False),
-        "description": fields.String(required=False),
+        "name": fields.String(required=True, description="The name of the parameterised virtual experiment package"),
+        "tags": fields.List(
+            fields.String(), required=False, default=[],
+            description="The tags associated with the parameterised virtual experiment package"),
+        "keywords": fields.List(
+            fields.String(), default=[],
+            description="Keywords associated with the parameterised virtual experiment package"),
+        "license": fields.String(
+            required=False, description="The license of the parameterised virtual experiment package"),
+        "maintainer": fields.String(
+            required=False, description="The maintainer of the parameterised virtual experiment package"),
+        "description": fields.String(
+            required=False, description="The description of the parameterised virtual experiment package"),
     },
 )
 
@@ -565,29 +660,51 @@ mVeMetadataRegistry = api_experiments.model(
 mVeMetadata = api_experiments.model(
     "ve-metadata",
     {
-        "package": fields.Nested(mVeMedataPackage),
-        "registry": fields.Nested(mVeMetadataRegistry),
+        "package": fields.Nested(
+            mVeMetadataPackage,
+            required=True,
+            description="Metadata aboud the parameterised virtual experiment package"
+        ),
+        "registry": fields.Nested(
+            mVeMetadataRegistry, required=False, description="Metadata that the registry generates"
+        ),
     },
 )
 
 mOrchestratorResources = api_experiments.model(
     "orchestratorresources",
-    {"cpu": fields.String(required=False), "memory": fields.String(required=False)},
+    {
+        "cpu": fields.String(
+            required=False,
+            description="How many cores to request for the orchestrator executing the workflow"
+        ),
+        "memory": fields.String(
+            required=False,
+            description="How much memory to request for the orchestrator executing the workflow"
+        )
+    },
 )
 
 mVeParameterisationRuntime = api_experiments.model(
     "ve-parameterisation-runtime",
     {
-        "resources": fields.Nested(mOrchestratorResources),
-        "args": fields.List(fields.String(), default=[]),
+        "resources": fields.Nested(
+            mOrchestratorResources,
+            required=False,
+            description="Resource requests for the orchestrator executing the workflow"
+        ),
+        "args": fields.List(
+            fields.String(), default=[], required=False,
+            description="Commandline arguments to the orchestrator executing the workflow"
+        ),
     },
 )
 
 mVeParameterisationPresetsVariable = api_experiments.model(
     "ve-parameterisation-presets-variable",
     {
-        "name": fields.String(description="The name of the variable", required=False),
-        "value": fields.String(description="The preset value of the variable", required=False),
+        "name": fields.String(description="The name of the variable", required=True),
+        "value": fields.String(description="The preset value of the variable", required=True),
     },
 )
 
@@ -596,26 +713,54 @@ mVeParameterisationPresetsEnvironmentVariables = api_experiments.model(
     "ve-parameterisation-presets-environment-variables",
     {
         "name": fields.String(
-            description="Name of the environment variable to inject into the containers in the orchestrator pod"),
-        "value": fields.String(description="The value of the environment variable")
+            description="Name of the environment variable to inject into the containers in the orchestrator pod",
+            required=True
+        ),
+        "value": fields.String(
+            description="The value of the environment variable",
+            required=True
+        )
     }
 )
 
 mVeParameterisationPresets = api_experiments.model(
     "ve-parameterisation-presets",
     {
-        "variables": fields.List(fields.Nested(mVeParameterisationPresetsVariable), default=[]),
-        "runtime": fields.Nested(mVeParameterisationRuntime),
-        "data": fields.List(fields.Nested(mDataFileName), default=[]),
-        "environmentVariables": fields.List(fields.Nested(mVeParameterisationPresetsEnvironmentVariables), default=[]),
-        "platform": fields.String(required=False),
+        "variables": fields.List(
+            fields.Nested(mVeParameterisationPresetsVariable),
+            default=[],
+            required=False,
+            description="The preset variables"
+        ),
+        "runtime": fields.Nested(
+            mVeParameterisationRuntime,
+            required=False,
+            description="The runtime configuration of the orchestrator executing the workflow"
+        ),
+        "data": fields.List(
+            fields.Nested(mDataFileName),
+            default=[],
+            required=False,
+            description="The configuration for data-files"
+        ),
+        "environmentVariables": fields.List(
+            fields.Nested(mVeParameterisationPresetsEnvironmentVariables),
+            default=[],
+            required=False,
+            description="Environment variables to inject into the processes that orchestrate "
+                        "the execution of the workflow"
+        ),
+        "platform": fields.String(required=False, description="The platform to specialize the workflow for"),
     },
 )
 
 mValueChoice = api_experiments.model(
     "ve-parameterisation-executionoptions-variable-choice",
     {
-        "value": fields.String("One of the valid choices")
+        "value": fields.String(
+            description="The value of the variable, must be compatible with the parameterisation options "
+                        "of the parameterised virtual experiment package"
+        )
     }
 )
 
@@ -627,17 +772,37 @@ mVeParameterisationExecutionOptionsVariable = api_experiments.model(
             description="This is the default value of the variable, providing this field means "
                         "that the variable can recieve *any* value", required=False,
         ),
-        "valueFrom": fields.List(fields.Nested(mValueChoice), required=False),
+        "valueFrom": fields.List(
+            fields.Nested(mValueChoice),
+            required=False,
+            description="An array of choices that this variable must be set to. "
+                        "If at execution time the variable does not receive a value, then the default value "
+                        "is the first value in this array"
+        ),
     },
 )
 
 mVeParameterisationExecutionOptions = api_experiments.model(
     "ve-parameterisation-executionoptions",
     {
-        "variables": fields.List(fields.Nested(mVeParameterisationExecutionOptionsVariable), default=[]),
-        "data": fields.List(fields.Nested(mDataFileName), default=[]),
-        "runtime": fields.Nested(mVeParameterisationRuntime),
-        "platform": fields.List(fields.String(), default=[]),
+        "variables": fields.List(
+            fields.Nested(mVeParameterisationExecutionOptionsVariable),
+            default=[],
+            required=False,
+            description="Parameterisation options for variables which the users can override at execution time "
+                        "(within constraints)"
+        ),
+        "data": fields.List(
+            fields.Nested(mDataFileName),
+            default=[],
+            description="Parameterisation options for data files which the users can override at execution time"
+        ),
+        "platform": fields.List(
+            fields.String(),
+            default=[],
+            description="Parameterisation options for the platform to specialize the workflow at execution time."
+                        "The users can override this option at execution time (within constraints)"
+        ),
     },
 )
 
@@ -645,17 +810,30 @@ mVeParameterisationExecutionOptions = api_experiments.model(
 mVeParameterisation = api_experiments.model(
     "ve-parameterisation",
     {
-        "presets": fields.Nested(mVeParameterisationPresets),
-        "executionOptions": fields.Nested(mVeParameterisationExecutionOptions),
+        "presets": fields.Nested(
+            mVeParameterisationPresets,
+            required=False,
+            description="Parameterisation options for settings that users cannot override at execution time"
+        ),
+        "executionOptions": fields.Nested(
+            mVeParameterisationExecutionOptions,
+            required=False,
+            description="Parameterisation options for settings that users can override at execution time "
+                        "(within constraints)"
+        ),
     },
 )
 
 mVirtualExperiment = api_experiments.model(
     "ve",
     {
-        "base": fields.Nested(mVeBase),
-        "parameterisation": fields.Nested(mVeParameterisation),
-        "metadata": fields.Nested(mVeMetadata),
+        "base": fields.Nested(mVeBase, description="The configuration of the base packages", required=True),
+        "parameterisation": fields.Nested(mVeParameterisation, description="The parameterisation options"),
+        "metadata": fields.Nested(
+            mVeMetadata,
+            description="Metadata of the parameterised virtual experiment package",
+            required=True
+        ),
     },
 )
 
@@ -739,16 +917,16 @@ mS3 = api_experiments.model(
             "If set, remaining S3 information will not be used",
         ),
         "accessKeyID": fields.String(
-            required=True, description="Access key id", default=""
+            required=False, description="Access key id", default=""
         ),
         "secretAccessKey": fields.String(
-            required=True, description="Secret access key", default=""
+            required=False, description="Secret access key", default=""
         ),
         "bucket": fields.String(
-            required=True, description="Name of bucket", default=""
+            required=False, description="Name of bucket", default=""
         ),
         "endpoint": fields.String(
-            required=True,
+            required=False,
             default="",
             description="Endpoint URL (e.g. https://s3.eu-gb.cloud-object-storage.appdomain.cloud)",
         ),
@@ -762,21 +940,21 @@ mS3Credentials = api_experiments.model(
     "s3-credentials",
     {
         "accessKeyID": fields.String(
-            required=True, description="Access key id", default=""
+            required=False, description="Access key id", default=None
         ),
         "secretAccessKey": fields.String(
-            required=True, description="Secret access key", default=""
+            required=False, description="Secret access key", default=None
         ),
         "bucket": fields.String(
-            required=True, description="Name of bucket", default=""
+            required=False, description="Name of bucket", default=None
         ),
         "endpoint": fields.String(
-            required=True,
-            default="",
+            required=False,
+            default=None,
             description="Endpoint URL (e.g. https://s3.eu-gb.cloud-object-storage.appdomain.cloud)",
         ),
         "region": fields.String(
-            required=False, description="Region (optional)", default=""
+            required=False, description="Region (optional)", default=None
         ),
     },
 )
@@ -789,9 +967,8 @@ mS3Store = api_experiments.model(
         ),
         "bucketPath": fields.String(
             required=True,
-            default="workflow_instances/",
-            description="The ST4SD runtime core will upload the workflow outputs under "
-            "this path",
+            default=None,
+            description="The ST4SD runtime core will upload the workflow outputs under this path",
         ),
     },
 )
@@ -873,21 +1050,46 @@ mExperimentStart = api_experiments.model(
             description="The platform to use for the execution of the virtual experiment. It should "
             "match the parameterisation options of the parameterised virtual experiment "
             "package you are starting.",
+            default=None,
         ),
-        "inputs": fields.List(fields.Nested(mFileContent), required=False),
-        "data": fields.List(fields.Nested(mFileContent), required=False),
-        "volumes": fields.List(fields.Nested(mVolume)),
+        "inputs": fields.List(
+            fields.Nested(mFileContent),
+            required=False,
+            description="The required inputs to the experiment (if any)",
+            default=[]
+        ),
+        "data": fields.List(
+            fields.Nested(mFileContent),
+            required=False,
+            description="The data files to the experiment, following the parameterisation settings (if any)",
+            default=[]
+        ),
+        "volumes": fields.List(
+            fields.Nested(mVolume),
+            required=False,
+            description="Optional volumes to mount in the pods",
+            default=[]
+        ),
         "variables": fields.Raw(
-            example={"startIndex": 10, "numberMolecules": 2, "functional": "B3LYPV3"}
+            required=False,
+            description="key: value variable pairs (must follow the parameterisation settings)",
+            default={}
         ),
         "additionalOptions": fields.List(
             fields.String(
                 required=False,
-                description="Additional options to elaunch.py",
                 example="--registerWorkflow=True",
-            )
+            ),
+            description="Additional options to orchestrator that executes this experiment",
+            default=None,
+            required=False,
         ),
-        "environmentVariables": fields.Raw(example={"RUNTIME_SECRET_TOKEN": "<token>"}),
+        "environmentVariables": fields.Raw(
+            required=False,
+            description="key: value environment variables to inject in the pod which hosts "
+                        "the orchestrator of the experiment",
+            default={}
+        ),
         "orchestrator_resources": fields.Nested(
             mContainerResources,
             required=False,
@@ -895,9 +1097,10 @@ mExperimentStart = api_experiments.model(
             "the workflow orchestrator",
         ),
         "metadata": fields.Raw(
-            example={
-                "exp-label": "no-spaces-allowed",
-            }
+            description="key: value metadata values to associate with the experiment. "
+                        "The orchestrator will use these values to populate the userMetadata document in the "
+                        "ST4SD Datastore, should the experiment be registered with the datastore",
+            default={},
         ),
         "s3": fields.Nested(
             mS3,
@@ -928,6 +1131,7 @@ mExperimentStart = api_experiments.model(
                         description="Configuration options for runtime policy",
                     ),
                 },
+                default=None,
             )
         ),
     },
@@ -978,12 +1182,14 @@ mLambdaExperimentStart = api_experiments.model(
             mS3,
             required=False,
             description="S3 configuration (read the description of the Filename-Content pair model too)",
+            default=None,
         ),
         "s3Store": fields.Nested(
             mS3Store,
             required=False,
             description="Configuration to store outputs of workflow instance to a S3 bucket. "
             "Mutually exclusive with datasetStoreURI",
+            default=None,
         ),
         # For backwards compatibility support both datasetStoreURI and dlfStoreURI but only advertise datasetStoreURI
         "datasetStoreURI": fields.String(
@@ -991,6 +1197,7 @@ mLambdaExperimentStart = api_experiments.model(
             description="Dataset URI to store outputs (uses github.com/datashim-io/datashim) "
             "i.e. dataset://<dataset-name>/path/in/dataset/to/upload/outputs/to. "
             "Mutually exclusive with s3Store.",
+            default=None,
         ),
     },
 )

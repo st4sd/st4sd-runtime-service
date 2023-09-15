@@ -162,7 +162,10 @@ class OptionValueFrom(Digestable):
 
 class OptionValueFromMany(Digestable):
     value: Optional[str] = None
-    secretKeyRef: Optional[OptionFromSecretKeyRef] = None
+    secretKeyRef: Optional[OptionFromSecretKeyRef] = pydantic.Field(
+        None,
+        description="Value is in a Kubernetes Secret object"
+    )
     datasetRef: Optional[OptionFromDatasetRef] = None
     usernamePassword: Optional[OptionFromUsernamePassword] = None
     s3Ref: Optional[OptionFromS3Values] = None

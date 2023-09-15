@@ -50,21 +50,33 @@ class BasePackageSource(apis.models.common.Digestable):
 class SourceGitSecurityOAuth(apis.models.common.Option):
     pass
 
+
 class BasePackageSourceGitSecurity(apis.models.common.Digestable):
-    oauth: Optional[SourceGitSecurityOAuth] = None
+    oauth: Optional[SourceGitSecurityOAuth] = pydantic.Field(
+        None, description="The oauth-token to use when retrieving the package from git")
 
 
 class SourceGitLocation(apis.models.common.Digestable):
-    url: Optional[str] = None
-    branch: Optional[str] = None
-    tag: Optional[str] = None
-    commit: Optional[str] = None
+    url: str = pydantic.Field(description="Git url, must provide this if package is hosted on a Git server")
+    branch: Optional[str] = pydantic.Field(
+        None,
+        description="Git branch name, mutually exclusive with @tag and @commit"
+    )
+    tag: Optional[str] = pydantic.Field(
+        None,
+        description="Git tag name, mutually exclusive with @branch and @commit"
+    )
+    commit: Optional[str] = pydantic.Field(
+        None,
+        description="Git commig name, mutually exclusive with @branch and @tag"
+    )
 
 
 class BasePackageSourceGit(BasePackageSource):
-    security: Optional[BasePackageSourceGitSecurity] = None
-    location: SourceGitLocation
-    version: Optional[str] = None
+    security: Optional[BasePackageSourceGitSecurity] = pydantic.Field(
+        None, description="The information required to get the package from git")
+    location: SourceGitLocation = pydantic.Field(description="The location of the package on git")
+    version: Optional[str] = pydantic.Field(None, description="The commit id of the package on git")
 
     @validator('location')
     def single_location_source(cls, value: SourceGitLocation):
@@ -76,13 +88,14 @@ class BasePackageSourceGit(BasePackageSource):
 
 
 class DatasetInfo(apis.models.common.Digestable):
-    dataset: str
+    dataset: str = pydantic.Field(description="The name of the dataset")
 
 
 class BasePackageSourceDataset(BasePackageSource):
-    location: DatasetInfo
-    version: Optional[str] = None
-    security: Optional[DatasetInfo] = None
+    location: DatasetInfo = pydantic.Field(description="The Dataset which holds the package")
+    version: Optional[str] = pydantic.Field(None, description="The version of the package")
+    security: Optional[DatasetInfo] = pydantic.Field(
+        None, description="The information required to get the package from the dataset")
 
     @validator('security', always=True)
     def set_default_security(cls, value: DatasetInfo | None, values: Dict[str, Any]) -> DatasetInfo:
@@ -669,12 +682,30 @@ class ParameterisationExecutionOptions(apis.models.common.Digestable):
 
 
 class MetadataPackage(apis.models.common.Digestable):
-    name: Optional[str]
-    tags: Optional[List[str]] = []
-    keywords: List[str] = []
-    license: Optional[str]
-    maintainer: Optional[str]
-    description: Optional[str]
+    name: Optional[str] = pydantic.Field(
+        None,
+        description="The name of the parameterised virtual experiment package"
+    )
+    tags: Optional[List[str]] = pydantic.Field(
+        [],
+        description="The tags of the parameterised virtual experiment package"
+    )
+    keywords: List[str] = pydantic.Field(
+        [],
+        description="The keywords of the parameterised virtual experiment package"
+    )
+    license: Optional[str] = pydantic.Field(
+        None,
+        description="The license of the parameterised virtual experiment package"
+    )
+    maintainer: Optional[str] = pydantic.Field(
+        None,
+        description="The maintainer of the parameterised virtual experiment package"
+    )
+    description: Optional[str] = pydantic.Field(
+        None,
+        description="The description of the parameterised virtual experiment package"
+    )
 
     @validator('name')
     def name_must_be_valid_k8s_object_name(cls, name):

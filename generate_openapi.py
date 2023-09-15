@@ -17,4 +17,4 @@ with app.app_context():
     schema.pop('host')
 
     with open(Path.cwd()/'docs/openapi.yaml','w') as filestream:
-        filestream.write(yaml.safe_dump(schema, sort_keys=False))
+        filestream.write(yaml.safe_dump(schema))

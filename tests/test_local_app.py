@@ -38,6 +38,8 @@ def initialise_api(output_dir) -> int:
     logger.info(f"initialise_api on port {port}")
     pid_path = os.path.join(output_dir, 'webserver.pid')
 
+    curr_env = os.environ.copy()
+    curr_env['LOG_DIR'] = os.path.join(output_dir, "logs")
     process = subprocess.Popen(
         [
             "gunicorn",
@@ -53,7 +55,8 @@ def initialise_api(output_dir) -> int:
             "--keep-alive=3",
         ],
         stdout=sys.stdout,
-        stderr=sys.stderr
+        stderr=sys.stderr,
+        env=curr_env
     )
 
     # VV: Wait for gunicorn to start serving requests
