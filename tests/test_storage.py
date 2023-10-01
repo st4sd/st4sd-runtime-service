@@ -11,6 +11,8 @@ import zipfile
 
 import apis.storage
 import apis.storage.actuators
+import apis.storage.actuators.memory
+import apis.storage.actuators.local
 
 def test_stream_zip(output_dir: str):
     os.makedirs(os.path.join(output_dir, "in", "a", "b"))
@@ -37,7 +39,7 @@ def test_stream_zip(output_dir: str):
 
 def test_inmemory_initialize():
     contents = "hello".encode()
-    memory = apis.storage.actuators.InMemoryStorage({"path/to/file": contents, "to/dir": None})
+    memory = apis.storage.actuators.memory.InMemoryStorage({"path/to/file": contents, "to/dir": None})
 
     assert memory.files == {
         "/": None,
@@ -49,7 +51,7 @@ def test_inmemory_initialize():
     }
 
 def test_inmemory_initialize_empty():
-    memory = apis.storage.actuators.InMemoryStorage({})
+    memory = apis.storage.actuators.memory.InMemoryStorage({})
 
     assert memory.files == {
         "/": None,
@@ -57,9 +59,9 @@ def test_inmemory_initialize_empty():
 
 def test_inmemory_copy_to_inmemory():
     contents = "hello".encode()
-    source = apis.storage.actuators.InMemoryStorage({"path/to/file": contents, "to/dir": None})
+    source = apis.storage.actuators.memory.InMemoryStorage({"path/to/file": contents, "to/dir": None})
 
-    dest = apis.storage.actuators.InMemoryStorage({})
+    dest = apis.storage.actuators.memory.InMemoryStorage({})
 
     dest.copy(source=source, source_path="/path", dest_path="/")
 
@@ -72,9 +74,9 @@ def test_inmemory_copy_to_inmemory():
 
 def test_inmemory_copy_to_local(output_dir: str):
     contents = "hello".encode()
-    source = apis.storage.actuators.InMemoryStorage({"path/to/file": contents, "to/dir": None})
+    source = apis.storage.actuators.memory.InMemoryStorage({"path/to/file": contents, "to/dir": None})
 
-    dest = apis.storage.actuators.LocalStorage()
+    dest = apis.storage.actuators.local.LocalStorage()
     dest.copy(source=source, source_path="/path", dest_path=output_dir)
 
     top_level = [p.name for p in dest.listdir(output_dir)]
@@ -89,8 +91,8 @@ def test_inmemory_copy_to_local(output_dir: str):
 def test_local_copy_to_inmemory(output_dir: str):
     contents = "hello".encode()
 
-    source = apis.storage.actuators.LocalStorage()
-    dest = apis.storage.actuators.InMemoryStorage({})
+    source = apis.storage.actuators.local.LocalStorage()
+    dest = apis.storage.actuators.memory.InMemoryStorage({})
 
     os.makedirs(os.path.join(output_dir, "path/to"), exist_ok=True)
 

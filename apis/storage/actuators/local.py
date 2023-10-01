@@ -5,84 +5,15 @@
 
 from __future__ import annotations
 
-import copy
 import os
 import pathlib
 import shutil
 import typing
 
-
-class PathInfo:
-    def __init__(self, name: typing.Optional[str] = None, isdir: typing.Optional[bool] = None,
-                 isfile: typing.Optional[bool] = None, ):
-        self.name = name
-        self.isdir = isdir
-        self.isfile = isfile
-
-
-class Storage:
-    @classmethod
-    def as_posix(cls, path: typing.Union[pathlib.Path, str]) -> str:
-        if isinstance(path, str):
-            return path
-        return path.as_posix()
-
-    def copy(
-        self,
-        source: Storage,
-        source_path: typing.Union[pathlib.Path, str],
-        dest_path: typing.Union[pathlib.Path, str]
-    ):
-        """Copies files from source into self
-
-        Arguments:
-            source:
-                the container of the source files
-            source_path:
-                the path prefix to the source files
-            dest_path:
-                the path prefix for the destination files
-        """
-
-        to_copy = [source_path]
-
-        while to_copy:
-            path = to_copy.pop(0)
-            path = source.as_posix(path)
-
-            if source.isfile(path):
-                new_path = os.path.relpath(path, source_path)
-                new_path = os.path.join(dest_path, new_path)
-                contents = source.read(path)
-                self.write(path=new_path, contents=contents)
-                del contents
-            else:
-                to_copy.extend([os.path.join(path, x.name) for x in source.listdir(path)])
-
-    def exists(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        raise NotImplementedError()
-
-    def isfile(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        raise NotImplementedError()
-
-    def isdir(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        raise NotImplementedError()
-
-    def listdir(self, path: typing.Union[pathlib.Path, str]) -> typing.Iterator[PathInfo]:
-        """Iterates the paths under a directory, does not recursively visit sub-dirs"""
-        raise NotImplementedError()
-
-    def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
-        raise NotImplementedError()
-
-    def write(self, path: typing.Union[pathlib.Path, str], contents: bytes):
-        raise NotImplementedError()
-
-    def remove(self, path: typing.Union[pathlib.Path, str]):
-        """Removes files and directories"""
-        raise NotImplementedError()
-
-
+from .base import (
+Storage,
+PathInfo,
+)
 class LocalStorage(Storage):
 
     @classmethod
@@ -157,7 +88,6 @@ class InMemoryStorage(Storage):
             dir_path = path[:skip]
             self.files[dir_path] = None
 
-
     def exists(self, path: typing.Union[pathlib.Path, str]) -> bool:
         path = self.as_posix(path)
         return self.isfile(path) or self.isdir(path)
@@ -180,7 +110,6 @@ class InMemoryStorage(Storage):
 
         return False
 
-
     def listdir(self, path: typing.Union[pathlib.Path, str]) -> typing.Iterator[PathInfo]:
         path = self.as_posix(path)
 
@@ -199,13 +128,12 @@ class InMemoryStorage(Storage):
                 else:
                     name = os.path.split(p)[1]
 
-                if v is None and this_depth == depth+1:
+                if v is None and this_depth == depth + 1:
                     yield PathInfo(name=name, isdir=True, isfile=False)
                 elif v is not None and this_depth == depth:
                     yield PathInfo(name=name, isdir=False, isfile=True)
         else:
             raise NotADirectoryError(path)
-
 
     def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
         path = self.as_posix(path)
@@ -248,20 +176,18 @@ class InMemoryStorage(Storage):
             del self.files[path]
 
 
-
 class S3Storage(Storage):
     def __init__(
-        self,
-        access_key_id: typing.Optional[str],
-        secret_access_key: typing.Optional[str],
-        endpoint_url: typing.Optional[str],
-        region_name: typing.Optional[str],
+            self,
+            access_key_id: typing.Optional[str],
+            secret_access_key: typing.Optional[str],
+            endpoint_url: typing.Optional[str],
+            region_name: typing.Optional[str],
     ):
         self.access_key_id = access_key_id
         self.secret_access_key = secret_access_key
         self.endpoint_url = endpoint_url
         self.region_name = region_name
-
 
     def exists(self, path: typing.Union[pathlib.Path, str]) -> bool:
         # VV: TODO optimize this
