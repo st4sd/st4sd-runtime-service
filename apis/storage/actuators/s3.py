@@ -113,7 +113,7 @@ class S3Storage(Storage):
             client.download_fileobj(self.bucket, path, container)
         except botocore.exceptions.ClientError as e:
             # VV: The status code is a string
-            if str(e.response.get("Error", {}).get("Code", None)) in '404':
+            if str(e.response.get("Error", {}).get("Code", None)) == '404':
                 raise FileNotFoundError(path)
             else:
                 raise
