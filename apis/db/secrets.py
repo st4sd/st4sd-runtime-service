@@ -3,21 +3,20 @@
 # Authors:
 #   Vassilis Vassiliadis
 
-import tinydb.table
-
-import apis.k8s
-import apis.db.base
-import apis.models.common
-import apis.models.errors
 import base64
-
-import kubernetes.client
-
 from typing import (
     Dict,
     Any,
     Optional,
 )
+
+import kubernetes.client
+import tinydb.table
+
+import apis.db.base
+import apis.k8s
+import apis.models.common
+import apis.models.errors
 
 
 class Secret(apis.models.common.DigestableBase):
@@ -103,6 +102,12 @@ class KubernetesSecrets(SecretsStorageTemplate):
         return {"name": name, "data": data}
 
     def secret_create(self, secret: SecretKubernetes):
+        if not isinstance(secret, SecretKubernetes):
+            secret = SecretKubernetes(
+                data=secret.data,
+                name=secret.name,
+                kind="generic"
+            )
         data = {x: b64_encode(secret.data[x]) for x in secret.data}
 
         api = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())
@@ -114,7 +119,12 @@ class KubernetesSecrets(SecretsStorageTemplate):
                 name=secret.name, labels={'creator': 'st4sd-runtime-service'})
         )
 
-        api.create_namespaced_secret(namespace=self.namespace, body=k8s_secret)
+        try:
+            api.create_namespaced_secret(namespace=self.namespace, body=k8s_secret)
+        except kubernetes.client.exceptions.ApiException as e:
+            raise apis.models.errors.DBError(
+                f"Unable to create K8s Secret {self.namespace}/{secret.name} due to {e}"
+            )
 
     def secret_delete(self, name: str):
         api = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())

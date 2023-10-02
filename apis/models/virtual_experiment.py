@@ -113,8 +113,8 @@ class BasePackageDependencies(apis.models.common.Digestable):
 
 
 class BasePackageConfig(apis.models.common.Digestable):
-    path: Optional[str]
-    manifestPath: Optional[str]
+    path: Optional[str] = None
+    manifestPath: Optional[str] = None
 
 
 class VirtualExperimentMetadata(pydantic.BaseModel):
@@ -242,10 +242,51 @@ class StorageMetadata(VirtualExperimentMetadata):
         ret.discover_data_files()
         return ret
 
+class SourceS3SecurityCredentialsValue(apis.models.common.Digestable):
+    accessKeyID: Optional[str] = None
+    secretAccessKey: Optional[str] = None
+
+
+class SourceS3SecurityCredentialsValueFrom(apis.models.common.Digestable):
+    secretName: str = pydantic.Field(
+        description="The name of the Secret which contains the credentials")
+    keyAccessKeyID: Optional[str] = pydantic.Field(
+        None, description="The key in @secretName which holds the ACCESS_KEY_ID")
+    keySecretAccessKey: Optional[str] = pydantic.Field(
+        None, description="The key in @secretName which holds the SECRET_ACCESS_KEY")
+
+
+class SourceS3SecurityCredentials(apis.models.common.Digestable):
+    valueFrom: Optional[SourceS3SecurityCredentialsValueFrom] = pydantic.Field(
+        None, description="The credentials are stored in a Secret. Mutually exlusive with @value")
+    value: Optional[SourceS3SecurityCredentialsValue] = pydantic.Field(
+        None, description="The raw credentials, the service will auto convert these into @valueFrom. "
+                          "Mutually exclusive with @fomSecret"
+    )
+
+
+class BasePackageSourceS3Security(apis.models.common.Digestable):
+    credentials: Optional[SourceS3SecurityCredentials] = pydantic.Field(
+        None, description="The credentials to use when retrieving the package from S3")
+
+
+class BasePackageSourceS3Location(apis.models.common.Digestable):
+    bucket: str = pydantic.Field(description="The bucket name")
+    endpoint: str = pydantic.Field(description="The S3 endpoint")
+    region: Optional[str] = pydantic.Field(None, description="The region name")
+
+
+class BasePackageSourceS3(BasePackageSource):
+    security: Optional[BasePackageSourceS3Security] = pydantic.Field(
+        None, description="The information required to get the package from S3")
+    location: BasePackageSourceS3Location = pydantic.Field(description="The location of the package in the bucket")
+    version: Optional[str] = pydantic.Field(None, description="The version of the package on S3")
+
 
 class BaseSource(apis.models.common.Digestable):
-    git: Optional[BasePackageSourceGit]
-    dataset: Optional[BasePackageSourceDataset]
+    git: Optional[BasePackageSourceGit] = None
+    dataset: Optional[BasePackageSourceDataset] = None
+    s3: Optional[BasePackageSourceS3] = None
 
 
 class OrchestratorResources(apis.models.common.Digestable):

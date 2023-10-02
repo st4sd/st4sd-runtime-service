@@ -52,162 +52,48 @@ class LocalStorage(Storage):
     def remove(cls, path: typing.Union[pathlib.Path, str]):
         shutil.rmtree(path, ignore_errors=True)
 
+    def store_to_file(self, src: typing.Union[pathlib.Path, str], dest: typing.Union[pathlib.Path, str]):
+        """Stores a @src to a @dest file on the local storage"""
+        if not self.isfile(src):
+            raise FileNotFoundError(src)
 
-class InMemoryStorage(Storage):
-    def __init__(self, files: typing.Dict[typing.Union[pathlib.Path, str], typing.Optional[bytes]]):
-        self.files = {self._tidy_path(p, v is None): v for p, v in files.items()}
-
-        # VV: For each path/to/file: contents all directories (e.g. path/ and path/to/) must also exist
-        #   path/: None
-        #   path/to/ None
-        self.files['/'] = None
-
-        for path in list(self.files):
-            self._ensure_dirs_to_path(path)
-
-    def _tidy_path(self, p: typing.Union[pathlib.Path, str], is_dir: bool) -> str:
-        p = self.as_posix(p)
-
-        if is_dir and not p.endswith("/"):
-            p = p + "/"
-
-        if p.startswith("/") is False:
-            p = "/" + p
-
-        return p
-
-    def _ensure_dirs_to_path(self, path: typing.Union[pathlib.Path, str]):
-        path = self.as_posix(path)
-        skip = 0
-        while True:
-            idx = path.find("/", skip)
-            if idx == -1:
-                break
-            skip = idx + 1
-
-            dir_path = path[:skip]
-            self.files[dir_path] = None
-
-    def exists(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        path = self.as_posix(path)
-        return self.isfile(path) or self.isdir(path)
-
-    def isfile(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        return self.as_posix(path) in self.files
-
-    def isdir(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        path = self.as_posix(path)
-
-        if not path.endswith("/"):
-            path = path + "/"
-
-        if path in self.files:
-            return True
-
-        for k in self.files:
-            if k.startswith(path):
-                return True
-
-        return False
-
-    def listdir(self, path: typing.Union[pathlib.Path, str]) -> typing.Iterator[PathInfo]:
-        path = self.as_posix(path)
-
-        if not path.endswith("/"):
-            path = path + "/"
-
-        if self.isdir(path):
-            # VV: List every direct child of path
-            depth = sum((1 for x in path if x == "/"))
-            for p, v in self.files.items():
-                if not p.startswith(path) or p == path:
-                    continue
-                this_depth = sum((1 for x in p if x == "/"))
-                if p.endswith("/"):
-                    name = os.path.split(p[:-1])[1]
-                else:
-                    name = os.path.split(p)[1]
-
-                if v is None and this_depth == depth + 1:
-                    yield PathInfo(name=name, isdir=True, isfile=False)
-                elif v is not None and this_depth == depth:
-                    yield PathInfo(name=name, isdir=False, isfile=True)
-        else:
-            raise NotADirectoryError(path)
-
-    def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
-        path = self.as_posix(path)
-
-        if path.endswith("/"):
-            raise ValueError("Cannot read from a Directory")
-
-        if path not in self.files:
-            raise FileNotFoundError(path)
-
-        return self.files[path]
-
-    def write(self, path: typing.Union[pathlib.Path, str], contents: bytes):
-        path = self.as_posix(path)
-
-        if path.endswith("/"):
-            raise ValueError("Cannot write to a Directory")
-
-        self.files[path] = contents
-        self._ensure_dirs_to_path(path)
-
-    def remove(self, path: typing.Union[pathlib.Path, str]):
-        path = self.as_posix(path)
-
-        if path.endswith("/"):
-            is_dir = True
-        elif self.isdir(path):
-            path += "/"
-            is_dir = True
-        else:
-            is_dir = False
-
-        if is_dir:
-            for k in list(self.files):
-                if k.startswith(path):
-                    del self.files[k]
-        else:
-            if path not in self.files:
-                raise FileNotFoundError(path)
-            del self.files[path]
+        shutil.copyfile(src=src, dst=dest, follow_symlinks=True)
 
 
-class S3Storage(Storage):
-    def __init__(
+    def copy(
             self,
-            access_key_id: typing.Optional[str],
-            secret_access_key: typing.Optional[str],
-            endpoint_url: typing.Optional[str],
-            region_name: typing.Optional[str],
+            source: Storage,
+            source_path: typing.Union[pathlib.Path, str],
+            dest_path: typing.Union[pathlib.Path, str]
     ):
-        self.access_key_id = access_key_id
-        self.secret_access_key = secret_access_key
-        self.endpoint_url = endpoint_url
-        self.region_name = region_name
+        """Copies files from source into self
 
-    def exists(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        # VV: TODO optimize this
-        return self.isfile(path) or self.isdir(path)
+        This optimized implementation uses `store_to_file()` instead of calling source.read() and self.write()
 
-    def isfile(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        pass
+        Arguments:
+            source:
+                the container of the source files
+            source_path:
+                the path prefix to the source files
+            dest_path:
+                the path prefix for the destination files
+        """
 
-    def isdir(self, path: typing.Union[pathlib.Path, str]) -> bool:
-        pass
+        to_copy = [source_path]
 
-    def listdir(self, path: typing.Union[pathlib.Path, str]) -> typing.Iterator[PathInfo]:
-        pass
+        while to_copy:
+            path = to_copy.pop(0)
+            path = source.as_posix(path)
 
-    def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
-        pass
+            if source.isfile(path):
+                new_path = os.path.relpath(path, source_path)
+                new_path = os.path.join(dest_path, new_path)
 
-    def write(self, path: typing.Union[pathlib.Path, str], contents: bytes):
-        pass
+                path_dir = os.path.split(new_path)[0]
 
-    def remove(self, path: typing.Union[pathlib.Path, str]):
-        pass
+                if path_dir and not os.path.exists(path_dir):
+                    os.makedirs(path_dir, exist_ok=True)
 
+                source.store_to_file(src=path, dest=new_path)
+            else:
+                to_copy.extend([os.path.join(path, x.name) for x in source.listdir(path)])

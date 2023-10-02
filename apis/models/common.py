@@ -114,9 +114,10 @@ class OptionFromSecretKeyRef(Digestable):
 class OptionFromS3SecretKeyRef(Digestable):
     keyAccessKeyID: Optional[str] = None
     keySecretAccessKey: Optional[str] = None
-    keyBucket: Optional[str] = None
-    keyEndpoint: Optional[str] = None
+    keyBucket: str = None
+    keyEndpoint: str = None
     keyPath: Optional[str] = None
+    objectName: str
 
 
 class OptionFromS3Values(Digestable):

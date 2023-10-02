@@ -25,17 +25,19 @@ if typing.TYPE_CHECKING:
 class S3Storage(Storage):
     def __init__(
             self,
+            endpoint_url: str,
+            bucket: str,
             access_key_id: typing.Optional[str],
             secret_access_key: typing.Optional[str],
-            endpoint_url: typing.Optional[str],
             region_name: typing.Optional[str],
-            bucket: typing.Optional[str]
     ):
         self.access_key_id = access_key_id
         self.secret_access_key = secret_access_key
         self.endpoint_url = endpoint_url
         self.region_name = region_name
         self.bucket = bucket
+
+    #### Utility methods ####
 
     def client(self) -> "botocore.client.S3":
         return boto3.client(
@@ -45,6 +47,30 @@ class S3Storage(Storage):
               endpoint_url=self.endpoint_url,
               region_name=self.region_name,
         )
+
+    def download_file(
+        self,
+        path: typing.Union[pathlib.Path, str],
+        destination: typing.Union[io.IOBase, typing.BinaryIO],
+    ):
+        client = self.client()
+
+        path = self.as_posix(path)
+        try:
+            client.download_fileobj(self.bucket, path, destination)
+        except botocore.exceptions.ClientError as e:
+            # VV: The status code is a string
+            if str(e.response.get("Error", {}).get("Code", None)) == '404':
+                raise FileNotFoundError(path)
+            else:
+                raise
+
+    def upload_file(self, path: typing.Union[pathlib.Path, str], source: typing.Union[io.IOBase, typing.BinaryIO]):
+        client = self.client()
+        client.upload_fileobj(self.bucket, self.as_posix(path), source)
+
+
+    #### Storage API ####
 
     def exists(self, path: typing.Union[pathlib.Path, str]) -> bool:
         # VV: TODO optimize this
@@ -103,28 +129,14 @@ class S3Storage(Storage):
 
                 yield relpath
 
-
     def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
-        client = self.client()
-
-        container = io.BytesIO()
-        path = self.as_posix(path)
-        try:
-            client.download_fileobj(self.bucket, path, container)
-        except botocore.exceptions.ClientError as e:
-            # VV: The status code is a string
-            if str(e.response.get("Error", {}).get("Code", None)) == '404':
-                raise FileNotFoundError(path)
-            else:
-                raise
-
-        return container.getvalue()
+        destination = io.BytesIO()
+        self.download_file(path=path, destination=destination)
+        return destination.getvalue()
 
     def write(self, path: typing.Union[pathlib.Path, str], contents: bytes):
-        client = self.client()
-
-        container = io.BytesIO(contents)
-        client.upload_fileobj(self.bucket, self.as_posix(path), container)
+        source = io.BytesIO(contents)
+        self.upload_file(path=path, source=source)
 
     def remove(self, path: typing.Union[pathlib.Path, str]):
         client = self.client()
@@ -151,3 +163,17 @@ class S3Storage(Storage):
             to_delete = [path]
 
         client.delete_objects(Bucket=self.bucket, Delete={"Objects": to_delete})
+
+    def store_to_file(self, src: typing.Union[pathlib.Path, str], dest: typing.Union[pathlib.Path, str]):
+        """Stores a @src to a @dest file on the local storage"""
+        if not self.isfile(src):
+            raise FileNotFoundError(src)
+
+        dest = self.as_posix(dest)
+        path_dir = os.path.split(dest)[0]
+
+        if path_dir and not os.path.exists(path_dir):
+            os.makedirs(path_dir, exist_ok=True)
+
+        with open(dest, "wb") as f:
+            self.download_file(path=src, destination=f)

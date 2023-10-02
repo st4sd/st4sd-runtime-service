@@ -135,3 +135,17 @@ class InMemoryStorage(Storage):
             if path not in self.files:
                 raise FileNotFoundError(path)
             del self.files[path]
+
+    def store_to_file(self, src: typing.Union[pathlib.Path, str], dest: typing.Union[pathlib.Path, str]):
+        """Stores a @src to a @dest file on the local storage"""
+        if not self.isfile(src):
+            raise FileNotFoundError(src)
+
+        dest = self.as_posix(dest)
+        path_dir = os.path.split(dest)[0]
+
+        if path_dir and not os.path.exists(path_dir):
+            os.makedirs(path_dir, exist_ok=True)
+
+        with open(dest, 'wb') as f:
+            f.write(self.read(src))

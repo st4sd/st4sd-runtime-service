@@ -79,3 +79,7 @@ class Storage:
     def remove(self, path: typing.Union[pathlib.Path, str]):
         """Removes files and directories"""
         raise NotImplementedError()
+
+    def store_to_file(self, src: typing.Union[pathlib.Path, str], dest: typing.Union[pathlib.Path, str]):
+        """Stores a @src to a @dest file on the local storage"""
+        raise NotImplementedError()
