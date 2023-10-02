@@ -1198,7 +1198,8 @@ def create_secret_for_s3_package_source_security(
         data=data
     )
 
-    db_secrets.secret_create(secret)
+    with db_secrets:
+        db_secrets.secret_create(secret)
 
     return True
 
@@ -1458,7 +1459,6 @@ def access_and_validate_virtual_experiment_packages(
     Returns:
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
     """
-
     prepare_parameterised_package_for_download_definition(ve, db_secrets=packages.db_secrets)
 
     for package in ve.base.packages:

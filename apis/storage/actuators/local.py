@@ -42,7 +42,7 @@ class LocalStorage(Storage):
     def write(cls, path: typing.Union[pathlib.Path, str], contents: bytes):
         path_dir = os.path.split(path)[0]
 
-        if path_dir and not os.path.exists(path_dir):
+        if path_dir and not os.path.isdir(path_dir):
             os.makedirs(path_dir, exist_ok=True)
 
         with open(path, 'wb') as f:
@@ -56,6 +56,11 @@ class LocalStorage(Storage):
         """Stores a @src to a @dest file on the local storage"""
         if not self.isfile(src):
             raise FileNotFoundError(src)
+
+        path_dir = os.path.split(dest)[0]
+
+        if path_dir and not os.path.isdir(path_dir):
+            os.makedirs(path_dir, exist_ok=True)
 
         shutil.copyfile(src=src, dst=dest, follow_symlinks=True)
 

@@ -209,9 +209,10 @@ def api_get_experiment(
 def validate_and_store_pvep_in_db(package_metadata_collection: apis.storage.PackageMetadataCollection,
                                   parameterised_package: apis.models.virtual_experiment.ParameterisedPackage,
                                   db: apis.db.exp_packages.DatabaseExperiments):
-    metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(parameterised_package,
-                                                                                    package_metadata_collection,
-                                                                                    db)
+    metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(
+        ve=parameterised_package,
+        packages=package_metadata_collection
+    )
     apis.runtime.package.validate_parameterised_package(ve=parameterised_package, metadata=metadata)
     with db:
         db.push_new_entry(parameterised_package)

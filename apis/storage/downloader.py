@@ -25,7 +25,7 @@ import apis.s3
 import utils
 
 import apis.storage.actuators.s3
-import apis.storage.actuators.base
+import apis.storage.actuators.local
 
 from .collection import PackageMetadataCollection
 
@@ -221,20 +221,23 @@ class PackagesDownloader(PackageMetadataCollection):
         self,
         package: apis.models.virtual_experiment.BasePackage,
     ):
+        source_path = package.config.path or ""
         output_dir = os.path.join(self._root_directory(), package.name)
+        if source_path:
+            output_dir = os.path.join(output_dir, source_path)
 
         self._log.info(f"Downloading S3 {package.name} from {package.source.s3.location.endpoint} "
-                       f"(bucket: {package.source.s3.location.bucket})")
+                       f"(bucket: {package.source.s3.location.bucket}) from path {source_path}")
         s3_access = apis.storage.actuators.storage_actuator_for_package(
             package=package,
             db_secrets=self.db_secrets,
         )
 
-        dest = apis.storage.actuators.base.Storage()
+        dest = apis.storage.actuators.local.LocalStorage()
 
         dest.copy(
             source=s3_access,
-            source_path=package.config.path or "",
+            source_path=source_path,
             dest_path=output_dir
         )
 
@@ -244,15 +247,19 @@ class PackagesDownloader(PackageMetadataCollection):
                 dest=os.path.join(output_dir, os.path.basename(package.config.manifestPath))
             )
 
+
     def _download_package(self, package: apis.models.virtual_experiment.BasePackage, platform: str | None):
         if package.source.git is not None:
             self._download_package_git(package)
         elif package.source.dataset is not None:
             self._download_package_dataset(package)
+        elif package.source.s3 is not None:
+            self._download_package_s3(package)
         else:
             # Should never happen: this function is called after
             # the experiment has already been validated
-            raise apis.models.errors.ApiError("Package type was neither git nor dataset")
+            source = list(package.source.dict(exclude_none=True))
+            raise apis.models.errors.ApiError(f"Package type was not one of git, s3, dataset. Fields were {source}")
 
         download_path = os.path.join(self._root_directory(), package.name)
 
