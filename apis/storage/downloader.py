@@ -23,6 +23,10 @@ import apis.models.virtual_experiment
 import apis.runtime.errors
 import apis.s3
 import utils
+
+import apis.storage.actuators.s3
+import apis.storage.actuators.base
+
 from .collection import PackageMetadataCollection
 
 
@@ -188,15 +192,57 @@ class PackagesDownloader(PackageMetadataCollection):
                 f"{e.message}")
 
     def _download_package_dataset(self, package: apis.models.virtual_experiment.BasePackage):
+        self._log.info(f"Downloading DATASET {package.name} from {package.source.dataset.security.dataset} via S3")
         credentials = apis.k8s.extract_s3_credentials_from_dataset(package.source.dataset.security.dataset)
+
+        # VV: instead of handling a Dataset, convert the package to a S3 package and use that instead
+        mock_package = package.copy(deep=True)
+        mock_package.source.dataset = None
+        mock_package.source.s3 = apis.models.virtual_experiment.BasePackageSourceS3(
+            security=apis.models.virtual_experiment.BasePackageSourceS3Security(
+                credentials=apis.models.virtual_experiment.SourceS3SecurityCredentials(
+                    value=apis.models.virtual_experiment.SourceS3SecurityCredentialsValue(
+                        accessKeyID=credentials.accessKeyID,
+                        secretAccessKey=credentials.secretAccessKey,
+                    )
+                ),
+            ),
+            location = apis.models.virtual_experiment.BasePackageSourceS3Location(
+                bucket=credentials.bucket,
+                endpoint=credentials.endpoint,
+                region=credentials.region,
+            )
+        )
+
+        self._download_package_s3(mock_package)
+        del mock_package
+
+    def _download_package_s3(
+        self,
+        package: apis.models.virtual_experiment.BasePackage,
+    ):
         output_dir = os.path.join(self._root_directory(), package.name)
 
-        self._log.info(f"Downloading DATASET {package.name} from {package.source.dataset.security.dataset}")
+        self._log.info(f"Downloading S3 {package.name} from {package.source.s3.location.endpoint} "
+                       f"(bucket: {package.source.s3.location.bucket})")
+        s3_access = apis.storage.actuators.storage_actuator_for_package(
+            package=package,
+            db_secrets=self.db_secrets,
+        )
 
-        apis.s3.download_all(credentials, package.config.path or '', output_dir)
+        dest = apis.storage.actuators.base.Storage()
+
+        dest.copy(
+            source=s3_access,
+            source_path=package.config.path or "",
+            dest_path=output_dir
+        )
 
         if package.config.manifestPath and (package.config.manifestPath.startswith(package.config.path or '') is False):
-            apis.s3.download_all(credentials, package.config.manifestPath, output_dir)
+            s3_access.store_to_file(
+                src=package.config.manifestPath,
+                dest=os.path.join(output_dir, os.path.basename(package.config.manifestPath))
+            )
 
     def _download_package(self, package: apis.models.virtual_experiment.BasePackage, platform: str | None):
         if package.source.git is not None:
@@ -281,3 +327,4 @@ class IterableStreamZipOfDirectory:
 
         for zipped_chunk in stream_zip.stream_zip(yield_recursively(self.location)):
             yield zipped_chunk
+
