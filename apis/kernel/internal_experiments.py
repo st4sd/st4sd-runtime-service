@@ -145,6 +145,24 @@ def generate_s3_package_source_from_secret(
     secret_name: str,
     db_secrets: apis.db.secrets.DatabaseSecrets,
 ) -> apis.models.virtual_experiment.BasePackageSourceS3:
+    """Extracts the S3 Credentials and Location from a Secret in a secret database
+
+    The keys in the Secret are
+
+    - S3_BUCKET: str
+    - S3_ENDPOINT: str
+    - S3_ACCESS_KEY_ID: typing.Optional[str] = None
+    - S3_SECRET_ACCESS_KEY: typing.Optional[str] = None
+    - S3_REGION: typing.Optional[str] = None
+
+    Args:
+        secret_name:
+            The name containing the information
+        db_secrets:
+            A reference to the Secrets database
+    Returns:
+
+    """
     with db_secrets:
         secret = db_secrets.secret_get(secret_name)
 
