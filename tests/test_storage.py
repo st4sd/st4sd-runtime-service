@@ -15,7 +15,6 @@ import apis.storage.actuators.memory
 import apis.storage.actuators.local
 import apis.storage.actuators.s3
 
-
 def test_stream_zip(output_dir: str):
     os.makedirs(os.path.join(output_dir, "in", "a", "b"))
 
