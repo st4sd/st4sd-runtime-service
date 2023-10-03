@@ -40,11 +40,13 @@ def validate_internal_experiment(
     pass
 
 
-def store_internal_experiment(dsl2_definition: typing.Dict[str, typing.Any],
-        pvep: apis.models.virtual_experiment.ParameterisedPackage,
-        dest_storage: typing.Optional[apis.storage.actuators.Storage] = None,
-        db_secrets: typing.Optional[apis.db.secrets.DatabaseSecrets] = None,
-        dest_path: typing.Union[pathlib.Path, str] = pathlib.Path("experiments"), ):
+def store_internal_experiment(
+    dsl2_definition: typing.Dict[str, typing.Any],
+    pvep: apis.models.virtual_experiment.ParameterisedPackage,
+    dest_storage: typing.Optional[apis.storage.actuators.Storage] = None,
+    db_secrets: typing.Optional[apis.db.secrets.DatabaseSecrets] = None,
+    dest_path: typing.Union[pathlib.Path, str] = pathlib.Path("experiments"),
+):
     """Validates that an experiment is consistent with a PVEP and then stores its definition in the
     storage.
 
@@ -71,6 +73,10 @@ def store_internal_experiment(dsl2_definition: typing.Dict[str, typing.Any],
 
     Returns:
         The PVEP of the newly created experiment
+
+    Raises:
+        apis.models.errors.ApiError:
+            If unable to upload files
     """
 
     if not isinstance(dest_path, pathlib.Path):

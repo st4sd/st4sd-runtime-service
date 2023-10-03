@@ -1280,9 +1280,15 @@ def get_and_validate_parameterised_package(
         - If PVEP is "derived" method also stores the concretised FlowIR definition on the filesystem.
         - Database should not be already open
 
-    Arguments:
-        ve: the parameterised virtual experiment package (PVEP)
-        package_metadata_collection: The collection of the package metadata
+    Args:
+        ve:
+            the parameterised virtual experiment package (PVEP)
+        package_metadata_collection:
+            The collection of the package metadata
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the virtual experiment is invalid or inconsistent with the PVEP
     """
     parser = apis.models.common.parser_important_elaunch_arguments()
     try:
@@ -1442,7 +1448,7 @@ def access_and_validate_virtual_experiment_packages(
         ve: apis.models.virtual_experiment.ParameterisedPackage,
         packages: apis.storage.PackageMetadataCollection,
         path_multipackage: Optional[str] = None,
-) -> apis.models.virtual_experiment.VirtualExperimentMetadata:
+) -> apis.models.virtual_experiment.StorageMetadata:
     """Validates a Parameterised Virtual Experiment Package modifies it (e.g. add createdOn and digest)
 
     Notes: ::
@@ -1451,13 +1457,20 @@ def access_and_validate_virtual_experiment_packages(
         - If PVEP is "derived", method also double checks that the bindings use the correct input/output types
 
     Arguments:
-        ve: the parameterised virtual experiment package (PVEP)
-        packages: The collection of the package metadata
-        path_multipackage: (Optional - only for multi-package PVEPs) Path to store the aggregate virtual experiment
+        ve:
+            the parameterised virtual experiment package (PVEP)
+        packages:
+            The collection of the package metadata
+        path_multipackage:
+            (Optional - only for multi-package PVEPs) Path to store the aggregate virtual experiment
             that is the result of a Synthesis step following instructions encoded in the multi-package PVEP
 
     Returns:
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the virtual experiment is invalid or inconsistent with the PVEP
     """
     prepare_parameterised_package_for_download_definition(ve, db_secrets=packages.db_secrets)
 
@@ -1506,6 +1519,10 @@ def validate_parameterised_package(
 
     Returns:
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the virtual experiment is invalid or inconsistent with the PVEP
     """
 
     update_registry_metadata_of_parameterised_package(ve=ve, concrete=metadata.concrete, data_files=metadata.data)

@@ -13,6 +13,7 @@ import typing
 import boto3
 import botocore.exceptions
 
+import apis.models.errors
 from .base import (
     Storage,
     PathInfo,
@@ -48,6 +49,15 @@ class S3Storage(Storage):
               region_name=self.region_name,
         )
 
+    def resource(self) -> "botocore.resource.S3":
+        return boto3.resource(
+            's3',
+            aws_access_key_id=self.access_key_id,
+            aws_secret_access_key=self.secret_access_key,
+            endpoint_url=self.endpoint_url,
+            region_name=self.region_name,
+        )
+
     def download_file(
         self,
         path: typing.Union[pathlib.Path, str],
@@ -57,17 +67,25 @@ class S3Storage(Storage):
 
         path = self.as_posix(path)
         try:
-            client.download_fileobj(self.bucket, path, destination)
+            client.download_fileobj(Bucket=self.bucket, Key=path, Fileobj=destination)
         except botocore.exceptions.ClientError as e:
             # VV: The status code is a string
             if str(e.response.get("Error", {}).get("Code", None)) == '404':
                 raise FileNotFoundError(path)
             else:
-                raise
+                raise apis.models.errors.ApiError(
+                    f"Failed to download s3://{self.endpoint_url}@{self.bucket}:{self.as_posix(path)} due to {e}")
 
     def upload_file(self, path: typing.Union[pathlib.Path, str], source: typing.Union[io.IOBase, typing.BinaryIO]):
         client = self.client()
-        client.upload_fileobj(self.bucket, self.as_posix(path), source)
+        resource = self.resource()
+        path = self.as_posix(path)
+        try:
+            client.upload_fileobj(Bucket=self.bucket, Key=path, Fileobj=source)
+            resource.Object(self.bucket, path).wait_until_exists()
+        except botocore.exceptions.ClientError as e:
+            raise apis.models.errors.ApiError(
+                f"Failed to upload s3://{self.endpoint_url}@{self.bucket}:{path} due to {e}")
 
 
     #### Storage API ####
@@ -79,10 +97,16 @@ class S3Storage(Storage):
     def isfile(self, path: typing.Union[pathlib.Path, str]) -> bool:
         client = self.client()
 
-        ret = client.get_object(
-            Bucket=self.bucket,
-            Key=self.as_posix(path)
-        )
+        try:
+            ret = client.get_object(
+                Bucket=self.bucket,
+                Key=self.as_posix(path)
+            )
+        except botocore.exceptions.ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                return False
+            else:
+                raise
 
         if ret['ResponseMetadata']['HTTPStatusCode'] == 200:
             return True
@@ -110,11 +134,10 @@ class S3Storage(Storage):
         path = path.lstrip("/")
 
         paginator = client.get_paginator('list_objects_v2')
-
         generated = set()
         # VV: This should handle "directories" which contain more than 1k files
         for page in paginator.paginate(Bucket=self.bucket, Prefix=path):
-            for obj in page['Contents']:
+            for obj in page.get("Contents", []):
                 if not isinstance(obj, dict) or 'Key' not in obj:
                     continue
 
@@ -127,7 +150,8 @@ class S3Storage(Storage):
                     continue
                 generated.add(relpath)
 
-                yield relpath
+                isfile = self.isfile(obj["Key"])
+                yield PathInfo(name=relpath, isdir=not isfile, isfile=isfile)
 
     def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
         destination = io.BytesIO()
@@ -155,14 +179,15 @@ class S3Storage(Storage):
 
             # VV: This should handle "directories" which contain more than 1k files
             for page in paginator.paginate(Bucket=self.bucket, Prefix=path):
-                for obj in page['Contents']:
+                for obj in page.get('Contents', []):
                     if not isinstance(obj, dict) or 'Key' not in obj:
                         continue
                     to_delete.append(obj['Key'])
         else:
             to_delete = [path]
 
-        client.delete_objects(Bucket=self.bucket, Delete={"Objects": to_delete})
+        if to_delete:
+            client.delete_objects(Bucket=self.bucket, Delete={"Objects": [{"Key": key} for key in to_delete]})
 
     def store_to_file(self, src: typing.Union[pathlib.Path, str], dest: typing.Union[pathlib.Path, str]):
         """Stores a @src to a @dest file on the local storage"""

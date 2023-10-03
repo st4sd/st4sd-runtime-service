@@ -206,9 +206,24 @@ def api_get_experiment(
     return ParameterisedPackageAndProblems(experiment=ve, problems=problems)
 
 
-def validate_and_store_pvep_in_db(package_metadata_collection: apis.storage.PackageMetadataCollection,
-                                  parameterised_package: apis.models.virtual_experiment.ParameterisedPackage,
-                                  db: apis.db.exp_packages.DatabaseExperiments):
+def validate_and_store_pvep_in_db(
+    package_metadata_collection: apis.storage.PackageMetadataCollection,
+    parameterised_package: apis.models.virtual_experiment.ParameterisedPackage,
+    db: apis.db.exp_packages.DatabaseExperiments
+) -> apis.models.virtual_experiment.ParameterisedPackage:
+    """Validates a PVEP and updates the database
+
+    Args:
+        package_metadata_collection:
+            The collection of the package metadata
+        parameterised_package:
+            The PVEP of the experiment. The method will update this in place
+        db:
+            A reference to the experiments database
+
+    Returns:
+        The updated PVEP
+    """
     metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(
         ve=parameterised_package,
         packages=package_metadata_collection
@@ -216,3 +231,5 @@ def validate_and_store_pvep_in_db(package_metadata_collection: apis.storage.Pack
     apis.runtime.package.validate_parameterised_package(ve=parameterised_package, metadata=metadata)
     with db:
         db.push_new_entry(parameterised_package)
+
+    return parameterised_package
