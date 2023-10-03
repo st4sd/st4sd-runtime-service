@@ -3,8 +3,10 @@
 # Authors:
 #   Vassilis Vassiliadis
 
-import contextlib
+
 import os
+import random
+import string
 import typing
 
 import pytest
@@ -23,6 +25,8 @@ import apis.storage.actuators.memory
 import apis.storage.actuators.s3
 import apis.storage.downloader
 
+
+internal_storage_s3 = pytest.mark.skipif("not config.getoption('internal_storage_s3')")
 
 @pytest.fixture()
 def pvep_on_s3() -> typing.Dict[str, typing.Any]:
@@ -92,10 +96,12 @@ def simple_dsl2() -> typing.Dict[str, typing.Any]:
     # VV: FIXME Use DSL 2.0 here
     return yaml.safe_load(
         """
+        variables:
+          default:
+            global:
+                foo: bar
         components:
           - name: hello
-            variables:
-              foo: bar
             command:
               executable: echo
               arguments: "%(foo)s"
@@ -126,7 +132,6 @@ def mock_s3_storage():
             }
         ).encode()
         in_memory.write(f"initialized/{initialized}.yaml", settings)
-
         initialized += 1
         return in_memory
 
@@ -137,79 +142,6 @@ def mock_s3_storage():
         yield in_memory
     finally:
         apis.storage.actuators.s3.S3Storage = actual_s3
-
-
-def test_experiment_from_s3(
-    output_dir: str,
-    pvep_on_s3: typing.Dict[str, typing.Any],
-    simple_dsl2: typing.Dict[str, typing.Any],
-    mock_s3_storage: apis.storage.actuators.memory.InMemoryStorage,
-):
-    db_secrets = apis.db.secrets.DatabaseSecrets(db_path=os.path.join(output_dir, "secrets.db"))
-    db_experiments = apis.db.exp_packages.DatabaseExperiments(db_path=os.path.join(output_dir, "experiments.db"))
-
-    pvep = apis.models.virtual_experiment.ParameterisedPackage(**pvep_on_s3)
-
-    pvep = apis.kernel.internal_experiments.point_base_package_to_s3_storage(
-        pvep=pvep,
-        credentials=apis.models.virtual_experiment.SourceS3SecurityCredentials(
-            value=apis.models.virtual_experiment.SourceS3SecurityCredentialsValue(
-                accessKeyID="access-key-id",
-                secretAccessKey="secret-access-key",
-            )
-        ),
-        location=apis.models.virtual_experiment.BasePackageSourceS3Location(
-            bucket="a-bucket",
-            endpoint="https://my.endpoint",
-        )
-    )
-
-    yaml_dsl = yaml.safe_dump(simple_dsl2, indent=2)
-
-    apis.kernel.internal_experiments.validate_internal_experiment(
-        dsl2_definition=simple_dsl2,
-        pvep=pvep,
-    )
-    apis.kernel.internal_experiments.store_internal_experiment(
-        dsl2_definition=simple_dsl2,
-        pvep=pvep,
-        db_secrets=db_secrets
-    )
-
-    uploaded = sorted(mock_s3_storage.files)
-    assert uploaded == sorted([
-        "/",
-        # VV: The code will call apis.storage.actuators.s3.S3Storage() just once (with "raw" s3 creds)
-        "initialized/", "initialized/0.yaml",
-        # VV: The code will upload the file experiments/example/conf/flowir_package.yaml (DSL 2.0)
-        "experiments/", "experiments/example/", "experiments/example/conf/",
-        "experiments/example/conf/flowir_package.yaml",
-    ])
-
-    contents = mock_s3_storage.read("experiments/example/conf/flowir_package.yaml").decode()
-    assert contents == yaml_dsl
-
-    contents = yaml.safe_load(mock_s3_storage.read("initialized/0.yaml"))
-    assert contents == {
-        "endpoint": "https://my.endpoint",
-        "bucket": "a-bucket",
-        "access_key_id": "access-key-id",
-        "secret_access_key": "secret-access-key",
-        "region_name": None,
-    }
-
-    with db_experiments:
-        download = apis.storage.PackagesDownloader(pvep, db_secrets=db_secrets)
-        with download as dl:
-            apis.kernel.experiments.validate_and_store_pvep_in_db(
-                package_metadata_collection=dl,
-                parameterised_package=pvep,
-                db=db_experiments,
-            )
-            meta = dl.get_metadata("main")
-
-    comp_config = meta.concrete.get_component_configuration((0, "hello"))
-
 
 
 def test_internal_experiment_simple(
@@ -254,4 +186,118 @@ def test_internal_experiment_simple(
         "bucket": "a-bucket",
         "endpoint": "https://my.endpoint",
         "region": "region",
+    }
+
+    uploaded = sorted(mock_s3_storage.files)
+    assert uploaded == sorted([
+        "/",
+        # VV: The code will call apis.storage.actuators.s3.S3Storage() twice, once to upload the files
+        # and then a second time to download the files from S3 during validate_and_store_pvep_in_db()
+        "initialized/", "initialized/0.yaml", "initialized/1.yaml",
+        # VV: The code will upload the file experiments/example/conf/flowir_package.yaml (DSL 2.0)
+        "experiments/", "experiments/example/", "experiments/example/conf/",
+        "experiments/example/conf/flowir_package.yaml",
+    ])
+
+    contents = mock_s3_storage.read("experiments/example/conf/flowir_package.yaml").decode()
+    yaml_dsl = yaml.safe_dump(simple_dsl2, indent=2)
+    assert contents == yaml_dsl
+
+    expected_creds = {
+        "endpoint": "https://my.endpoint",
+        "bucket": "a-bucket",
+        "access_key_id": "access-key-id",
+        "secret_access_key": "secret-access-key",
+        "region_name": "region",
+    }
+
+    contents = yaml.safe_load(mock_s3_storage.read("initialized/0.yaml"))
+    assert contents == expected_creds
+
+    contents = yaml.safe_load(mock_s3_storage.read("initialized/1.yaml"))
+    assert contents == expected_creds
+
+    assert pvep.metadata.registry.platforms == ["default"]
+    assert len(pvep.metadata.registry.executionOptionsDefaults.variables) == 1
+    assert pvep.metadata.registry.executionOptionsDefaults.variables[0].dict(exclude_none=True) == {
+        "name": "foo",
+        "valueFrom": [
+            {
+                "value": "bar",
+                "platform": "default"
+            }
+        ]
+    }
+
+
+@internal_storage_s3()
+def test_internal_experiment_simple_real(
+    output_dir: str,
+    simple_dsl2: typing.Dict[str, typing.Any],
+    pvep_on_s3: typing.Dict[str, typing.Any],
+):
+    rand = random.SystemRandom()
+    characters = string.digits + string.ascii_lowercase
+    rand_str = ''.join((rand.choice(characters) for _ in range(8)))
+    pvep_name = f"example-{rand_str}"
+
+    pvep = apis.models.virtual_experiment.ParameterisedPackage(**pvep_on_s3)
+    pvep.metadata.package.name = pvep_name
+
+    db_secrets = apis.db.secrets.DatabaseSecrets(db_path=os.path.join(output_dir, "secrets.db"))
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(db_path=os.path.join(output_dir, "experiments.db"))
+
+    keys = ["S3_BUCKET", "S3_ENDPOINT", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY", "S3_REGION"]
+    secret = apis.db.secrets.Secret(
+        name="default-s3-secret",
+        data={k: os.environ[k] for k in keys if os.environ.get(k)}
+    )
+    lookup = {
+        "S3_BUCKET": "bucket",
+        "S3_ENDPOINT": "endpoint_url",
+        "S3_ACCESS_KEY_ID": "access_key_id",
+        "S3_SECRET_ACCESS_KEY": "secret_access_key",
+        "S3_REGION": "region_name"
+    }
+    args = {
+        lookup[k]: secret.data.get(k) for k in lookup
+    }
+    s3_storage = apis.storage.actuators.s3.S3Storage(
+        **args
+    )
+
+    with db_secrets:
+        db_secrets.secret_create(secret)
+
+    apis.kernel.internal_experiments.upsert_internal_experiment(
+        dsl2_definition=simple_dsl2,
+        pvep=pvep,
+        db_secrets=db_secrets,
+        db_experiments=db_experiments,
+        package_source="default-s3-secret",
+    )
+
+    assert pvep.base.packages[0].source.s3.security.credentials.valueFrom.dict(exclude_none=True) == {
+        'keyAccessKeyID': 'S3_ACCESS_KEY_ID',
+        'keySecretAccessKey': 'S3_SECRET_ACCESS_KEY',
+        'secretName': 'default-s3-secret'
+    }
+
+    assert sorted(pvep.base.packages[0].source.s3.location.dict(exclude_none=True)) == ["bucket", "endpoint"]
+    contents = s3_storage.read(f"experiments/{pvep_name}/conf/flowir_package.yaml").decode()
+    s3_storage.remove(f"experiments/{pvep_name}/")
+
+    yaml_dsl = yaml.safe_dump(simple_dsl2, indent=2)
+    assert contents == yaml_dsl
+
+    assert pvep.metadata.registry.platforms == ["default"]
+    assert len(pvep.metadata.registry.executionOptionsDefaults.variables) == 1
+    assert pvep.metadata.registry.executionOptionsDefaults.variables[0].dict(exclude_none=True) == {
+        "name": "foo",
+        "valueFrom": [
+            {
+                "value": "bar",
+                "platform": "default"
+            }
+        ]
     }

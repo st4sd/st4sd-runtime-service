@@ -437,10 +437,10 @@ def test_check_execution_options_data_invalid(
     ve_sum_numbers.parameterisation.executionOptions.data.append(apis.models.common.Option(name='cat_me.txt-not'))
     combine_sumnumbers_with_flowir(str_sum_numbers, ve_sum_numbers, output_dir)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(apis.models.errors.ApiError) as e:
         ve_sum_numbers.test()
 
-    logging.getLogger().info(f"ValueError message was {e.value}")
+    logging.getLogger().info(f"ApiError message was {e.value}")
     assert 'cat_me.txt' in str(e.value)
 
 

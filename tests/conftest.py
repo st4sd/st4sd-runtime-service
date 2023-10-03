@@ -36,7 +36,11 @@ def pytest_addoption(parser):
                      default=False, help="Enable tests that involve real packages")
     parser.addoption('--rest-api', action='store_true', dest="rest_api",
                      default=False, help="Enable tests that involve spinning up the REST-API")
-
+    parser.addoption(
+        '--internal-storage-s3',
+        help="Enable tests that involve testing the actual S3 api of the internal storage.",
+        default=False, action="store_true", dest="internal_storage_s3"
+    )
 
 @pytest.fixture()
 def local_deployment():

@@ -1445,8 +1445,14 @@ class ParameterisedPackage(apis.models.common.Digestable):
         return cast(ParameterisedPackage, super(ParameterisedPackage, cls).parse_obj(*args, **kwargs))
 
     def test(self):
-        """Tests whether the contents of the parameterised package make sense"""
+        """Tests whether the contents of the parameterised package make sense
+
+        Raises:
+            apis.models.errors.ApiError:
+                If the virtual experiment is invalid or inconsistent with the PVEP
+        """
         data_names = self.metadata.registry.get_data_names()
+        error_msgs = []
 
         for i, d in enumerate(self.parameterisation.executionOptions.data):
             if d.name not in data_names:
@@ -1455,8 +1461,11 @@ class ParameterisedPackage(apis.models.common.Digestable):
                 possibilities = difflib.get_close_matches(d.name, data_names)
                 if len(possibilities):
                     msg += f" - did you mean {possibilities[0]}"
+                error_msgs.append(msg)
 
-                raise ValueError(msg)
+        if error_msgs:
+            error_msgs = "\n".join(error_msgs)
+            raise apis.models.errors.ApiError(error_msgs)
 
 
 class ParameterisedPackageDropUnknown(ParameterisedPackage):
