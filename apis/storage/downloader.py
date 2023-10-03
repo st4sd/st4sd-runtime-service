@@ -6,105 +6,28 @@
 
 from __future__ import annotations
 
-import copy
 import datetime
-import logging
 import os
 import subprocess
 import tempfile
-from typing import Dict
 from typing import List
 from typing import Optional
-from typing import Any
 
-import utils
-import apis.db.secrets
-import experiment.model.frontends.flowir
-import experiment.model.graph
-import experiment.model.storage
 import stream_zip
 
+import apis.db.secrets
 import apis.k8s
 import apis.models.common
 import apis.models.errors
 import apis.models.virtual_experiment
 import apis.runtime.errors
 import apis.s3
+import utils
 
+import apis.storage.actuators.s3
+import apis.storage.actuators.local
 
-class PackageMetadataCollection:
-    def __init__(
-            self,
-            concrete_and_data: Dict[str, apis.models.virtual_experiment.StorageMetadata] | None = None,
-            ve: apis.models.virtual_experiment.ParameterisedPackage | None = None,
-            db_secrets: apis.db.secrets.DatabaseSecrets | None = None,
-    ):
-        self.db_secrets = db_secrets
-        self._log = logging.getLogger('Downloader')
-        self._metadata: Dict[str, apis.models.virtual_experiment.StorageMetadata] = concrete_and_data or {}
-        self._ve = ve
-        self._entered = 0
-        self._times_entered_total = 0
-
-    def get_common_platforms(self) -> List[str]:
-        ret: Optional[List[str]] = None
-
-        for name in sorted(self._metadata):
-            concrete = self.get_concrete_of_package(name)
-            platforms = concrete.platforms
-            if ret is None:
-                ret = list(platforms)
-            else:
-                ret = list(set(ret).intersection(platforms))
-
-        return ret or []
-
-    def update_parameterised_package(self, ve: apis.models.virtual_experiment.ParameterisedPackage | None):
-
-        if self._times_entered_total == 0:
-            self._ve = ve
-        elif self._ve != ve:
-            old_ve = self._ve.metadata.package.name if self._ve is not None else "*none*"
-            new_ve = ve.metadata.package.name if ve is not None else "*none*"
-            self._ve = ve
-            self._log.warning(f"Changing ve from {old_ve} to {new_ve}")
-
-    def get_parameterised_package(self) -> apis.models.virtual_experiment.ParameterisedPackage | None:
-        return self._ve
-
-    def get_all_package_metadata(self) -> Dict[str, apis.models.virtual_experiment.StorageMetadata]:
-        return self._metadata
-
-    def get_root_directory_containing_package(self, name: str) -> str:
-        return self._metadata[name].rootDirectory
-
-    def get_location_of_package(self, name: str) -> str:
-        # VV: Ensure package exists
-        return self._metadata[name].location
-
-    def get_manifest_data_of_package(self, name: str) -> experiment.model.frontends.flowir.DictManifest:
-        return copy.deepcopy(self._metadata[name].manifestData)
-
-    def get_concrete_of_package(self, name: str) -> experiment.model.frontends.flowir.FlowIRConcrete:
-        return self._metadata[name].concrete.copy()
-
-    def get_datafiles_of_package(self, name: str) -> List[str]:
-        return list(self._metadata[name].data)
-
-    def get_metadata(self, name: str) -> apis.models.virtual_experiment.StorageMetadata:
-        return self._metadata[name]
-
-    def upsert_metadata(self, name: str, metadata: apis.models.virtual_experiment.StorageMetadata):
-        self._metadata[name] = metadata
-
-    def __enter__(self):
-        self._entered += 1
-        self._times_entered_total += 1
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._entered -= 1
-        pass
+from .collection import PackageMetadataCollection
 
 
 class PackagesDownloader(PackageMetadataCollection):
@@ -269,25 +192,74 @@ class PackagesDownloader(PackageMetadataCollection):
                 f"{e.message}")
 
     def _download_package_dataset(self, package: apis.models.virtual_experiment.BasePackage):
+        self._log.info(f"Downloading DATASET {package.name} from {package.source.dataset.security.dataset} via S3")
         credentials = apis.k8s.extract_s3_credentials_from_dataset(package.source.dataset.security.dataset)
+
+        # VV: instead of handling a Dataset, convert the package to a S3 package and use that instead
+        mock_package = package.copy(deep=True)
+        mock_package.source.dataset = None
+        mock_package.source.s3 = apis.models.virtual_experiment.BasePackageSourceS3(
+            security=apis.models.virtual_experiment.BasePackageSourceS3Security(
+                credentials=apis.models.virtual_experiment.SourceS3SecurityCredentials(
+                    value=apis.models.virtual_experiment.SourceS3SecurityCredentialsValue(
+                        accessKeyID=credentials.accessKeyID,
+                        secretAccessKey=credentials.secretAccessKey,
+                    )
+                ),
+            ),
+            location = apis.models.virtual_experiment.BasePackageSourceS3Location(
+                bucket=credentials.bucket,
+                endpoint=credentials.endpoint,
+                region=credentials.region,
+            )
+        )
+
+        self._download_package_s3(mock_package)
+        del mock_package
+
+    def _download_package_s3(
+        self,
+        package: apis.models.virtual_experiment.BasePackage,
+    ):
+        source_path = package.config.path or ""
         output_dir = os.path.join(self._root_directory(), package.name)
+        if source_path:
+            output_dir = os.path.join(output_dir, source_path)
 
-        self._log.info(f"Downloading DATASET {package.name} from {package.source.dataset.security.dataset}")
+        self._log.info(f"Downloading S3 {package.name} from {package.source.s3.location.endpoint} "
+                       f"(bucket: {package.source.s3.location.bucket}) from path {source_path}")
+        s3_access = apis.storage.actuators.storage_actuator_for_package(
+            package=package,
+            db_secrets=self.db_secrets,
+        )
 
-        apis.s3.download_all(credentials, package.config.path or '', output_dir)
+        dest = apis.storage.actuators.local.LocalStorage()
+
+        dest.copy(
+            source=s3_access,
+            source_path=source_path,
+            dest_path=output_dir
+        )
 
         if package.config.manifestPath and (package.config.manifestPath.startswith(package.config.path or '') is False):
-            apis.s3.download_all(credentials, package.config.manifestPath, output_dir)
+            s3_access.store_to_file(
+                src=package.config.manifestPath,
+                dest=os.path.join(output_dir, os.path.basename(package.config.manifestPath))
+            )
+
 
     def _download_package(self, package: apis.models.virtual_experiment.BasePackage, platform: str | None):
         if package.source.git is not None:
             self._download_package_git(package)
         elif package.source.dataset is not None:
             self._download_package_dataset(package)
+        elif package.source.s3 is not None:
+            self._download_package_s3(package)
         else:
             # Should never happen: this function is called after
             # the experiment has already been validated
-            raise apis.models.errors.ApiError("Package type was neither git nor dataset")
+            source = list(package.source.dict(exclude_none=True))
+            raise apis.models.errors.ApiError(f"Package type was not one of git, s3, dataset. Fields were {source}")
 
         download_path = os.path.join(self._root_directory(), package.name)
 
@@ -362,3 +334,4 @@ class IterableStreamZipOfDirectory:
 
         for zipped_chunk in stream_zip.stream_zip(yield_recursively(self.location)):
             yield zipped_chunk
+

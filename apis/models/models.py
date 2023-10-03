@@ -1471,3 +1471,9 @@ mQueryRelationship = api_query.model(
         ),
     },
 )
+
+
+api_internal_experiments = Namespace(
+    "internal-experiments",
+    description="Operations on experiments that are hosted on the internal storage"
+)

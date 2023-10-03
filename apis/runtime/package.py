@@ -1088,32 +1088,35 @@ class NamedPackage:
         return body
 
 
-def may_create_oauth_secret_and_update_base(
-        base: apis.models.virtual_experiment.BasePackage,
-        db_secrets: apis.db.secrets.SecretsStorageTemplate,
-):
-    """Inspects an experiment definition and if it contains the field package.type.git.oauth-token it
-    validates that it's also cloning a https:// url. Then it creates a Secret object to hold that token
-    and rewrites the experiment definition to use the new Secret object
+def create_secret_for_git_package_source_security(
+    source_git: apis.models.virtual_experiment.BasePackageSourceGit,
+    db_secrets: apis.db.secrets.SecretsStorageTemplate,
+) -> bool:
+    """If  @source_git uses raw credentials to configure the oauth-token for git clone, the method creates Secret with
+    the oauth-token and updates the source to use that instead of the raw token
 
-    Arguments:
-        base: The description of a base package - may be updated to reflect new security options
-        db_secrets: The database of secrets
+    Args:
+        source_git:
+            The package source which describes how to retrieve the package definition from Git
+        db_secrets:
+            The database of secrets
+
+    Returns:
+        True if it creates a Secret, False otherwise
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the method is unable to create a Secret for some reason, the exception explains the reason.
     """
-    source = base.source
-    if source.git is None:
-        return
-    source = source.git
-
-    security = source.security
+    security = source_git.security
     if security is None:
         # VV: The base package does not contain security metadata - it must be using the "default" Git oauth-token
-        return
+        return False
 
     if isinstance(security.oauth, apis.models.virtual_experiment.SourceGitSecurityOAuth):
         if security.oauth.valueFrom is not None and security.oauth.valueFrom.secretKeyRef is not None:
             # VV: The base package is already using a Secret for its token
-            return
+            return False
         elif security.oauth.value is not None:
             # VV: The base package contains an oauth-token, we need to create a secret for it
             pass
@@ -1123,26 +1126,124 @@ def may_create_oauth_secret_and_update_base(
         raise apis.models.errors.ApiError(f"Not implemented git source.security {type(security)}")
 
     # VV: this is an embedded oauth-token, convert it
-    url: str = source.location.url
+    url: str = source_git.location.url
     oauth_token = security.oauth.value
     # VV: Turns https://hello/world.git into world
     name = os.path.splitext(os.path.basename(url))[0]
     name = f"git-oauth-{name}-{binascii.b2a_hex(os.urandom(6)).decode('utf-8')}"
 
-    if isinstance(db_secrets, apis.db.secrets.KubernetesSecrets):
-        secret = apis.db.secrets.SecretKubernetes(
-            name=name,
-            data={'oauth-token': oauth_token},
-            secretKind="generic")
-    else:
-        secret = apis.db.secrets.Secret(name=name, data={'oauth-token': oauth_token})
+    secret = apis.db.secrets.Secret(name=name, data={'oauth-token': oauth_token})
 
     with db_secrets:
         db_secrets.secret_create(secret)
 
-    source.security.oauth = apis.models.common.Option(
+    source_git.security.oauth = apis.models.common.Option(
         valueFrom=apis.models.common.OptionValueFrom(
             secretKeyRef=apis.models.common.OptionFromSecretKeyRef(name=name, key="oauth-token")))
+
+    return True
+
+
+def create_secret_for_s3_package_source_security(
+    source_s3: apis.models.virtual_experiment.BasePackageSourceS3,
+    db_secrets: apis.db.secrets.SecretsStorageTemplate,
+) -> bool:
+    """If  @source_s3 uses raw credentials to configure the S3 credentials, the method creates Secret with
+    the credentials and updates the source to use that instead of the raw secrets.
+
+    Args:
+        source_s3:
+            The package source which describes how to retrieve the package definition from S3
+        db_secrets:
+            The database of secrets
+
+    Returns:
+        True if it creates a Secret, False otherwise
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the method is unable to create a Secret for some reason, the exception explains the reason.
+    """
+    if not source_s3.security or not source_s3.security.credentials or not source_s3.security.credentials.value:
+        return False
+
+    credentials = source_s3.security.credentials
+
+    if credentials.value is None or (
+            credentials.value.accessKeyID is None
+            and credentials.value.secretAccessKey is None
+    ):
+        return False
+
+    rand = random.Random()
+    characters = string.ascii_letters + string.digits
+    secret_name = ''.join((rand.choice(characters) for x in range(10)))
+
+    data = {}
+    credentials.valueFrom = apis.models.virtual_experiment.SourceS3SecurityCredentialsValueFrom(
+       secretName=secret_name,
+    )
+
+    if credentials.value.accessKeyID is not None:
+        data['S3_ACCESS_KEY_ID'] = credentials.value.accessKeyID
+        credentials.valueFrom.keyAccessKeyID = "S3_ACCESS_KEY_ID"
+
+    if credentials.value.secretAccessKey is not None:
+        data['S3_SECRET_ACCESS_KEY'] = credentials.value.secretAccessKey
+        credentials.valueFrom.keySecretAccessKey = "S3_SECRET_ACCESS_KEY"
+
+    credentials.value = None
+    secret = apis.db.secrets.Secret(
+        name=secret_name,
+        data=data
+    )
+
+    with db_secrets:
+        db_secrets.secret_create(secret)
+
+    return True
+
+
+
+def rewrite_security_of_package_source(
+        base: apis.models.virtual_experiment.BasePackage,
+        db_secrets: apis.db.secrets.SecretsStorageTemplate,
+):
+    """If any package uses raw credentials to configure the security of its package source it creates
+    a secret and references the credentials instead.
+
+    Inspects an experiment definition and if it contains the field package.type.git.oauth-token it
+    validates that it's also cloning a https:// url. Then it creates a Secret object to hold that token
+    and rewrites the experiment definition to use the new Secret object
+
+    Arguments:
+        base: The description of a base package - may be updated to reflect new security options
+        db_secrets: The database of secrets
+
+    Returns:
+        True if it creates a Secret, False otherwise
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the method is unable to create a Secret for some reason, the exception explains the reason.
+    """
+    source = base.source
+
+    if source.git:
+        return create_secret_for_git_package_source_security(
+            source_git=source.git,
+            db_secrets=db_secrets,
+        )
+    elif source.dataset:
+        return False
+    elif source.s3:
+        return create_secret_for_s3_package_source_security(
+            source_s3=source.s3,
+            db_secrets=db_secrets,
+        )
+
+    return False
+
 
 
 def prepare_parameterised_package_for_download_definition(
@@ -1161,7 +1262,7 @@ def prepare_parameterised_package_for_download_definition(
     base_packages = ve.base.packages
     for bp in base_packages:
         try:
-            may_create_oauth_secret_and_update_base(bp, db_secrets=db_secrets)
+            rewrite_security_of_package_source(bp, db_secrets=db_secrets)
         except Exception as e:
             logger.warning(f"Cannot create OAuth secret for {ve.metadata.package.name}/{bp.name} due to {e}. "
                            f"Traceback {traceback.format_exc()}")
@@ -1179,9 +1280,15 @@ def get_and_validate_parameterised_package(
         - If PVEP is "derived" method also stores the concretised FlowIR definition on the filesystem.
         - Database should not be already open
 
-    Arguments:
-        ve: the parameterised virtual experiment package (PVEP)
-        package_metadata_collection: The collection of the package metadata
+    Args:
+        ve:
+            the parameterised virtual experiment package (PVEP)
+        package_metadata_collection:
+            The collection of the package metadata
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the virtual experiment is invalid or inconsistent with the PVEP
     """
     parser = apis.models.common.parser_important_elaunch_arguments()
     try:
@@ -1341,7 +1448,7 @@ def access_and_validate_virtual_experiment_packages(
         ve: apis.models.virtual_experiment.ParameterisedPackage,
         packages: apis.storage.PackageMetadataCollection,
         path_multipackage: Optional[str] = None,
-) -> apis.models.virtual_experiment.VirtualExperimentMetadata:
+) -> apis.models.virtual_experiment.StorageMetadata:
     """Validates a Parameterised Virtual Experiment Package modifies it (e.g. add createdOn and digest)
 
     Notes: ::
@@ -1350,15 +1457,21 @@ def access_and_validate_virtual_experiment_packages(
         - If PVEP is "derived", method also double checks that the bindings use the correct input/output types
 
     Arguments:
-        ve: the parameterised virtual experiment package (PVEP)
-        packages: The collection of the package metadata
-        path_multipackage: (Optional - only for multi-package PVEPs) Path to store the aggregate virtual experiment
+        ve:
+            the parameterised virtual experiment package (PVEP)
+        packages:
+            The collection of the package metadata
+        path_multipackage:
+            (Optional - only for multi-package PVEPs) Path to store the aggregate virtual experiment
             that is the result of a Synthesis step following instructions encoded in the multi-package PVEP
 
     Returns:
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
-    """
 
+    Raises:
+        apis.models.errors.ApiError:
+            If the virtual experiment is invalid or inconsistent with the PVEP
+    """
     prepare_parameterised_package_for_download_definition(ve, db_secrets=packages.db_secrets)
 
     for package in ve.base.packages:
@@ -1406,6 +1519,10 @@ def validate_parameterised_package(
 
     Returns:
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
+
+    Raises:
+        apis.models.errors.ApiError:
+            If the virtual experiment is invalid or inconsistent with the PVEP
     """
 
     update_registry_metadata_of_parameterised_package(ve=ve, concrete=metadata.concrete, data_files=metadata.data)
