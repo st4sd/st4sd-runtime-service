@@ -92,3 +92,15 @@ LOCAL_DEPLOYMENT = EnvVar("LOCAL_DEPLOYMENT", "False").enabled
 # VV: Points to the directory which will contain the files that the runtime service uses
 # to store metadata (databases, etc)
 LOCAL_STORAGE = EnvVar("LOCAL_STORAGE", os.getcwd()).value
+
+# VV: Contains the name of a secret which includes the keys:
+# S3_ACCESS_KEY_ID
+# S3_SECRET_ACCESS_KEY
+# S3_END_POINT
+# S3_BUCKET
+# S3_PREFIX
+# When set, it switches on the `/internal-experiments/` APIs
+S3_CONFIG_SECRET_NAME = EnvVar("S3_CONFIG_SECRET_NAME", "").value
+
+# VV: The suffix under which to store the internal experiments under the internal storage (e.g. S3)
+S3_ROOT_INTERNAL_EXPERIMENTS = EnvVar("S3_ROOT_INTERNAL_EXPERIMENTS", "experiments").value

@@ -40,6 +40,7 @@ import apis.authorisation
 import apis.relationships
 import apis.query
 import apis.url_map
+import apis.internal_experiments
 
 
 
@@ -65,13 +66,14 @@ api = Api(
 )
 
 api.add_namespace(apis.authorisation.api)
-api.add_namespace(apis.datasets.api)
 api.add_namespace(apis.experiments.api)
-api.add_namespace(apis.image_pull_secrets.api)
+api.add_namespace(apis.internal_experiments.api)
 api.add_namespace(apis.instances.api)
+api.add_namespace(apis.image_pull_secrets.api)
 api.add_namespace(apis.query.api)
 api.add_namespace(apis.relationships.api)
 api.add_namespace(apis.url_map.api)
+api.add_namespace(apis.datasets.api)
 
 # File Logging Setup
 app.config['LOG_DIR'] = os.environ.get("LOG_DIR", "/tmp/logs")

@@ -1131,57 +1131,44 @@ class ExperimentDSL(Resource):
                 except pydantic.error_wrappers.ValidationError as e:
                     return {'problems': e.errors()}
 
-            platforms = ve.parameterisation.get_available_platforms()
-            platform_name = None
-
-            if platforms and len(platforms) > 0:
-                platform_name = platforms[0]
-
             if len(ve.base.packages) == 1:
                 download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
                     local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
-
-                with download:
-                    metadata = download.get_metadata(ve.base.packages[0].name)
-                    manifest = {x: x for x in metadata.top_level_folders}
-                    dsl = apis.models.virtual_experiment.dsl_from_concrete(metadata.concrete, manifest, platform_name)
-            elif len(ve.base.packages) > 1:
-                # VV: FIXME This is a hack, the derived packages currently live on a PVC
-                path = os.path.join(
-                    apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
-                    ve.metadata.package.name,
-                    ve.get_packages_identifier())
-                package = experiment.model.storage.ExperimentPackage.packageFromLocation(
-                    path, platform=platform_name, primitive=True, variable_substitute=False)
-                concrete = package.configuration.get_flowir_concrete()
-                manifest = package.manifestData
-
-                dsl = apis.models.virtual_experiment.dsl_from_concrete(concrete, manifest, concrete.active_platform)
             else:
-                api.abort(400, "Parameterised virtual experiment package does not contain any base packages")
-                raise NotImplementedError()  # keep linter happy
+                download = None
+
+            dsl = apis.kernel.experiments.api_get_experiment_dsl(
+                pvep=ve,
+                packages=download,
+                derived_packages_root=apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
+            )
 
             args = self._my_parser.parse_args()
-
             if args.outputFormat == "yaml":
                 dsl = experiment.model.frontends.flowir.yaml_dump(dsl)
 
             return {
-                'dsl': dsl,
-                'problems': [],
+                "dsl": dsl,
+                "problems": [],
             }
-
 
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.ApiError as e:
             current_app.logger.warning(f"Run into {e} while generating the DSL of {identifier}. "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(500, str(e))
+            return {
+                "dsl": None,
+                "problems": [str(e)]
+            }
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while generating the DSL of {identifier}. "
                                        f"Traceback: {traceback.format_exc()}")
             api.abort(500, f"Run into internal error while querying for {identifier}")
+            return {
+                'dsl': None,
+                "problems": [str(e)]
+            }
 
 
 @api.route('/<identifier>/package-inheritance/', doc=False)

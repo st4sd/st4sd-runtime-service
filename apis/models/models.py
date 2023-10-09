@@ -15,6 +15,7 @@ api_url_map = Namespace(
     "url-map", description="Operations to interact with workflow software stack URLs"
 )
 
+
 ############################ Image Pull Secrets ############################
 
 api_image_pull_secret = Namespace(
@@ -1473,7 +1474,27 @@ mQueryRelationship = api_query.model(
 )
 
 
+
+############################ Internal Experiments ############################
+
 api_internal_experiments = Namespace(
     "internal-experiments",
-    description="Operations on experiments that are hosted on the internal storage"
+    description="Operations to create an experiment whose workflow is hosted in the internal storage"
+)
+
+m_internal_experiment = api_internal_experiments.model(
+    "internal-experiment", {
+        "pvep": fields.Nested(
+            mVirtualExperiment,
+            description="The Parameterised Virtual Experiment Package that parameterizes the execution of the workflow"
+        ),
+        "workflow": fields.Nested(
+            api_internal_experiments.model(
+                "internal-experiment-workflow", {
+                    "dsl": fields.Raw(description="The dictionary representing an experiment in DSL format")
+                }
+            ),
+            description="The definition of the workflow",
+        )
+    }
 )

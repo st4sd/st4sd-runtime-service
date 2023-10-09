@@ -23,6 +23,11 @@ import apis.kernel.experiments
 
 import apis.models.common
 
+import experiment.model.frontends.dsl
+import experiment.model.frontends.flowir
+import experiment.model.errors
+
+import apis.runtime.package
 
 def validate_internal_experiment(
     dsl2_definition: typing.Dict[str, typing.Any],
@@ -35,9 +40,46 @@ def validate_internal_experiment(
             the DSL 2.0 definition
         pvep:
             The parameterised virtual experiment package definition
+
+    Raises:
+        apis.models.errors.InvalidModelError:
+            If the DSL is invalid
+        apis.models.errors.ApiError:
+            If the DSL is not compatible with the PVEP
     """
-    # VV: FIXME Validate DSL 2.0 against the PVEP here
-    pass
+    try:
+        namespace = experiment.model.frontends.dsl.Namespace(**dsl2_definition)
+    except pydantic.ValidationError as e:
+        raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=e.errors())
+
+    try:
+        concrete = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+    except experiment.model.errors.FlowIRConfigurationErrors as e:
+        raise apis.models.errors.InvalidModelError("Invalid DSL definition", [
+            {"problem": str(e)} for e in e.underlyingErrors
+        ])
+
+    pvep = pvep.copy(deep=True)
+
+    if len(pvep.base.packages) != 1:
+        raise apis.models.errors.InvalidPayloadError("The PVEP must point to exactly 1 base package")
+
+    download = apis.storage.PackageMetadataCollection(
+        {pvep.base.packages[0].name: apis.models.virtual_experiment.StorageMetadata(
+            concrete=concrete,
+            manifestData={},
+            data=[],
+        )}
+    )
+
+    # VV: Run all the tests without actually accessing the internal storage to retrieve the source code of the workflow
+    metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(
+        ve=pvep,
+        packages=download
+    )
+    apis.runtime.package.validate_parameterised_package(ve=pvep, metadata=metadata)
+
+
 
 
 def store_internal_experiment(
@@ -87,7 +129,7 @@ def store_internal_experiment(
 
     root_dir = dest_path / pvep.metadata.package.name
     # VV: FIXME Store DSL 2.0 here
-    conf_file = root_dir / "conf/flowir_package.yaml"
+    conf_file = root_dir / "conf/dsl.yaml"
 
     yaml_dsl2_def: str = yaml.safe_dump(dsl2_definition, indent=2)
 
@@ -147,6 +189,41 @@ class S3StorageSecret(apis.models.common.Digestable):
     S3_REGION: typing.Optional[str] = None
 
 
+def get_s3_internal_storage_secret(
+    secret_name: str,
+    db_secrets: apis.db.secrets.DatabaseSecrets,
+) -> S3StorageSecret:
+    """Extracts the S3 Credentials and Location from a Secret in a secret database
+
+    The keys in the Secret are
+
+    - S3_BUCKET: str
+    - S3_ENDPOINT: str
+    - S3_ACCESS_KEY_ID: typing.Optional[str] = None
+    - S3_SECRET_ACCESS_KEY: typing.Optional[str] = None
+    - S3_REGION: typing.Optional[str] = None
+
+    Args:
+        secret_name:
+            The name containing the information
+        db_secrets:
+            A reference to the Secrets database
+    Returns:
+        The contents of the secret
+
+    Raises:
+        apis.models.errors.DBError:
+            When the secret is not found or it contains invalid information
+    """
+
+    with db_secrets:
+        secret = db_secrets.secret_get(secret_name)
+
+    try:
+        return S3StorageSecret(**secret["data"])
+    except pydantic.ValidationError as e:
+        raise apis.models.errors.DBError(f"The S3 Secret {secret_name} is invalid. Errors follow: {e.errors()}")
+
 def generate_s3_package_source_from_secret(
     secret_name: str,
     db_secrets: apis.db.secrets.DatabaseSecrets,
@@ -167,15 +244,10 @@ def generate_s3_package_source_from_secret(
         db_secrets:
             A reference to the Secrets database
     Returns:
-
+        The BasePackageSource
     """
-    with db_secrets:
-        secret = db_secrets.secret_get(secret_name)
 
-    try:
-        secret = S3StorageSecret(**secret["data"])
-    except pydantic.ValidationError as e:
-        raise apis.models.errors.DBError(f"The S3 Secret {secret_name} is invalid. Errors follow: {e.errors()}")
+    secret =get_s3_internal_storage_secret(secret_name=secret_name, db_secrets=db_secrets)
 
     return apis.models.virtual_experiment.BasePackageSourceS3(
         security=apis.models.virtual_experiment.BasePackageSourceS3Security(
@@ -222,6 +294,9 @@ def upsert_internal_experiment(
     Returns:
         The parameterised virtual experiment package
     """
+
+    if not pvep.metadata.package.name:
+        raise apis.models.errors.ApiError('Missing "pvep.metadata.package.name"')
 
     if isinstance(package_source, str):
         package_source = generate_s3_package_source_from_secret(

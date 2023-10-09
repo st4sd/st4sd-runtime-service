@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import copy
 import pprint
+import typing
 from typing import Any
 from typing import Dict
 from typing import List
 from typing import NamedTuple
 
+import pydantic.typing
 import pydantic.error_wrappers
 
 import apis.db.exp_packages
@@ -26,6 +28,12 @@ import apis.models.virtual_experiment
 import apis.storage
 import apis.runtime.package
 import utils
+
+import experiment.model.storage
+import experiment.model.graph
+import experiment.model.errors
+
+import os
 
 
 class FormatOptions(apis.models.common.Digestable):
@@ -204,6 +212,74 @@ def api_get_experiment(
                 f"Parameterised virtual experiment package {identifier} is invalid", problems)
 
     return ParameterisedPackageAndProblems(experiment=ve, problems=problems)
+
+
+def api_get_experiment_dsl(
+    pvep: apis.models.virtual_experiment.ParameterisedPackage,
+    packages: typing.Optional[apis.storage.PackageMetadataCollection],
+    derived_packages_root: str = apis.models.constants.ROOT_STORE_DERIVED_PACKAGES,
+):
+    """Generate (or hallucinate) the DSL definition of an experiment
+
+    Args:
+        pvep:
+            the parameterised virtual experiment package
+        packages:
+            an optional collection of packages metadata - not used when the pvep contains
+            more than 1 base packages (will load the derived package for @derived_packages_root)
+        derived_packages_root:
+            the location which contains the definition of
+    Returns:
+        A dictionary containing the DSL 2 of the experiment
+
+    Raises
+        api.models.errors.ApiModel:
+            When the PVEP or DSL is invalid
+    """
+    platforms = pvep.parameterisation.get_available_platforms()
+    platform_name = None
+
+    if platforms and len(platforms) > 0:
+        platform_name = platforms[0]
+    try:
+
+        if len(pvep.base.packages) == 1:
+            if packages is None:
+                raise apis.models.errors.ApiError(
+                    "InternalError: Trying to extract DSL without a PackageMetadataCollection"
+                )
+            with packages as download:
+                path = download.get_location_of_package(pvep.base.packages[0].name)
+                package = experiment.model.storage.ExperimentPackage.packageFromLocation(
+                    path, platform=platform_name, primitive=True, variable_substitute=False)
+                graph = experiment.model.graph.WorkflowGraph.graphFromPackage(
+                    package, platform=platform_name, primitive=True, variable_substitute=False,
+                    createInstanceConfiguration=False, updateInstanceConfiguration=False, validate=True
+                )
+                dsl = graph.to_dsl()
+        elif len(pvep.base.packages) > 1:
+            # VV: FIXME This is a hack, the derived packages currently live on a PVC
+            path = os.path.join(
+                derived_packages_root,
+                pvep.metadata.package.name,
+                pvep.get_packages_identifier()
+            )
+            package = experiment.model.storage.ExperimentPackage.packageFromLocation(
+                path, platform=platform_name, primitive=True, variable_substitute=False,
+                createInstanceFiles=False, updateInstanceFiles=False, is_instance=False
+            )
+            concrete = package.configuration.get_flowir_concrete()
+            manifest = package.manifestData
+
+            dsl = apis.models.virtual_experiment.dsl_from_concrete(concrete, manifest, concrete.active_platform)
+        else:
+            raise apis.models.errors.ApiError(
+                "Parameterised virtual experiment package does not contain any base packages"
+            )
+    except experiment.model.errors.ExperimentInvalidConfigurationError as e:
+        raise apis.models.errors.ApiError(f"Invalid workflow definition, problems were {str(e)}")
+
+    return dsl
 
 
 def validate_and_store_pvep_in_db(

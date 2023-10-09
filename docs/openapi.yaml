@@ -310,6 +310,24 @@ definitions:
         description: The name of the input file
         type: string
     type: object
+  internal-experiment:
+    properties:
+      pvep:
+        allOf:
+        - $ref: '#/definitions/ve'
+        description: The Parameterised Virtual Experiment Package that parameterizes
+          the execution of the workflow
+      workflow:
+        allOf:
+        - $ref: '#/definitions/internal-experiment-workflow'
+        description: The definition of the workflow
+    type: object
+  internal-experiment-workflow:
+    properties:
+      dsl:
+        description: The dictionary representing an experiment in DSL format
+        type: object
+    type: object
   mount-volume:
     properties:
       applicationDependency:
@@ -1672,6 +1690,20 @@ paths:
       name: id
       required: true
       type: string
+  /internal-experiments/:
+    post:
+      operationId: post_relationships
+      parameters:
+      - in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/internal-experiment'
+      responses:
+        '200':
+          description: Success
+      tags:
+      - internal-experiments
   /query/experiments/:
     post:
       operationId: post_query_experiments
@@ -1914,3 +1946,6 @@ tags:
 - name: relationships
 - description: Operations to interact with workflow software stack URLs
   name: url-map
+- description: Operations to create an experiment whose workflow is hosted in the
+    internal storage
+  name: internal-experiments

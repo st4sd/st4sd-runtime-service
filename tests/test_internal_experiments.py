@@ -5,8 +5,7 @@
 
 
 import os
-import random
-import string
+import pathlib
 import typing
 
 import pytest
@@ -24,6 +23,8 @@ import apis.storage.actuators.local
 import apis.storage.actuators.memory
 import apis.storage.actuators.s3
 import apis.storage.downloader
+
+import experiment.model.frontends.dsl
 
 
 internal_storage_s3 = pytest.mark.skipif("not config.getoption('internal_storage_s3')")
@@ -96,15 +97,32 @@ def simple_dsl2() -> typing.Dict[str, typing.Any]:
     # VV: FIXME Use DSL 2.0 here
     return yaml.safe_load(
         """
-        variables:
-          default:
-            global:
-                foo: bar
+        entrypoint:
+          entry-instance: main
+          execute:
+          - target: <entry-instance>
+            args:
+              foo: bar
+        workflows:
+        - signature:
+            name: main
+            parameters:
+            - name: foo
+              default: hello world
+          steps:
+            hello: echo
+          execute:
+          - target: <hello>
+            args:
+              message: "%(foo)s"
         components:
-          - name: hello
-            command:
-              executable: echo
-              arguments: "%(foo)s"
+        - signature:
+            name: echo
+            parameters:
+            - name: message
+          command:
+            executable: echo
+            arguments: "%(message)s"
         """
     )
 
@@ -196,10 +214,10 @@ def test_internal_experiment_simple(
         "initialized/", "initialized/0.yaml", "initialized/1.yaml",
         # VV: The code will upload the file experiments/example/conf/flowir_package.yaml (DSL 2.0)
         "experiments/", "experiments/example/", "experiments/example/conf/",
-        "experiments/example/conf/flowir_package.yaml",
+        "experiments/example/conf/dsl.yaml",
     ])
 
-    contents = mock_s3_storage.read("experiments/example/conf/flowir_package.yaml").decode()
+    contents = mock_s3_storage.read("experiments/example/conf/dsl.yaml").decode()
     yaml_dsl = yaml.safe_dump(simple_dsl2, indent=2)
     assert contents == yaml_dsl
 
@@ -236,10 +254,8 @@ def test_internal_experiment_simple_real(
     simple_dsl2: typing.Dict[str, typing.Any],
     pvep_on_s3: typing.Dict[str, typing.Any],
 ):
-    rand = random.SystemRandom()
-    characters = string.digits + string.ascii_lowercase
-    rand_str = ''.join((rand.choice(characters) for _ in range(8)))
-    pvep_name = f"example-{rand_str}"
+    # VV: S3 deletes keys about 7 days after we ask COS to delete them - so let's use a static name
+    pvep_name = f"test_internal_experiment_simple_real"
 
     pvep = apis.models.virtual_experiment.ParameterisedPackage(**pvep_on_s3)
     pvep.metadata.package.name = pvep_name
@@ -275,6 +291,7 @@ def test_internal_experiment_simple_real(
         db_secrets=db_secrets,
         db_experiments=db_experiments,
         package_source="default-s3-secret",
+        dest_path=pathlib.Path("unit-tests-experiments")
     )
 
     assert pvep.base.packages[0].source.s3.security.credentials.valueFrom.dict(exclude_none=True) == {
@@ -283,9 +300,9 @@ def test_internal_experiment_simple_real(
         'secretName': 'default-s3-secret'
     }
 
-    assert sorted(pvep.base.packages[0].source.s3.location.dict(exclude_none=True)) == ["bucket", "endpoint"]
-    contents = s3_storage.read(f"experiments/{pvep_name}/conf/flowir_package.yaml").decode()
-    s3_storage.remove(f"experiments/{pvep_name}/")
+    assert sorted(pvep.base.packages[0].source.s3.location.dict(exclude_none=True)) == ["bucket", "endpoint", "region"]
+    contents = s3_storage.read(f"unit-tests-experiments/{pvep_name}/conf/dsl.yaml").decode()
+    s3_storage.remove(f"unit-tests-experiments/{pvep_name}/")
 
     yaml_dsl = yaml.safe_dump(simple_dsl2, indent=2)
     assert contents == yaml_dsl
@@ -301,3 +318,48 @@ def test_internal_experiment_simple_real(
             }
         ]
     }
+
+
+def test_recover_dsl_from_internal_experiment(
+        output_dir: str,
+        simple_dsl2: typing.Dict[str, typing.Any],
+        pvep_on_s3: typing.Dict[str, typing.Any],
+        mock_s3_storage: apis.storage.actuators.memory.InMemoryStorage,
+):
+    pvep = apis.models.virtual_experiment.ParameterisedPackage(**pvep_on_s3)
+    db_secrets = apis.db.secrets.DatabaseSecrets(db_path=os.path.join(output_dir, "secrets.db"))
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(db_path=os.path.join(output_dir, "experiments.db"))
+
+    with db_secrets:
+        db_secrets.secret_create(
+            apis.db.secrets.Secret(
+                name="default-s3-secret",
+                data={
+                    "S3_BUCKET": "a-bucket",
+                    "S3_ENDPOINT": "https://my.endpoint",
+                    "S3_ACCESS_KEY_ID": "access-key-id",
+                    "S3_SECRET_ACCESS_KEY": "secret-access-key",
+                    "S3_REGION": "region"
+                }
+            )
+        )
+
+    pvep = apis.kernel.internal_experiments.upsert_internal_experiment(
+        dsl2_definition=simple_dsl2,
+        pvep=pvep,
+        db_secrets=db_secrets,
+        db_experiments=db_experiments,
+        package_source="default-s3-secret",
+    )
+
+    download = apis.storage.PackagesDownloader(pvep, db_secrets=db_secrets)
+
+    recons_dsl = apis.kernel.experiments.api_get_experiment_dsl(
+        pvep=pvep,
+        packages=download
+    )
+
+    orig_namespace = experiment.model.frontends.dsl.Namespace(**simple_dsl2)
+    rc_namespace = experiment.model.frontends.dsl.Namespace(**recons_dsl)
+
+    assert rc_namespace.dict(by_alias=True) == orig_namespace.dict(by_alias=True)
