@@ -363,3 +363,43 @@ def test_recover_dsl_from_internal_experiment(
     rc_namespace = experiment.model.frontends.dsl.Namespace(**recons_dsl)
 
     assert rc_namespace.dict(by_alias=True) == orig_namespace.dict(by_alias=True)
+
+
+def test_auto_pvep_for_simple(
+    simple_dsl2: typing.Dict[str, typing.Any],
+):
+    pvep = apis.kernel.internal_experiments.generate_pvep_for_dsl(
+        dsl2_definition=simple_dsl2,
+    )
+
+    # VV:
+    expected_registry = {
+        'data': [],
+        'executionOptionsDefaults': {
+            'variables': [
+                {'name': 'foo',
+                 'valueFrom': [
+                     {
+                         # VV: In this DSL workflow, there's 1 parameter that the entrypoint sets
+                         'value': 'bar',
+                         'platform': 'default'
+                     }
+                 ]
+                 }
+            ]
+        },
+        'inputs': [],
+        # VV: There's only one platform for **ALL** DSL workflows
+        'platforms': ['default']
+    }
+
+    assert pvep.metadata.registry.dict(exclude={
+        "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted"
+    }) == expected_registry
+
+    # VV: No parameterisation at all
+    assert pvep.parameterisation.presets.variables == []
+    assert pvep.parameterisation.presets.data == []
+    assert pvep.parameterisation.executionOptions.variables == []
+    assert pvep.parameterisation.executionOptions.data == []
+

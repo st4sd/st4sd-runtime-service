@@ -100,7 +100,7 @@ class BasePackageSourceDataset(BasePackageSource):
     @validator('security', always=True)
     def set_default_security(cls, value: DatasetInfo | None, values: Dict[str, Any]) -> DatasetInfo:
         if value is None:
-            return values['location']
+            return values.get('location')
 
 
 class DependencyImageRegistry(apis.models.common.Digestable):

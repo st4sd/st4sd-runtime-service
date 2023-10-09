@@ -30,6 +30,14 @@ import experiment.model.errors
 import apis.runtime.package
 
 
+class S3StorageSecret(apis.models.common.Digestable):
+    S3_BUCKET: str
+    S3_ENDPOINT: str
+    S3_ACCESS_KEY_ID: typing.Optional[str] = None
+    S3_SECRET_ACCESS_KEY: typing.Optional[str] = None
+    S3_REGION: typing.Optional[str] = None
+
+
 def validate_dsl(
     dsl2_definition: typing.Dict[str, typing.Any],
 ):
@@ -61,10 +69,31 @@ def validate_dsl(
         } for e in errors])
 
 
+def generate_pvep_for_dsl(
+    dsl2_definition: typing.Dict[str, typing.Any],
+) -> apis.models.virtual_experiment.ParameterisedPackage:
+    """Generates the default PVEP for a DSL 2 workflow
+
+    Args:
+        dsl2_definition:
+            the DSL 2.0 definition
+
+    Returns:
+        A default parameterised virtual experiment package definition
+    """
+    # VV: This is just a dummy PVEP with a name and a base package, everything, everything else will be auto generated
+    pvep = apis.models.virtual_experiment.ParameterisedPackage(
+        base=apis.models.virtual_experiment.VirtualExperimentBase(packages=[{ "source": {}}])
+    )
+    pvep.metadata.package.name = "anonymous"
+
+    return validate_internal_experiment(dsl2_definition=dsl2_definition, pvep=pvep)
+
+
 def validate_internal_experiment(
     dsl2_definition: typing.Dict[str, typing.Any],
     pvep: apis.models.virtual_experiment.ParameterisedPackage,
-):
+) -> apis.models.virtual_experiment.ParameterisedPackage:
     """Validates a DSL 2.0 specification against its PVEP
 
     Args:
@@ -72,6 +101,9 @@ def validate_internal_experiment(
             the DSL 2.0 definition
         pvep:
             The parameterised virtual experiment package definition
+
+    Returns:
+        The auto-updated PVEP
 
     Raises:
         apis.models.errors.InvalidModelError:
@@ -86,9 +118,14 @@ def validate_internal_experiment(
 
     try:
         concrete = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+        concrete.validate()
     except experiment.model.errors.FlowIRConfigurationErrors as e:
         raise apis.models.errors.InvalidModelError("Invalid DSL definition", [
             {"problem": str(e)} for e in e.underlyingErrors
+        ])
+    except experiment.model.errors.DSLInvalidError as e:
+        raise apis.models.errors.InvalidModelError("Invalid DSL definition", [
+            {"problem": str(e)} for e in e.underlying_errors
         ])
 
     pvep = pvep.copy(deep=True)
@@ -111,7 +148,7 @@ def validate_internal_experiment(
     )
     apis.runtime.package.validate_parameterised_package(ve=pvep, metadata=metadata)
 
-
+    return pvep
 
 
 def store_internal_experiment(
@@ -212,13 +249,6 @@ def point_base_package_to_s3_storage(
     ]
 
     return pvep
-
-class S3StorageSecret(apis.models.common.Digestable):
-    S3_BUCKET: str
-    S3_ENDPOINT: str
-    S3_ACCESS_KEY_ID: typing.Optional[str] = None
-    S3_SECRET_ACCESS_KEY: typing.Optional[str] = None
-    S3_REGION: typing.Optional[str] = None
 
 
 def get_s3_internal_storage_secret(

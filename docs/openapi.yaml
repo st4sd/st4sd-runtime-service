@@ -55,24 +55,6 @@ definitions:
     - endpoint
     - secretAccessKey
     type: object
-  dsl:
-    properties:
-      components:
-        description: An array of component blueprints
-        items:
-          description: One component blueprint
-          type: object
-        type: array
-      entrypoint:
-        description: The entrypoint definition
-        type: object
-      workflows:
-        description: An array of workflow definition
-        items:
-          description: One workflow blueprint
-          type: object
-        type: array
-    type: object
   executionoptiondefaults:
     properties:
       variables:
@@ -635,6 +617,30 @@ definitions:
     required:
     - bucketPath
     - credentials
+    type: object
+  utilities-dsl:
+    properties:
+      components:
+        description: An array of component blueprints
+        items:
+          description: One component blueprint
+          type: object
+        type: array
+      entrypoint:
+        description: The entrypoint definition
+        type: object
+      workflows:
+        description: An array of workflow definition
+        items:
+          description: One workflow blueprint
+          type: object
+        type: array
+    type: object
+  utilities-pvep:
+    properties:
+      dsl:
+        description: The DSL 2.0 definition of a workflow
+        type: object
     type: object
   valueinplatform:
     properties:
@@ -1949,10 +1955,27 @@ paths:
         name: payload
         required: true
         schema:
-          $ref: '#/definitions/dsl'
+          $ref: '#/definitions/utilities-dsl'
       responses:
         '200':
           description: Success
+      summary: Validates a DSL workflow and its associated Parameterised Virtual Experiment
+        Package (PVEP) definition
+      tags:
+      - utilities
+  /utilities/pvep/:
+    post:
+      operationId: post_utility_pvep
+      parameters:
+      - in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/utilities-pvep'
+      responses:
+        '200':
+          description: Success
+      summary: Generates the default PVEP for a DSL workflow
       tags:
       - utilities
 produces:

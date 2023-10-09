@@ -1510,7 +1510,7 @@ def access_and_validate_virtual_experiment_packages(
 def validate_parameterised_package(
         ve: apis.models.virtual_experiment.ParameterisedPackage,
         metadata: apis.models.virtual_experiment.VirtualExperimentMetadata,
-):
+) -> apis.models.virtual_experiment.VirtualExperimentMetadata:
     """Validates a Parameterised Virtual Experiment Package and modifies it (e.g. add createdOn and digest)
 
     Arguments:
@@ -1543,3 +1543,5 @@ def validate_parameterised_package(
         logger.warning(f"Run into {e} while adding parameterised virtual experiment package to database. "
                        f"Traceback: {traceback.format_exc()}")
         raise apis.models.errors.ApiError(f"Unable to add experiment to database due to {e}")
+
+    return metadata

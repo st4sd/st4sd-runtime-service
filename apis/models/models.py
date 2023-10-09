@@ -1508,7 +1508,7 @@ api_utilities = Namespace(
 )
 
 m_utilities_dsl = api_utilities.model(
-    "dsl",
+    "utilities-dsl",
     {
         "entrypoint": fields.Raw(description="The entrypoint definition"),
         "workflows": fields.List(
@@ -1519,6 +1519,16 @@ m_utilities_dsl = api_utilities.model(
             fields.Raw(description="One component blueprint"),
             description="An array of component blueprints"
         ),
+    },
+    description="The DSL 2 definition"
+)
+
+
+# VV: m_utilities_pvep as in "the payload for /utilities/pvep/"
+m_utilities_pvep = api_utilities.model(
+    "utilities-pvep",
+    {
+        "dsl": fields.Raw(description="The DSL 2.0 definition of a workflow")
     },
     description="The DSL 2 definition"
 )
