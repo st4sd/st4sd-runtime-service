@@ -55,6 +55,24 @@ definitions:
     - endpoint
     - secretAccessKey
     type: object
+  dsl:
+    properties:
+      components:
+        description: An array of component blueprints
+        items:
+          description: One component blueprint
+          type: object
+        type: array
+      entrypoint:
+        description: The entrypoint definition
+        type: object
+      workflows:
+        description: An array of workflow definition
+        items:
+          description: One workflow blueprint
+          type: object
+        type: array
+    type: object
   executionoptiondefaults:
     properties:
       variables:
@@ -1692,7 +1710,7 @@ paths:
       type: string
   /internal-experiments/:
     post:
-      operationId: post_relationships
+      operationId: post_internal_experiments
       parameters:
       - in: body
         name: payload
@@ -1923,6 +1941,20 @@ paths:
       name: service
       required: true
       type: string
+  /utilities/dsl/:
+    post:
+      operationId: post_utility_dsl
+      parameters:
+      - in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/dsl'
+      responses:
+        '200':
+          description: Success
+      tags:
+      - utilities
 produces:
 - application/json
 responses:
@@ -1933,19 +1965,21 @@ responses:
 tags:
 - description: Operations to interact with authorization token(s)
   name: authorisation
-- description: Datashim related operations
-  name: datasets
 - description: Experiments related operations
   name: experiments
-- description: Operations to view/create/edit imagePullSecrets
-  name: image-pull-secrets
+- description: Operations to create an experiment whose workflow is hosted in the
+    internal storage
+  name: internal-experiments
 - description: Instances of Experiments related operations
   name: instances
+- description: Operations to view/create/edit imagePullSecrets
+  name: image-pull-secrets
 - description: Query operations
   name: query
 - name: relationships
 - description: Operations to interact with workflow software stack URLs
   name: url-map
-- description: Operations to create an experiment whose workflow is hosted in the
-    internal storage
-  name: internal-experiments
+- description: Datashim related operations
+  name: datasets
+- description: Utility operations
+  name: utilities

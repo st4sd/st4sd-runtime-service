@@ -88,5 +88,5 @@ class InternalExperiments(Resource):
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while registering internal-experiment "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(500, f"Internal error while registering relationship "
+            api.abort(500, f"Internal error while registering internal-experiment "
                            f"- contact the administrator of this ST4SD deployment", problem=str(e))

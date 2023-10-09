@@ -29,6 +29,38 @@ import experiment.model.errors
 
 import apis.runtime.package
 
+
+def validate_dsl(
+    dsl2_definition: typing.Dict[str, typing.Any],
+):
+    """Validates a DSl 2.0 definition of a workflow
+
+    Args:
+        dsl2_definition:
+            the DSL 2.0 definition
+
+    Raises:
+        apis.models.errors.InvalidModelError:
+            If the DSL is invalid
+    """
+    try:
+        namespace = experiment.model.frontends.dsl.Namespace(**dsl2_definition)
+    except pydantic.ValidationError as e:
+        raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=e.errors())
+
+    try:
+        flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
+    except experiment.model.errors.DSLInvalidError as e:
+        raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=e.errors())
+
+    errors = flowir.validate()
+
+    if errors:
+        raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=[{
+            "problem": str(e)
+        } for e in errors])
+
+
 def validate_internal_experiment(
     dsl2_definition: typing.Dict[str, typing.Any],
     pvep: apis.models.virtual_experiment.ParameterisedPackage,

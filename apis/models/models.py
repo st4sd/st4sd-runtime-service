@@ -1498,3 +1498,27 @@ m_internal_experiment = api_internal_experiments.model(
         )
     }
 )
+
+
+############################ Utilities ############################
+
+api_utilities = Namespace(
+    "utilities",
+    description="Utility operations"
+)
+
+m_utilities_dsl = api_utilities.model(
+    "dsl",
+    {
+        "entrypoint": fields.Raw(description="The entrypoint definition"),
+        "workflows": fields.List(
+            fields.Raw(description="One workflow blueprint"),
+            description="An array of workflow definition"
+        ),
+        "components": fields.List(
+            fields.Raw(description="One component blueprint"),
+            description="An array of component blueprints"
+        ),
+    },
+    description="The DSL 2 definition"
+)
