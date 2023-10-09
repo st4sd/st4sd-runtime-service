@@ -96,7 +96,7 @@ LOCAL_STORAGE = EnvVar("LOCAL_STORAGE", os.getcwd()).value
 # VV: Contains the name of a secret which includes the keys:
 # S3_ACCESS_KEY_ID
 # S3_SECRET_ACCESS_KEY
-# S3_END_POINT
+# S3_ENDPOINT
 # S3_BUCKET
 # S3_PREFIX
 # When set, it switches on the `/internal-experiments/` APIs
