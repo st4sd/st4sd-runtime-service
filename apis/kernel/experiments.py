@@ -29,9 +29,12 @@ import apis.storage
 import apis.runtime.package
 import utils
 
+import experiment.model.conf
 import experiment.model.storage
 import experiment.model.graph
 import experiment.model.errors
+
+import experiment.model.frontends.dsl
 
 import os
 
@@ -252,11 +255,18 @@ def api_get_experiment_dsl(
                 path = download.get_location_of_package(pvep.base.packages[0].name)
                 package = experiment.model.storage.ExperimentPackage.packageFromLocation(
                     path, platform=platform_name, primitive=True, variable_substitute=False)
-                graph = experiment.model.graph.WorkflowGraph.graphFromPackage(
-                    package, platform=platform_name, primitive=True, variable_substitute=False,
-                    createInstanceConfiguration=False, updateInstanceConfiguration=False, validate=True
-                )
-                dsl = graph.to_dsl()
+
+                if isinstance(package.configuration, experiment.model.conf.DSLExperimentConfiguration):
+                    conf: experiment.model.conf.DSLExperimentConfiguration = package.configuration
+                    namespace = conf.dsl_namespace
+                    experiment.model.frontends.dsl.auto_generate_entrypoint(namespace)
+                    dsl = namespace.dict(by_alias=True)
+                else:
+                    graph = experiment.model.graph.WorkflowGraph.graphFromPackage(
+                        package, platform=platform_name, primitive=True, variable_substitute=False,
+                        createInstanceConfiguration=False, updateInstanceConfiguration=False, validate=True
+                    )
+                    dsl = graph.to_dsl()
         elif len(pvep.base.packages) > 1:
             # VV: FIXME This is a hack, the derived packages currently live on a PVC
             path = os.path.join(

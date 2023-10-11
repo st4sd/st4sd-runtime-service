@@ -94,7 +94,6 @@ def test_point_internal_experiment_to_s3(pvep_on_s3: typing.Dict[str, typing.Any
 
 @pytest.fixture()
 def simple_dsl2() -> typing.Dict[str, typing.Any]:
-    # VV: FIXME Use DSL 2.0 here
     return yaml.safe_load(
         """
         entrypoint:
@@ -115,6 +114,37 @@ def simple_dsl2() -> typing.Dict[str, typing.Any]:
           - target: <hello>
             args:
               message: "%(foo)s"
+        components:
+        - signature:
+            name: echo
+            parameters:
+            - name: message
+          command:
+            executable: echo
+            arguments: "%(message)s"
+        """
+    )
+
+
+@pytest.fixture()
+def simple_dsl2_with_inputs() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load(
+        """
+        entrypoint:
+          entry-instance: main
+          execute:
+          - target: <entry-instance>
+        workflows:
+        - signature:
+            name: main
+            parameters:
+            - name: input.my-inputs.csv
+          steps:
+            hello: echo
+          execute:
+          - target: <hello>
+            args:
+              message: "%(input.my-inputs.csv)s:output"
         components:
         - signature:
             name: echo
@@ -365,6 +395,70 @@ def test_recover_dsl_from_internal_experiment(
     assert rc_namespace.dict(by_alias=True) == orig_namespace.dict(by_alias=True)
 
 
+def test_recover_dsl_from_internal_experiment_with_input_params(
+        output_dir: str,
+        simple_dsl2_with_inputs: typing.Dict[str, typing.Any],
+        pvep_on_s3: typing.Dict[str, typing.Any],
+        mock_s3_storage: apis.storage.actuators.memory.InMemoryStorage,
+):
+    pvep = apis.models.virtual_experiment.ParameterisedPackage(**pvep_on_s3)
+    db_secrets = apis.db.secrets.DatabaseSecrets(db_path=os.path.join(output_dir, "secrets.db"))
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(db_path=os.path.join(output_dir, "experiments.db"))
+
+    with db_secrets:
+        db_secrets.secret_create(
+            apis.db.secrets.Secret(
+                name="default-s3-secret",
+                data={
+                    "S3_BUCKET": "a-bucket",
+                    "S3_ENDPOINT": "https://my.endpoint",
+                    "S3_ACCESS_KEY_ID": "access-key-id",
+                    "S3_SECRET_ACCESS_KEY": "secret-access-key",
+                    "S3_REGION": "region"
+                }
+            )
+        )
+
+    pvep = apis.kernel.internal_experiments.upsert_internal_experiment(
+        dsl2_definition=simple_dsl2_with_inputs,
+        pvep=pvep,
+        db_secrets=db_secrets,
+        db_experiments=db_experiments,
+        package_source="default-s3-secret",
+    )
+
+    download = apis.storage.PackagesDownloader(pvep, db_secrets=db_secrets)
+
+    recons_dsl = apis.kernel.experiments.api_get_experiment_dsl(
+        pvep=pvep,
+        packages=download
+    )
+
+    orig_namespace = experiment.model.frontends.dsl.Namespace(**simple_dsl2_with_inputs)
+    rc_namespace = experiment.model.frontends.dsl.Namespace(**recons_dsl)
+
+    rc_sans_entrypoint = rc_namespace.dict(by_alias=True)
+    orig_sans_entrypoint = orig_namespace.dict(by_alias=True)
+
+    del rc_sans_entrypoint["entrypoint"]
+    del orig_sans_entrypoint["entrypoint"]
+
+    assert rc_sans_entrypoint == orig_sans_entrypoint
+
+    assert rc_namespace.entrypoint.dict(by_alias=True) == {
+        "entry-instance": "main",
+        "execute": [
+            {
+                "target": "<entry-instance>",
+                "args": {
+                    "input.my-inputs.csv": "input/my-inputs.csv"
+                }
+            }
+        ]
+    }
+
+
+
 def test_auto_pvep_for_simple(
     simple_dsl2: typing.Dict[str, typing.Any],
 ):
@@ -372,7 +466,6 @@ def test_auto_pvep_for_simple(
         dsl2_definition=simple_dsl2,
     )
 
-    # VV:
     expected_registry = {
         'data': [],
         'executionOptionsDefaults': {
