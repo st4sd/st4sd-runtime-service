@@ -6,6 +6,7 @@
 
 import os
 import pathlib
+import random
 import typing
 
 import pytest
@@ -27,6 +28,8 @@ import apis.storage.downloader
 import experiment.model.frontends.flowir
 import experiment.model.frontends.dsl
 
+import random
+import string
 
 internal_storage_s3 = pytest.mark.skipif("not config.getoption('internal_storage_s3')")
 
@@ -285,8 +288,10 @@ def test_internal_experiment_simple_real(
     simple_dsl2: typing.Dict[str, typing.Any],
     pvep_on_s3: typing.Dict[str, typing.Any],
 ):
-    # VV: S3 deletes keys about 7 days after we ask COS to delete them - so let's use a static name
-    pvep_name = f"test_internal_experiment_simple_real"
+    rand = random.Random()
+    characters = string.ascii_letters + string.digits
+    suffix = ''.join((rand.choice(characters) for x in range(10)))
+    pvep_name = f"test_internal_experiment_simple_real-{suffix}"
 
     pvep = apis.models.virtual_experiment.ParameterisedPackage(**pvep_on_s3)
     pvep.metadata.package.name = pvep_name

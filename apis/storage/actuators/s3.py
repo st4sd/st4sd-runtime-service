@@ -128,7 +128,7 @@ class S3Storage(Storage):
     def listdir(self, path: typing.Union[pathlib.Path, str]) -> typing.Iterator[PathInfo]:
         client = self.client()
         path = self.as_posix(path)
-        if path.endswith("/"):
+        if not path.endswith("/"):
             path = path + "/"
 
         path = path.lstrip("/")
@@ -169,7 +169,7 @@ class S3Storage(Storage):
         to_delete = []
 
         if self.isdir(path):
-            if path.endswith("/"):
+            if not path.endswith("/"):
                 path = path + "/"
 
             if path.startswith("/"):
@@ -187,7 +187,10 @@ class S3Storage(Storage):
             to_delete = [path]
 
         if to_delete:
-            client.delete_objects(Bucket=self.bucket, Delete={"Objects": [{"Key": key} for key in to_delete]})
+            num_to_delete = len(to_delete)
+            for start in range(0, num_to_delete, 1000):
+                chunk = to_delete[start: min(start+1000, num_to_delete)]
+                client.delete_objects(Bucket=self.bucket, Delete={"Objects": [{"Key": key} for key in chunk]})
 
     def store_to_file(self, src: typing.Union[pathlib.Path, str], dest: typing.Union[pathlib.Path, str]):
         """Stores a @src to a @dest file on the local storage"""
