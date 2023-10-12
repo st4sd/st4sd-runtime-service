@@ -392,4 +392,5 @@ def upsert_internal_experiment(
         package_metadata_collection=download,
         parameterised_package=pvep,
         db=db_experiments,
+        is_internal_experiment=True
     )

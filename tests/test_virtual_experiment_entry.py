@@ -458,7 +458,7 @@ def test_check_metadata_registry_platforms(flowir_fixture_name: str,
                                            request):
     # AP - pytest inbuilt to get fixture by name
     wf_flowir = request.getfixturevalue(flowir_fixture_name)
-    wf_ve = request.getfixturevalue(ve_fixture_name)
+    wf_ve: apis.models.virtual_experiment.ParameterisedPackage = request.getfixturevalue(ve_fixture_name)
 
     #
     flowir = yaml.load(wf_flowir, Loader=yaml.FullLoader)
@@ -484,9 +484,12 @@ def test_check_metadata_registry_platforms(flowir_fixture_name: str,
             prefix_paths=pkg_location, config=apis.models.virtual_experiment.BasePackageConfig(),
         )})
 
+    wf_ve.metadata.package.keywords.append("internal-experiment")
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
             apis.kernel.experiments.validate_and_store_pvep_in_db(collection, wf_ve, db)
             res = db.query_identifier(wf_ve.metadata.package.name)
             retrieved_pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(res[0])
             assert sorted(retrieved_pvep.metadata.registry.platforms) == sorted(expected_platforms)
+
+            assert "internal-experiment" not in retrieved_pvep.metadata.package.keywords

@@ -33,6 +33,7 @@ import experiment.model.conf
 import experiment.model.storage
 import experiment.model.graph
 import experiment.model.errors
+import experiment.model.frontends.flowir
 
 import experiment.model.frontends.dsl
 
@@ -217,6 +218,32 @@ def api_get_experiment(
     return ParameterisedPackageAndProblems(experiment=ve, problems=problems)
 
 
+def update_component_defaults_in_namespace(namespace: experiment.model.frontends.dsl.Namespace):
+    """Updates the component templates in a Namespace with FlowIR default values
+
+    Args:
+        namespace:
+            The namespace definition, updated in place
+    """
+    # VV: The canvas expects to find all fields in the DSL 2.0
+    # We don't want to store the DSL 2.0 with default values in it because they should be
+    # getting auto-added by FlowIR - therefore we manually inject them here
+    default_comp = experiment.model.frontends.flowir.FlowIR.default_component_structure()
+
+    del default_comp['stage']
+    del default_comp['references']
+    del default_comp['executors']
+
+    for idx, comp in enumerate(namespace.components):
+        comp = comp.dict(by_alias=True, exclude_unset=True, exclude_defaults=True)
+
+        experiment.model.frontends.flowir.FlowIR.override_object(
+            comp, copy.deepcopy(default_comp)
+        )
+
+        namespace.components[idx] = experiment.model.frontends.dsl.Component(**comp)
+
+
 def api_get_experiment_dsl(
     pvep: apis.models.virtual_experiment.ParameterisedPackage,
     packages: typing.Optional[apis.storage.PackageMetadataCollection],
@@ -260,6 +287,12 @@ def api_get_experiment_dsl(
                     conf: experiment.model.conf.DSLExperimentConfiguration = package.configuration
                     namespace = conf.dsl_namespace
                     experiment.model.frontends.dsl.auto_generate_entrypoint(namespace)
+
+                    # VV: The canvas expects to find all fields in the DSL 2.0
+                    # We don't want to store the DSL 2.0 with default values in it because they should be
+                    # getting auto-added by FlowIR - therefore we manually inject them here
+                    update_component_defaults_in_namespace(namespace)
+
                     dsl = namespace.dict(by_alias=True)
                 else:
                     graph = experiment.model.graph.WorkflowGraph.graphFromPackage(
@@ -295,7 +328,8 @@ def api_get_experiment_dsl(
 def validate_and_store_pvep_in_db(
     package_metadata_collection: apis.storage.PackageMetadataCollection,
     parameterised_package: apis.models.virtual_experiment.ParameterisedPackage,
-    db: apis.db.exp_packages.DatabaseExperiments
+    db: apis.db.exp_packages.DatabaseExperiments,
+    is_internal_experiment: bool = False,
 ) -> apis.models.virtual_experiment.ParameterisedPackage:
     """Validates a PVEP and updates the database
 
@@ -306,13 +340,16 @@ def validate_and_store_pvep_in_db(
             The PVEP of the experiment. The method will update this in place
         db:
             A reference to the experiments database
+        is_internal_experiment:
+            Whether the experiment is hosted on the internal storage
 
     Returns:
         The updated PVEP
     """
     metadata = apis.runtime.package.access_and_validate_virtual_experiment_packages(
         ve=parameterised_package,
-        packages=package_metadata_collection
+        packages=package_metadata_collection,
+        is_internal_experiment=is_internal_experiment
     )
     apis.runtime.package.validate_parameterised_package(ve=parameterised_package, metadata=metadata)
     with db:

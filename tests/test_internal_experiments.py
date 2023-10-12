@@ -24,6 +24,7 @@ import apis.storage.actuators.memory
 import apis.storage.actuators.s3
 import apis.storage.downloader
 
+import experiment.model.frontends.flowir
 import experiment.model.frontends.dsl
 
 
@@ -392,6 +393,7 @@ def test_recover_dsl_from_internal_experiment(
     orig_namespace = experiment.model.frontends.dsl.Namespace(**simple_dsl2)
     rc_namespace = experiment.model.frontends.dsl.Namespace(**recons_dsl)
 
+    apis.kernel.experiments.update_component_defaults_in_namespace(orig_namespace)
     assert rc_namespace.dict(by_alias=True) == orig_namespace.dict(by_alias=True)
 
 
@@ -427,6 +429,8 @@ def test_recover_dsl_from_internal_experiment_with_input_params(
         package_source="default-s3-secret",
     )
 
+    assert "internal-experiment" in pvep.metadata.package.keywords
+
     download = apis.storage.PackagesDownloader(pvep, db_secrets=db_secrets)
 
     recons_dsl = apis.kernel.experiments.api_get_experiment_dsl(
@@ -437,6 +441,7 @@ def test_recover_dsl_from_internal_experiment_with_input_params(
     orig_namespace = experiment.model.frontends.dsl.Namespace(**simple_dsl2_with_inputs)
     rc_namespace = experiment.model.frontends.dsl.Namespace(**recons_dsl)
 
+    apis.kernel.experiments.update_component_defaults_in_namespace(orig_namespace)
     rc_sans_entrypoint = rc_namespace.dict(by_alias=True)
     orig_sans_entrypoint = orig_namespace.dict(by_alias=True)
 

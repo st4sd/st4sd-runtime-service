@@ -1445,9 +1445,10 @@ def update_registry_metadata_of_parameterised_package(
 
 
 def access_and_validate_virtual_experiment_packages(
-        ve: apis.models.virtual_experiment.ParameterisedPackage,
-        packages: apis.storage.PackageMetadataCollection,
-        path_multipackage: Optional[str] = None,
+    ve: apis.models.virtual_experiment.ParameterisedPackage,
+    packages: apis.storage.PackageMetadataCollection,
+    path_multipackage: Optional[str] = None,
+    is_internal_experiment: bool = False,
 ) -> apis.models.virtual_experiment.StorageMetadata:
     """Validates a Parameterised Virtual Experiment Package modifies it (e.g. add createdOn and digest)
 
@@ -1464,6 +1465,8 @@ def access_and_validate_virtual_experiment_packages(
         path_multipackage:
             (Optional - only for multi-package PVEPs) Path to store the aggregate virtual experiment
             that is the result of a Synthesis step following instructions encoded in the multi-package PVEP
+        is_internal_experiment:
+            Whether the experiment is hosted on the internal storage
 
     Returns:
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
@@ -1472,6 +1475,16 @@ def access_and_validate_virtual_experiment_packages(
         apis.models.errors.ApiError:
             If the virtual experiment is invalid or inconsistent with the PVEP
     """
+    if is_internal_experiment:
+        if "internal-experiment" not in ve.metadata.package.keywords:
+            ve.metadata.package.keywords.append("internal-experiment")
+    else:
+        try:
+            ve.metadata.package.keywords.remove("internal-experiment")
+        except ValueError:
+            pass
+
+
     prepare_parameterised_package_for_download_definition(ve, db_secrets=packages.db_secrets)
 
     for package in ve.base.packages:
@@ -1508,15 +1521,16 @@ def access_and_validate_virtual_experiment_packages(
 
 
 def validate_parameterised_package(
-        ve: apis.models.virtual_experiment.ParameterisedPackage,
-        metadata: apis.models.virtual_experiment.VirtualExperimentMetadata,
+    ve: apis.models.virtual_experiment.ParameterisedPackage,
+    metadata: apis.models.virtual_experiment.VirtualExperimentMetadata,
 ) -> apis.models.virtual_experiment.VirtualExperimentMetadata:
     """Validates a Parameterised Virtual Experiment Package and modifies it (e.g. add createdOn and digest)
 
     Arguments:
-        ve: the parameterised virtual experiment package (PVEP) - updates this in memory
-        metadata: Metadata for the Virtual Experiment that Parameterised Virtual Experiment Package points to
-
+        ve:
+            the parameterised virtual experiment package (PVEP) - updates this in memory
+        metadata:
+            Metadata for the Virtual Experiment that Parameterised Virtual Experiment Package points to
     Returns:
         The metadata (concrete, datafiles, manifestData) of the virtual experiment defined by this PVEP
 
