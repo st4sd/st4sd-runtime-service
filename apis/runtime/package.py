@@ -744,7 +744,7 @@ class NamedPackage:
                             self._ve.get_packages_identifier())
 
     @property
-    def workflow_spec_package(self) -> Dict[str, str]:
+    def workflow_spec_package(self) -> Dict[str, Any]:
         base = self._ve.base.packages
 
         if len(base) > 1:
@@ -815,6 +815,42 @@ class NamedPackage:
 
             package['fromPath'] = os.path.normpath(path)
             package['withManifest'] = manifest
+        elif source.s3 is not None:
+            package['fromPath'] = (base.config.path or "").lstrip("/") or "/"
+            if base.config.manifestPath:
+                package['withManifest'] = base.config.manifestPath
+
+            s3 = {
+                'endpoint': {"value": source.s3.location.endpoint},
+                'bucket': {"value": source.s3.location.bucket},
+            }
+            if source.s3.location.region:
+                s3['region'] = {'value': source.s3.location.region}
+
+            if source.s3.security and source.s3.security.credentials:
+                credentials = source.s3.security.credentials
+                if credentials.value:
+                    if credentials.value.accessKeyID:
+                        s3['accessKeyId'] = {'value': credentials.value.accessKeyID}
+                    if credentials.value.secretAccessKey:
+                        s3['secretAccessKey'] = {'value': credentials.value.secretAccessKey}
+                elif credentials.valueFrom and credentials.valueFrom.secretName:
+                    if credentials.valueFrom.keyAccessKeyID:
+                        s3['accessKeyID'] = {
+                            'valueFrom': {
+                                'name': credentials.valueFrom.secretName,
+                                'key': credentials.valueFrom.keyAccessKeyID
+                            }
+                        }
+                    if credentials.valueFrom.keySecretAccessKey:
+                        s3['secretAccessKey'] = {
+                            'valueFrom': {
+                                'name': credentials.valueFrom.secretName,
+                                'key': credentials.valueFrom.keySecretAccessKey
+                            }
+                        }
+
+            package['s3'] = s3
         else:
             raise NotImplementedError(
                 f"We do not know how to generate a Workflow.spec.package for {type(source).__name__} source with keys "

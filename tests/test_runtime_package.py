@@ -30,6 +30,8 @@ import apis.runtime.package
 import apis.storage
 import tests.conftest
 
+import apis.kernel.internal_experiments
+
 
 
 package_from_files = tests.conftest.package_from_files
@@ -691,6 +693,106 @@ def test_package_workflow_git_plain(ve_sum_numbers: apis.models.virtual_experime
                                          'url': 'https://github.ibm.com/st4sd/sum-numbers.git',
                                          'fromPath': None,
                                          'withManifest': None},
+                             'resources': {'elaunchPrimary': {'cpu': '1', 'memory': '1Gi'}},
+                             'variables': [],
+                             'volumeMounts': [],
+                             'volumes': [],
+                             'workingVolume': {'name': 'working-volume',
+                                               'persistentVolumeClaim': {'claimName': package.pvc_working_volume}}
+                             }}
+
+
+
+def test_package_workflow_s3_plain(
+    ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage,
+    output_dir: str,
+):
+    ve_sum_numbers = ve_sum_numbers.copy(deep=True)
+
+    # VV: Echo the steps that the runtime-service follows to generate the base package for an internal experiment
+    db_secrets = apis.db.secrets.DatabaseSecrets(db_path=os.path.join(output_dir, "secrets.db"))
+
+    with db_secrets:
+        db_secrets.secret_create(
+            apis.db.secrets.Secret(
+                name="default-s3-secret",
+                data={
+                    "S3_BUCKET": "a-bucket",
+                    "S3_ENDPOINT": "https://my.endpoint",
+                    "S3_ACCESS_KEY_ID": "access-key-id",
+                    "S3_SECRET_ACCESS_KEY": "secret-access-key",
+                    "S3_REGION": "region"
+                }
+            )
+        )
+
+    package_source = apis.kernel.internal_experiments.generate_s3_package_source_from_secret(
+        secret_name="default-s3-secret",
+        db_secrets=db_secrets
+    )
+    ve_sum_numbers = apis.kernel.internal_experiments.point_base_package_to_s3_storage(
+        pvep=ve_sum_numbers,
+        credentials=package_source.security.credentials,
+        location=package_source.location,
+    )
+
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({})
+    package = apis.runtime.package.NamedPackage(
+        ve_sum_numbers,
+        namespace_presets,
+        payload_config)
+
+    spec = package.construct_k8s_workflow()
+
+    print(yaml.dump(spec))
+
+    # VV: Digest format is "${digest algorithm}x", find the first x (delimiter) and keep 6 chars after that
+    digest = ve_sum_numbers.metadata.registry.digest.split('x', 1)[1][:6]
+    constructed_name = f"{ve_sum_numbers.metadata.package.name}-{digest}"
+    assert spec['metadata']['name'].rsplit('-', 1)[0] == constructed_name
+
+    spec['metadata']['name'] = constructed_name
+
+    # VV: This contains a timestamp
+    instance_dir_name = f"{package.instance_name}.instance"
+
+    expected_package = {
+        'fromPath': 'experiments/http-sum-numbers',
+        's3': {
+            'bucket': {'value': 'a-bucket'},
+            'endpoint': {'value': 'https://my.endpoint'},
+            'region': {'value': 'region'},
+            'accessKeyID': {
+                'valueFrom': {
+                    'key': 'S3_ACCESS_KEY_ID',
+                    'name': 'default-s3-secret'
+                }
+            },
+            'secretAccessKey': {
+                'valueFrom': {
+                    'key': 'S3_SECRET_ACCESS_KEY',
+                    'name': 'default-s3-secret'}
+            }
+        }
+    }
+
+    assert spec == {'apiVersion': 'st4sd.ibm.com/v1alpha1',
+                    'kind': 'Workflow',
+                    'metadata': {'labels': {'rest-uid': package.rest_uid,
+                                            'workflow': package.rest_uid,
+                                            'st4sd-package-name': ve_sum_numbers.metadata.package.name,
+                                            'st4sd-package-digest': ve_sum_numbers.metadata.registry.digest},
+                                 'name': constructed_name},
+                    'spec': {'additionalOptions': package.runtime_args,
+                             'data': [],
+                             'env': [{'name': 'INSTANCE_DIR_NAME',
+                                      'value': instance_dir_name}],
+                             'image': 'res-st4sd-team-official-base-docker-local.artifactory.'
+                                      'swg-devops.com/st4sd-runtime-core',
+                             'imagePullSecrets': [],
+                             'inputs': [],
+                             'package': expected_package,
                              'resources': {'elaunchPrimary': {'cpu': '1', 'memory': '1Gi'}},
                              'variables': [],
                              'volumeMounts': [],
