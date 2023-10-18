@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import traceback
 
+import pydantic
 import werkzeug.exceptions
 from flask import request, current_app
 from flask_restx import Resource
 
 import apis.kernel.internal_experiments
 import apis.models.errors
-
+import apis.models.virtual_experiment
 
 api = apis.models.api_utilities
 
@@ -58,7 +59,9 @@ class UtilityDSL(Resource):
 class UtilityPVEP(Resource):
     @api.expect(apis.models.m_utilities_pvep)
     def post(self):
-        """Generates the default PVEP for a DSL workflow"""
+        """Generates the default Parameterised Virtual Experiment Package (PVEP) for a DSL workflow
+        starting from an optional PVEP template
+        """
         doc = request.get_json()
 
         try:
@@ -71,11 +74,20 @@ class UtilityPVEP(Resource):
                                    "of a workflow"
                     }
                 ])
+            template = None
 
-            pvep = apis.kernel.internal_experiments.generate_pvep_for_dsl(dsl)
+            if "pvep" in doc:
+                try:
+                    template = apis.models.virtual_experiment.ParameterisedPackage.validate(doc['pvep'])
+                except pydantic.ValidationError as e:
+                    raise apis.models.errors.InvalidModelError("Invalid payload field pvep", problems=e.errors())
+
+            pvep_and_changes = apis.kernel.internal_experiments.generate_pvep_for_dsl(
+                dsl2_definition=dsl, template=template)
 
             return {
-                "pvep": pvep.dict(by_alias=True, exclude_none=True),
+                "pvep": pvep_and_changes.pvep.dict(by_alias=True, exclude_none=True),
+                "changes": pvep_and_changes.changes,
                 "problems": []
             }
         except werkzeug.exceptions.HTTPException:

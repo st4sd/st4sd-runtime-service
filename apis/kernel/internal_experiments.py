@@ -69,17 +69,97 @@ def validate_dsl(
         } for e in errors])
 
 
+class PVEPForDSL:
+    def __init__(
+        self,
+        pvep: apis.models.virtual_experiment.ParameterisedPackage,
+        changes: typing.List[typing.Dict[str, typing.Any]]
+    ):
+        self.pvep = pvep
+        self.changes = changes
+
+
+class PVEPChange:
+    def __init__(self, message: str, location: typing.List[typing.Union[str, int]]):
+        self.message = message
+        self.location = location
+
+    def dict(self) -> typing.Dict[str, typing.Any]:
+        return {"message": self.message, "location": self.location}
+
+
+def _try_mirror_parameterisation(
+    source: typing.List[typing.Union[apis.models.common.Option, apis.models.common.OptionMany]],
+    destination: typing.List[typing.Union[apis.models.common.Option, apis.models.common.OptionMany]],
+    container_type: str,
+    setting_type: str,
+    available: typing.List[str],
+    changes: typing.List[typing.Dict[str, typing.Any]],
+):
+    for (idx, setting) in enumerate(source):
+        if setting.name not in available:
+            changes.append(
+                PVEPChange(message=f'Removed {container_type} for {setting_type.rstrip("s")} {setting.name}',
+                           location=["parameterisation", container_type, setting_type, idx]
+                           ).dict())
+        else:
+            destination.append(setting)
+            changes.append(
+                PVEPChange(message=f'Inherited {container_type} for {setting_type.rstrip("s")} {setting.name} '
+                                   f'from template',
+                           location=["parameterisation", container_type, setting_type, idx]
+                           ).dict())
+
+
+def _try_mirror_parameterisation_variable(
+    source: typing.List[typing.Union[apis.models.common.Option, apis.models.common.OptionMany]],
+    destination: typing.List[typing.Union[apis.models.common.Option, apis.models.common.OptionMany]],
+    container_type: str,
+    available_variables: typing.List[str],
+    changes: typing.List[typing.Dict[str, typing.Any]],
+):
+    return _try_mirror_parameterisation(
+        source=source,
+        destination=destination,
+        container_type=container_type,
+        setting_type="variables",
+        available=available_variables,
+        changes=changes,
+    )
+
+
+def _try_mirror_parameterisation_data(
+    source: typing.List[typing.Union[apis.models.common.Option, apis.models.common.OptionMany]],
+    destination: typing.List[typing.Union[apis.models.common.Option, apis.models.common.OptionMany]],
+    container_type: str,
+    available_data: typing.List[str],
+    changes: typing.List[typing.Dict[str, typing.Any]],
+):
+    return _try_mirror_parameterisation(
+        source=source,
+        destination=destination,
+        container_type=container_type,
+        setting_type="data",
+        available=available_data,
+        changes=changes,
+    )
+
+
+
 def generate_pvep_for_dsl(
     dsl2_definition: typing.Dict[str, typing.Any],
-) -> apis.models.virtual_experiment.ParameterisedPackage:
-    """Generates the default PVEP for a DSL 2 workflow
+    template: typing.Optional[apis.models.virtual_experiment.ParameterisedPackage],
+) -> PVEPForDSL:
+    """Generates the default parameterised virtual experiment package for a DSL 2 workflow using an optional template
 
     Args:
         dsl2_definition:
             the DSL 2.0 definition
+        template:
+            the parameterised virtual experiment package template
 
     Returns:
-        A default parameterised virtual experiment package definition
+        A default parameterised virtual experiment package definition along with any changes made to the template
     """
     # VV: This is just a dummy PVEP with a name and a base package, everything, everything else will be auto generated
     pvep = apis.models.virtual_experiment.ParameterisedPackage(
@@ -87,7 +167,62 @@ def generate_pvep_for_dsl(
     )
     pvep.metadata.package.name = "anonymous"
 
-    return validate_internal_experiment(dsl2_definition=dsl2_definition, pvep=pvep)
+    new_pvep = validate_internal_experiment(dsl2_definition=dsl2_definition, pvep=pvep)
+
+    new_pvep.metadata.registry.createdOn = None
+
+    changes = []
+
+    available_variables = [x.name for x in new_pvep.metadata.registry.executionOptionsDefaults.variables]
+    available_data = [x.name for x in new_pvep.metadata.registry.data]
+
+    if template:
+        changes.append(PVEPChange(message="Erased base.packages", location=["base", "packages"]).dict())
+        changes.append(PVEPChange(message="Updated metadata.registry", location= ["metadata", "registry"]).dict())
+        changes.append(
+            PVEPChange(message=f'Inherited metadata.package from template',location=["metadata", "package"]).dict())
+
+        new_pvep.metadata.package = template.metadata.package
+
+        if "internal-experiment" not in new_pvep.metadata.package.keywords:
+            new_pvep.metadata.package.keywords.append("internal-experiment")
+
+        _try_mirror_parameterisation_variable(
+            source=template.parameterisation.presets.variables,
+            destination=new_pvep.parameterisation.presets.variables,
+            container_type="presets",
+            available_variables=available_variables,
+            changes=changes
+        )
+
+        _try_mirror_parameterisation_variable(
+            source=template.parameterisation.executionOptions.variables,
+            destination=new_pvep.parameterisation.executionOptions.variables,
+            container_type="executionOptions",
+            available_variables=available_variables,
+            changes=changes
+        )
+
+        _try_mirror_parameterisation_data(
+            source=template.parameterisation.presets.data,
+            destination=new_pvep.parameterisation.presets.data,
+            container_type="presets",
+            available_data=available_data,
+            changes=changes
+        )
+
+        _try_mirror_parameterisation_data(
+            source=template.parameterisation.executionOptions.data,
+            destination=new_pvep.parameterisation.executionOptions.data,
+            container_type="executionOptions",
+            available_data=available_data,
+            changes=changes
+        )
+
+    return PVEPForDSL(
+        pvep = new_pvep,
+        changes = changes
+    )
 
 
 def validate_internal_experiment(
@@ -112,7 +247,7 @@ def validate_internal_experiment(
             If the DSL is not compatible with the PVEP
     """
     try:
-        namespace = experiment.model.frontends.dsl.Namespace(**dsl2_definition)
+        namespace = experiment.model.frontends.dsl.Namespace.validate(dsl2_definition)
     except pydantic.ValidationError as e:
         raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=e.errors())
 

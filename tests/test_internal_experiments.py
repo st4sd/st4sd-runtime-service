@@ -472,8 +472,9 @@ def test_recover_dsl_from_internal_experiment_with_input_params(
 def test_auto_pvep_for_simple(
     simple_dsl2: typing.Dict[str, typing.Any],
 ):
-    pvep = apis.kernel.internal_experiments.generate_pvep_for_dsl(
+    pvep_and_changes = apis.kernel.internal_experiments.generate_pvep_for_dsl(
         dsl2_definition=simple_dsl2,
+        template=None,
     )
 
     expected_registry = {
@@ -495,6 +496,7 @@ def test_auto_pvep_for_simple(
         # VV: There's only one platform for **ALL** DSL workflows
         'platforms': ['default']
     }
+    pvep = pvep_and_changes.pvep
 
     assert pvep.metadata.registry.dict(exclude={
         "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted"
@@ -506,3 +508,102 @@ def test_auto_pvep_for_simple(
     assert pvep.parameterisation.executionOptions.variables == []
     assert pvep.parameterisation.executionOptions.data == []
 
+
+def test_auto_update_pvep_for_simple(
+    simple_dsl2: typing.Dict[str, typing.Any],
+):
+    definition = yaml.safe_load("""
+    base:
+        packages:
+        - source:
+            s3:
+                security:
+                    credentials:
+                        value:
+                            accessKeyID: $accessKeyID
+                            secretAccessKey: $secretAccessKey
+                location:
+                    bucket: $bucket
+                    endpoint: https://end.point
+          config:
+              path: /experiments/old.package
+    parameterisation:
+        presets:
+            variables:
+            - name: doesNotExistAnyMore
+              value: does not matter
+            data:
+            - name: $data-preset-does-not-exist
+        executionOptions:
+            variables:
+            - name:  foo
+              value: keep this default value       
+    metadata:
+        package:
+            name: old
+            license: $license
+            maintainer: $maintainer
+        registry:
+            inputs:
+            - name: $input
+            data:
+            - name: $data-preset-does-not-exist
+    """)
+    template = apis.models.virtual_experiment.ParameterisedPackage(**definition)
+
+    pvep_and_changes = apis.kernel.internal_experiments.generate_pvep_for_dsl(
+        dsl2_definition=simple_dsl2,
+        template=template,
+    )
+
+    expected_registry = {
+        'data': [],
+        'executionOptionsDefaults': {
+            'variables': [
+                {'name': 'foo',
+                 'valueFrom': [
+                     {
+                         # VV: In this DSL workflow, there's 1 parameter that the entrypoint sets
+                         'value': 'bar',
+                         'platform': 'default'
+                     }
+                 ]
+                 }
+            ]
+        },
+        'inputs': [],
+        # VV: There's only one platform for **ALL** DSL workflows
+        'platforms': ['default']
+    }
+    pvep = pvep_and_changes.pvep
+    changes = pvep_and_changes.changes
+
+    assert changes == [
+        {'message': 'Erased base.packages', 'location': ["base", "packages"]},
+        {'message': 'Updated metadata.registry', 'location': ['metadata', 'registry']},
+        {'message': 'Inherited metadata.package from template', 'location': ["metadata", "package"]},
+        {'message': 'Removed presets for variable doesNotExistAnyMore',
+         'location': ['parameterisation', 'presets', 'variables', 0]},
+        {'location': ['parameterisation', 'executionOptions', 'variables', 0],
+         'message': 'Inherited executionOptions for variable foo from template'},
+        {'message': 'Removed presets for data $data-preset-does-not-exist',
+         'location': ['parameterisation', 'presets', 'data', 0]}
+    ]
+
+    assert pvep.metadata.registry.dict(exclude={
+        "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted"
+    }) == expected_registry
+
+    assert pvep.parameterisation.presets.variables == []
+    assert pvep.parameterisation.presets.data == []
+    assert pvep.parameterisation.executionOptions.data == []
+    assert len(pvep.parameterisation.executionOptions.variables) == 1
+
+    assert pvep.parameterisation.executionOptions.variables[0].dict(exclude_none=True) == {
+        "name": "foo",
+        "value": "keep this default value"
+    }
+
+    assert pvep.metadata.package.name == "old"
+
+    assert "internal-experiment" in pvep.metadata.package.keywords
