@@ -52,6 +52,13 @@ class ParameterisedPackageAndProblems(NamedTuple):
     problems: List[Dict[str, Any]]
 
 
+class SkeletonPayloadStart(NamedTuple):
+    payload: typing.Dict[str, typing.Any] = {}
+    magicValues: typing.Dict[str, typing.Any] = {}
+    problems: typing.List[typing.Dict[str, typing.Any]] = []
+    message: typing.Optional[str] = None
+
+
 # VV: TODO Refactor code to organize codes that APIs call so that the HTTP codes are just a proxy to methods
 def api_query_experiments(
         query: apis.models.query_experiment.QueryExperiment,
@@ -356,3 +363,190 @@ def validate_and_store_pvep_in_db(
         db.push_new_entry(parameterised_package)
 
     return parameterised_package
+
+
+def generate_experiment_start_skeleton_payload(
+    ve: apis.models.virtual_experiment.ParameterisedPackage,
+) -> SkeletonPayloadStart:
+    """Returns a skeleton payload to /experiments/<identifier>/start for an experiment
+
+    Args:
+        ve:
+            The parameterised virtual experiment package
+
+    Returns:
+        The skeleton payload along with a dictionary explaining magic values in the skeleton
+    """
+    ret = SkeletonPayloadStart()
+    lbl_download_s3_or_dataset = "{{OptionalS3OrDatasetDownload}}"
+    lbl_download_dataset = "{{OptionalDatasetForDownload}}"
+    lbl_download_s3 = "{{OptionalS3ForDownload}}"
+
+    def skeleton_file(
+        file_type: pydantic.typing.Literal['inputs', 'data'],
+        file_name: str,
+        idx: int,
+    ):
+        required = file_type == "inputs"
+        singular = file_type.rstrip("s")
+
+        if required:
+            content = ''.join(("{{", "Required", file_type.capitalize(), "_", file_name , "}}"))
+            ret.magicValues[content] = {
+                "message": f"You **must** set the content of the {singular} file {file_name} either directly, via "
+                           f"{file_type}[{idx}].content or by omitting the content dictionary and configuring the "
+                           f"payload to find the {singular} file in a S3 bucket. For the latter consult the "
+                           f"magicValue {lbl_download_s3_or_dataset}"
+            }
+        else:
+            content = ''.join(("{{", "Optional", file_type.capitalize(), "_", file_name, "}}"))
+            ret.magicValues[content] = {
+                "message": f"You **may** set the content of the {singular} file {file_name} either directly, via "
+                           f"{file_type}[{idx}].content or by omitting the content dictionary and configuring the "
+                           f"payload to find the {singular} file in a S3 bucket. For the latter consult the "
+                           f"magicValue {lbl_download_s3_or_dataset}. If you remove the field {file_type}[{idx}] "
+                           f"then the experiment will use the file that is in the workflow package of the experiment."
+            }
+
+        return {
+            "filename": file_name,
+            "content": content,
+        }
+
+    def skeleton_variable(
+        name: str,
+        default: typing.Optional[str],
+        choices: typing.Optional[typing.List[str]],
+        default_from_platform: typing.Dict[str, str],
+    ) -> str:
+        magic_value = ''.join(("{{", "Optional", "Variable_", name, "}}"))
+
+        ret.magicValues[magic_value] = {
+            "message": f"You **may** set the field variables.{name} to override its default value.",
+            "choices": choices,
+            "defaultFromPlatform": default_from_platform,
+        }
+
+        if choices:
+            ret.magicValues[magic_value]["message"] += f" You **must** set the value of the field to one of {choices}."
+        else:
+            ret.magicValues[magic_value]["message"] += f" You **may** set the value of the field to any string."
+
+        if default is not None:
+            ret.magicValues[magic_value]["default"] = default
+
+            ret.magicValues[magic_value]["message"] += f" The default value of this variable is {default}"
+        elif len(default_from_platform) > 1:
+            ret.magicValues[magic_value]["message"] += (f" The default value of this variable depends on "
+                                                        f"experiment platform you select: {default_from_platform}")
+
+        return magic_value
+
+    # VV: Some experiments have inputs and data, the difference between these 2 is that you **must** provide inputs
+    # and you **may** override data files when they are listed in the executionOptions
+    # You have 2 ways to provide a file, either you provide the `(inputs or data)[$idx].content` field
+    # OR you configure the `s3` field
+    for col_type, collection in (
+        ("inputs", ve.metadata.registry.inputs),
+        ("data", ve.parameterisation.executionOptions.data)
+    ):
+        if not collection:
+            continue
+        ret.payload[col_type] = []
+
+        for index, file in enumerate(sorted(collection, key = lambda x: x.name)):
+            part = skeleton_file(file_type=col_type, file_name=file.name, idx=index)
+            ret.payload[col_type].append(part)
+
+    # VV: If there are any inputs or data files then just tell the user they may pick one of:
+    # the .content field of each inputs/data file, the S3 fields, or the s3.Dataset field
+    if "inputs" in ret.payload or "data" in ret.payload:
+        ret.payload['s3'] = {
+            'dataset': lbl_download_dataset,
+            'accessKeyID': lbl_download_s3,
+            'secretAccessKey': lbl_download_s3,
+            'bucket': lbl_download_s3,
+            'endpoint': lbl_download_s3,
+            'region': lbl_download_s3,
+        }
+
+        ret.magicValues[lbl_download_s3] = {
+            "message": "You **may** ask the runtime to download files from S3 if you do not use the .content field "
+                       "of entries in the inputs and data array. "
+                       f"If you pick to set {lbl_download_s3} fields then you must not set {lbl_download_dataset} "
+                       f"fields. "
+                       f"If you decide not to set {lbl_download_s3} fields then simply remove the fields from your "
+                       f"payload. "
+                       f"See also {lbl_download_s3_or_dataset}."
+        }
+
+        ret.magicValues[lbl_download_dataset] = {
+            "message": "You **may** ask the runtime to download files from an existing Datashim Dataset, "
+                       "if you do not use the .content field of entries in the inputs and data array. "
+                       f"If you pick to set {lbl_download_dataset} fields then you must not set {lbl_download_s3} "
+                       f"fields. "
+                       f"If you decide not to set {lbl_download_dataset} fields then simply remove the fields from your "
+                       f"payload. "
+                       f"See also {lbl_download_s3_or_dataset}."
+        }
+
+        if "inputs" in ret.payload and "data" in ret.payload:
+            prologue = "You **must** fill in the inputs field and **may** fill in the data field. "
+        elif "inputs" in ret.payload:
+            prologue = "You **must** fill in the inputs field. "
+        else:
+            prologue = "You **may** fill in the inputs field. "
+
+        ret.magicValues[lbl_download_s3_or_dataset] = {
+            "message": prologue + "You **may** use the respective [$index].content field to provide the value of the "
+                                  "filename OR you may ask the runtime to retrieve the contents of the files from "
+                                  "S3/Dataset. "
+                                  "The .content field is mutually exclusive with the S3/Dataset settings. "
+                                  "When you use S3/Dataset then the .filename field is used as the relative path "
+                                  "to the file inside the S3 bucket/Dataset."
+        }
+
+
+    if ve.parameterisation.executionOptions.variables:
+        ret.payload["variables"] = {}
+
+    if ve.parameterisation.presets.platform:
+        available_platforms = [ve.parameterisation.presets.platform]
+    else:
+        available_platforms = ve.parameterisation.executionOptions.platform
+
+    if available_platforms:
+        if len(available_platforms) > 1:
+            ret.payload["platform"] = "{{OptionalPlatform}}"
+            ret.magicValues[ret.payload["platform"]] = {
+                "message": f"You **may** configure the experiment platform using one of "
+                           f"the values {available_platforms}",
+                "choices": available_platforms,
+            }
+    else:
+        available_platforms = ["default"]
+
+    for variable in ve.parameterisation.executionOptions.variables:
+        choices = None
+        default = None
+
+        if variable.value is not None:
+            default = variable.value
+        elif variable.valueFrom:
+            default = variable.valueFrom[0].value
+            choices = [x.value for x in variable.valueFrom]
+
+        from_platform = {}
+
+        for v in ve.metadata.registry.executionOptionsDefaults.variables:
+            if v.name == variable.name:
+                for vp in v.valueFrom:
+                    if vp.platform in available_platforms:
+                        from_platform[vp.platform] = vp.value
+                break
+
+        ret.payload["variables"][variable.name] = skeleton_variable(
+            name=variable.name, default=default, choices=choices, default_from_platform=from_platform
+        )
+
+    return ret

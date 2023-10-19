@@ -1658,3 +1658,48 @@ class ExperimentStart(Resource):
         except Exception as e:
             current_app.logger.warning("Traceback: %s\nException: %s for %s" % (traceback.format_exc(), e, identifier))
             api.abort(500, message="Exception when creating instance %s - %s" % (identifier, e))
+
+
+
+@api.route('/<identifier>/start/payload/')
+@api.param('identifier', 'The package identifier. It must contain a $packageName and may include either '
+                         'a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`). If both suffixes are missing '
+                         'then the identifier implies the `:latest` tag suffix.')
+@api.response(404, 'Experiment not found')
+@api.response(500, 'Internal error while generating the experiment start payload')
+@api.response(200, "The payload skeleton with magicValues explaining it")
+class GetPayloadToStart(Resource):
+    def get(self, identifier: str):
+        """Returns a skeleton payload to /experiments/<identifier>/start for an experiment"""
+        try:
+            identifier = apis.models.common.PackageIdentifier(identifier).identifier
+
+            with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
+                docs = db.query_identifier(identifier)
+
+            if len(docs) == 0:
+                api.abort(404, message=f"No parameterised package {identifier}", unknownExperiment=identifier)
+            elif len(docs) > 1:
+                api.abort(400, message=f"Found too many parameterised packages {len(docs)} for your query {identifier}")
+
+            ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(docs[0])
+
+            skeleton = apis.kernel.experiments.generate_experiment_start_skeleton_payload(ve=ve)
+
+            return {
+                "payload": skeleton.payload,
+                "magicValues": skeleton.magicValues,
+                "problems": skeleton.problems,
+                "message": "Read the skeleton payload in .payload and consult the .magicValues for instructions on "
+                           "how to construct the payload that you will submit to start the experiment.",
+            }
+        except pydantic.ValidationError as e:
+            api.abort(400, "The experiment stored in the database is invalid", problems=e.errors())
+        except apis.models.errors.ApiError as e:
+            current_app.logger.warning("Traceback: %s\nException: %s for %s" % (traceback.format_exc(), e, identifier))
+            api.abort(400, f"Invalid request. {e}")
+        except werkzeug.exceptions.HTTPException:
+            raise
+        except Exception as e:
+            current_app.logger.warning("Traceback: %s\nException: %s for %s" % (traceback.format_exc(), e, identifier))
+            api.abort(500, message="Internal error while generating the skeleton payload of %s - %s" % (identifier, e))

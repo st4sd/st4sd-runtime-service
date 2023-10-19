@@ -1203,6 +1203,40 @@ mLambdaExperimentStart = api_experiments.model(
     },
 )
 
+# r_magic_value = api_experiments.model(
+#     "experiment-start-payload-skeleton-magic-values",
+#     {
+#         "message": fields.String(
+#             description="A human readable string which explains how this magic value should be used.", required=True),
+#         "choices": fields.List(
+#             fields.String(), required=False,
+#             description="If you decide to replace references to the magicValue you **must** use one of these choices",
+#         )
+#
+#     },
+#     description=""
+# )
+
+# r_skeleton_payload = api_experiments.model(
+#     "experiment-start-payload-skeleton",
+#     {
+#
+#         "message": fields.String(description="A human readable desription explaining the response"),
+#         "payload": fields.Raw(description="The payload skeleton", required=True),
+#         "magicValues": fields.Raw(
+#
+#         ),
+#         # "magicValues": fields.Nested(
+#         #     r_magic_value,
+#         #     required=True,
+#         #     description="Pairs of key: value where the key is a magicValue and the value contains instructions to "
+#         #                 "interpret the magicValue. The key of the magicValue may appear in the skeleton payload.",
+#         #
+#         # )
+#     },
+#     description=""
+# )
+
 ############################ Instances ############################
 
 api_instances = Namespace(

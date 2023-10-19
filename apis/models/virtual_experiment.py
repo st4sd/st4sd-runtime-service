@@ -472,12 +472,12 @@ class OldVolume(apis.models.common.Digestable):
 
 
 class OldS3Credentials(apis.models.common.Digestable):
-    dataset: Optional[str]
-    accessKeyID: Optional[str]
-    secretAccessKey: Optional[str]
-    bucket: Optional[str]
-    endpoint: Optional[str]
-    region: Optional[str]
+    dataset: Optional[str] = None
+    accessKeyID: Optional[str] = None
+    secretAccessKey: Optional[str] = None
+    bucket: Optional[str] = None
+    endpoint: Optional[str] = None
+    region: Optional[str] = None
 
 
 class OldS3Store(apis.models.common.Digestable):
@@ -499,10 +499,10 @@ class DeprecatedExperimentStartPayload(apis.models.common.Digestable):
     environmentVariables: Dict[str, Any] = {}
     orchestrator_resources: OrchestratorResources = OrchestratorResources(cpu="1", memory="500Mi")
     metadata: Dict[str, Any] = {}
-    s3: Optional[OldS3Credentials]
-    s3Store: Optional[OldS3Store]
-    datasetStoreURI: Optional[str]
-    platform: Optional[str]
+    s3: Optional[OldS3Credentials] = None
+    s3Store: Optional[OldS3Store] = None
+    datasetStoreURI: Optional[str] = None
+    platform: Optional[str] = None
     runtimePolicy: Optional[PayloadExecutionRuntimePolicy] = None
 
     @validator('metadata', 'variables', 'environmentVariables')

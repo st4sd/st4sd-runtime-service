@@ -1,4 +1,3 @@
-swagger: '2.0'
 basePath: /
 consumes:
 - application/json
@@ -642,6 +641,7 @@ definitions:
         description: The DSL 2.0 definition of a workflow
         type: object
     type: object
+    x-mask: '{pvep}'
   valueinplatform:
     properties:
       platform:
@@ -1326,6 +1326,29 @@ paths:
       summary: Start an experiment given its identifier
       tags:
       - experiments
+  /experiments/{identifier}/start/payload/:
+    get:
+      operationId: get_get_payload_to_start
+      responses:
+        '200':
+          description: The payload skeleton with magicValues explaining it
+        '404':
+          description: Experiment not found
+        '500':
+          description: Internal error while generating the experiment start payload
+      summary: Returns a skeleton payload to /experiments/<identifier>/start for an
+        experiment
+      tags:
+      - experiments
+    parameters:
+    - description: The package identifier. It must contain a $packageName and may
+        include either a tag suffix (`:${tag}`) or a digest suffix (`@${digest}`).
+        If both suffixes are missing then the identifier implies the `:latest` tag
+        suffix.
+      in: path
+      name: identifier
+      required: true
+      type: string
   /experiments/{identifier}/tag:
     parameters:
     - description: The package identifier. It must contain a $packageName and may
@@ -1965,6 +1988,7 @@ paths:
       - utilities
   /utilities/pvep/:
     post:
+      description: starting from an optional PVEP template
       operationId: post_utility_pvep
       parameters:
       - in: body
@@ -1975,7 +1999,8 @@ paths:
       responses:
         '200':
           description: Success
-      summary: Generates the default PVEP for a DSL workflow
+      summary: Generates the default Parameterised Virtual Experiment Package (PVEP)
+        for a DSL workflow
       tags:
       - utilities
 produces:

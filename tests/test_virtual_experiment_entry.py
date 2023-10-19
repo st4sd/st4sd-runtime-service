@@ -29,6 +29,9 @@ import apis.storage
 from tests import conftest
 
 
+from .test_surrogates import simple_push_and_synthesize
+
+
 def test_parse_simplest_entry(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     # VV: Record when "now" is in the UTC timezone (now = when entry is "created")
     utcnow = datetime.datetime.utcnow().replace(tzinfo=datetime.timezone.utc)
@@ -493,3 +496,95 @@ def test_check_metadata_registry_platforms(flowir_fixture_name: str,
             assert sorted(retrieved_pvep.metadata.registry.platforms) == sorted(expected_platforms)
 
             assert "internal-experiment" not in retrieved_pvep.metadata.package.keywords
+
+
+def test_experiment_start_payload_skeleton(
+        package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,
+        rel_optimizer_band_gap: apis.models.relationships.Relationship,
+        ve_modular_band_gap_gamess: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str,
+):
+    path_db_experiments = os.path.join(output_dir, "experiments.json")
+    path_db_relationships = os.path.join(output_dir, "relationships.json")
+
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
+    db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
+
+    ve_modular_band_gap_gamess = ve_modular_band_gap_gamess.copy(deep=True)
+
+    for variable in ve_modular_band_gap_gamess.parameterisation.executionOptions.variables:
+        if variable.name == "number-processors":
+            variable.valueFrom=[
+                apis.models.common.OptionMany(value=f"{x}") for x in (2, 4, 8, 16)
+            ]
+
+    metadata = simple_push_and_synthesize(
+        packages=package_metadata_modular_optimizer_band_gap_gamess,
+        rel_optimizer_band_gap=rel_optimizer_band_gap,
+        ve_modular_band_gap_gamess=ve_modular_band_gap_gamess,
+        db_experiments=db_experiments,
+        db_relationships=db_relationships,
+        new_package_name="synthetic",
+        output_dir=output_dir,
+    )
+
+    payload = apis.kernel.experiments.generate_experiment_start_skeleton_payload(metadata.package)
+    log = logging.getLogger("payload")
+
+    log.log(21, "*** Payload")
+    log.log(21, yaml.safe_dump(payload.payload, sort_keys=False))
+
+    log.log(21, "*** MagicValues")
+    log.log(21, yaml.safe_dump(payload.magicValues, sort_keys=False))
+
+    assert payload.payload == {
+        'inputs': [
+            {'content': '{{RequiredInputs_smiles.csv}}',
+             'filename': 'smiles.csv'}
+        ],
+        'platform': '{{OptionalPlatform}}',
+        'variables': {
+            'gamess-grace-period-seconds': '{{OptionalVariable_gamess-grace-period-seconds}}',
+            'gamess-walltime-minutes': '{{OptionalVariable_gamess-walltime-minutes}}',
+            'mem': '{{OptionalVariable_mem}}',
+            'number-processors': '{{OptionalVariable_number-processors}}',
+            'numberMolecules': '{{OptionalVariable_numberMolecules}}',
+            'startIndex': '{{OptionalVariable_startIndex}}'
+        },
+        's3': {
+            'accessKeyID': '{{OptionalS3ForDownload}}',
+            'bucket': '{{OptionalS3ForDownload}}',
+            'dataset': '{{OptionalDatasetForDownload}}',
+            'endpoint': '{{OptionalS3ForDownload}}',
+            'region': '{{OptionalS3ForDownload}}',
+            'secretAccessKey': '{{OptionalS3ForDownload}}'
+        }
+    }
+
+    assert payload.magicValues['{{OptionalVariable_mem}}'] == {
+        'choices': None,
+        'defaultFromPlatform': {
+            'openshift': '4295000000',
+            'openshift-kubeflux': '4295000000'
+        },
+        'message': 'You **may** set the field variables.mem to override its default '
+                   'value. You **may** set the value of the field to any string. The '
+                   'default value of this variable depends on experiment platform you '
+                   "select: {'openshift': '4295000000', 'openshift-kubeflux': "
+                   "'4295000000'}"
+    }
+
+    assert payload.magicValues['{{OptionalVariable_number-processors}}'] == {
+        'choices': ['2', '4', '8', '16'],
+        'default': '2',
+        'defaultFromPlatform': {'openshift': '2', 'openshift-kubeflux': '2'},
+        'message': 'You **may** set the field variables.number-processors to override '
+                   'its default value. You **must** set the value of the field to one '
+                   "of ['2', '4', '8', '16']. The default value of this variable is 2"
+    }
+
+    assert payload.magicValues['{{OptionalPlatform}}'] == {
+        'message': 'You **may** configure the experiment platform using one of the '
+                   "values ['openshift', 'openshift-kubeflux']",
+        'choices': ['openshift', 'openshift-kubeflux']
+    }
