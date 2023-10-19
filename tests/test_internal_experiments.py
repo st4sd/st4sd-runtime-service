@@ -28,6 +28,8 @@ import apis.storage.downloader
 import experiment.model.frontends.flowir
 import experiment.model.frontends.dsl
 
+import apis.models.errors
+
 import random
 import string
 
@@ -607,3 +609,25 @@ def test_auto_update_pvep_for_simple(
     assert pvep.metadata.package.name == "old"
 
     assert "internal-experiment" in pvep.metadata.package.keywords
+
+
+def test_invalid_dsl():
+    dsl = yaml.safe_load("""
+    entrypoint:
+      entry-instance: main
+      execute:
+      - target: "<entry-instance>"
+    """)
+
+    with pytest.raises(apis.models.errors.InvalidModelError) as e:
+        apis.kernel.internal_experiments.validate_dsl(dsl)
+
+    exc = e.value
+
+    assert exc.problems == [
+        {
+            'error': "'No template with name main'",
+            'location': ['entrypoint', 'execute', 0, 'target']
+        }
+    ]
+
