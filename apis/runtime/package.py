@@ -838,15 +838,19 @@ class NamedPackage:
                     if credentials.valueFrom.keyAccessKeyID:
                         s3['accessKeyID'] = {
                             'valueFrom': {
-                                'name': credentials.valueFrom.secretName,
-                                'key': credentials.valueFrom.keyAccessKeyID
+                                'secretKeyRef': {
+                                    'name': credentials.valueFrom.secretName,
+                                    'key': credentials.valueFrom.keyAccessKeyID
+                                }
                             }
                         }
                     if credentials.valueFrom.keySecretAccessKey:
                         s3['secretAccessKey'] = {
                             'valueFrom': {
-                                'name': credentials.valueFrom.secretName,
-                                'key': credentials.valueFrom.keySecretAccessKey
+                                'secretKeyRef': {
+                                    'name': credentials.valueFrom.secretName,
+                                    'key': credentials.valueFrom.keySecretAccessKey
+                                }
                             }
                         }
 

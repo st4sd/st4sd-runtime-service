@@ -765,14 +765,19 @@ def test_package_workflow_s3_plain(
             'region': {'value': 'region'},
             'accessKeyID': {
                 'valueFrom': {
-                    'key': 'S3_ACCESS_KEY_ID',
-                    'name': 'default-s3-secret'
+                    'secretKeyRef': {
+                        'key': 'S3_ACCESS_KEY_ID',
+                        'name': 'default-s3-secret'
+                    }
                 }
             },
             'secretAccessKey': {
                 'valueFrom': {
-                    'key': 'S3_SECRET_ACCESS_KEY',
-                    'name': 'default-s3-secret'}
+                    'secretKeyRef': {
+                        'key': 'S3_SECRET_ACCESS_KEY',
+                        'name': 'default-s3-secret'
+                    }
+                }
             }
         }
     }
