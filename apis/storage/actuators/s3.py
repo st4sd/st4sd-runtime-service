@@ -143,15 +143,26 @@ class S3Storage(Storage):
 
                 relpath = os.path.relpath(obj['Key'], path).rstrip("/")
 
-                if "/" in relpath:
-                    relpath = relpath.split("/")[0]
+                # VV: If there's even 1 "/" in the relative path of the key to the directory we're listing
+                # then we are looking at a "directory" which contains the key or an ancestor of the key
+                # If there's no `/` then the Key is a direct child of the directory we are listing and
+                # since this is S3 then `relpath` must be a file.
+                parts = relpath.split("/")
+                relpath = parts[0]
+                isdir = (len(parts) > 1)
 
-                if relpath == "." or relpath in generated:
+                if relpath == ".":
+                    # VV: If there's an entry for the path we're looking at then it is a file.
+                    # This implies that someone created an S3 object with a key that ends in "/".
+                    # They should delete it ...
+                    raise NotADirectoryError(f'{obj["key"]} is not a directory')
+
+                if relpath in generated:
                     continue
+
                 generated.add(relpath)
 
-                isfile = self.isfile(obj["Key"])
-                yield PathInfo(name=relpath, isdir=not isfile, isfile=isfile)
+                yield PathInfo(name=relpath, isdir=isdir, isfile=not isdir)
 
     def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
         destination = io.BytesIO()

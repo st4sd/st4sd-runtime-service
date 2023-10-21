@@ -160,6 +160,10 @@ def check_basic_library_operations(
         by_alias=True, exclude_none=True, exclude_defaults=True
     )
 
+    graph_names = client.list()
+
+    assert graph_names == [namespace_library.entrypoint.entryInstance]
+
     with pytest.raises(apis.models.errors.GraphAlreadyExistsError):
         client.add(dsl)
 

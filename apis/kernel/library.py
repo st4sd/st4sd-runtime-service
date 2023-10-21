@@ -151,6 +151,10 @@ class LibraryClient:
             return [x.name for x in self.actuator.listdir(self.library_path) if x.isdir]
         except apis.models.errors.StorageError:
             raise
+        except NotADirectoryError:
+            raise apis.models.errors.StorageError(
+                f"The library path {self.library_path} points to a file instead of a directory"
+            )
         except FileNotFoundError:
             return []
         except Exception as e:
