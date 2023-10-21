@@ -32,11 +32,11 @@ def generate_client() -> apis.kernel.library.LibraryClient:
                 f"does not exist")
 
         lookup = {
-            "S3_LIBRARY_BUCKET": "bucket",
-            "S3_LIBRARY_ENDPOINT": "endpoint_url",
-            "S3_LIBRARY_ACCESS_KEY_ID": "access_key_id",
-            "S3_LIBRARY_SECRET_ACCESS_KEY": "secret_access_key",
-            "S3_LIBRARY_REGION": "region_name"
+            "S3_BUCKET": "bucket",
+            "S3_ENDPOINT": "endpoint_url",
+            "S3_ACCESS_KEY_ID": "access_key_id",
+            "S3_SECRET_ACCESS_KEY": "secret_access_key",
+            "S3_REGION": "region_name"
         }
         args = {
             arg_name: secret.data.get(env_var) for env_var, arg_name in lookup.items()

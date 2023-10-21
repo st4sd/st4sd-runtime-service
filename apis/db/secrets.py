@@ -66,7 +66,7 @@ class DatabaseSecrets(apis.db.base.Database, SecretsStorageTemplate):
             raise apis.models.errors.DBError(f"Multiple Secrets with name {name}")
 
         if len(docs) == 1:
-            data = {key: base64.standard_b64decode(value) for key, value in docs[0].get("data", {}).items()}
+            data = {key: base64.standard_b64decode(value).decode() for key, value in docs[0].get("data", {}).items()}
             return Secret(name=name, data=data)
 
     def secret_create(self, secret: Secret):
