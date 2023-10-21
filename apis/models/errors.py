@@ -31,6 +31,9 @@ class InvalidModelError(ApiError):
         super().__init__(msg=msg)
         self.problems = problems
 
+    def __str__(self):
+        return f"{self.message}. Underlying problems:\n" + "\n".join( [str(e) for e in self.problems])
+
 
 class UnknownVariableError(ApiError):
     def __init__(self, variable_name: str, platform: str):
@@ -202,3 +205,26 @@ class RelationshipNotFoundError(DBError):
     def __init__(self, identifier: str):
         self.identifier = identifier
         super().__init__(f"Cannot find relationship {identifier}")
+
+### Storage Actuators
+
+class StorageError(ApiError):
+    pass
+
+
+#### Graph Library
+
+class LibraryError(ApiError):
+    pass
+
+class GraphAlreadyExistsError(LibraryError):
+    def __init__(self, name: str):
+        self.graph_name = name
+        super().__init__(f"Graph {name} already exists")
+
+
+class GraphDoesNotExistError(LibraryError):
+    def __init__(self, name: str):
+        self.graph_name = name
+        super().__init__(f"Graph {name} does not exist")
+

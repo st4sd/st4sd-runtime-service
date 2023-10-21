@@ -94,7 +94,10 @@ class InMemoryStorage(Storage):
                 elif v is not None and this_depth == depth:
                     yield PathInfo(name=name, isdir=False, isfile=True)
         else:
-            raise NotADirectoryError(path)
+            if path in self.files:
+                raise NotADirectoryError(path)
+            else:
+                raise FileNotFoundError(path)
 
     def read(self, path: typing.Union[pathlib.Path, str]) -> bytes:
         path = self.as_posix(path)
@@ -109,6 +112,9 @@ class InMemoryStorage(Storage):
 
     def write(self, path: typing.Union[pathlib.Path, str], contents: bytes):
         path = self.as_posix(path)
+
+        if not isinstance(contents, bytes):
+            raise TypeError(f"a bytes-like object is required, not {type(contents)}")
 
         if path.endswith("/"):
             raise ValueError("Cannot write to a Directory")

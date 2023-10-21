@@ -102,5 +102,18 @@ LOCAL_STORAGE = EnvVar("LOCAL_STORAGE", os.getcwd()).value
 # When set, it switches on the `/internal-experiments/` APIs
 S3_CONFIG_SECRET_NAME = EnvVar("S3_CONFIG_SECRET_NAME", "").value
 
-# VV: The suffix under which to store the internal experiments under the internal storage (e.g. S3)
+# VV: The suffix under which to store the internal experiments inside the internal storage (e.g. S3)
 S3_ROOT_INTERNAL_EXPERIMENTS = EnvVar("S3_ROOT_INTERNAL_EXPERIMENTS", "experiments").value
+
+
+# VV: Contains the name of a secret which includes the keys:
+# S3_ACCESS_KEY_ID
+# S3_SECRET_ACCESS_KEY
+# S3_ENDPOINT
+# S3_BUCKET
+# S3_PREFIX
+# When set, it switches on the `/library/` APIs
+S3_LIBRARY_SECRET_NAME = EnvVar("S3_LIBRARY_SECRET_NAME", "").value
+
+# VV: The suffix under which to store the graph library inside the library storage (e.g. S3)
+S3_ROOT_LIBRARY = EnvVar("S3_ROOT_LIBRARY", "library").value

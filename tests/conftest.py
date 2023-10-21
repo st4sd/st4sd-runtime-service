@@ -42,6 +42,12 @@ def pytest_addoption(parser):
         default=False, action="store_true", dest="internal_storage_s3"
     )
 
+    parser.addoption(
+        '--library-s3',
+        help="Enable tests that involve testing the actual S3 api of the graph library.",
+        default=False, action="store_true", dest="library_s3"
+    )
+
 @pytest.fixture()
 def local_deployment():
     orig_env = os.environ.get('LOCAL_DEPLOYMENT')

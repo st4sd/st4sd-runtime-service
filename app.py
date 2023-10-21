@@ -42,7 +42,7 @@ import apis.query
 import apis.url_map
 import apis.internal_experiments
 import apis.utilities
-
+import apis.library
 
 app = Flask(__name__)
 app.wsgi_app = PrefixMiddleware(app.wsgi_app)
@@ -75,6 +75,7 @@ api.add_namespace(apis.relationships.api)
 api.add_namespace(apis.url_map.api)
 api.add_namespace(apis.datasets.api)
 api.add_namespace(apis.utilities.api)
+api.add_namespace(apis.library.api)
 
 # File Logging Setup
 app.config['LOG_DIR'] = os.environ.get("LOG_DIR", "/tmp/logs")

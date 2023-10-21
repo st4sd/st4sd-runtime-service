@@ -14,6 +14,7 @@ import os
 import random
 import string
 import traceback
+import typing
 from typing import Any
 from typing import Dict
 from typing import List
@@ -820,7 +821,7 @@ class NamedPackage:
             if base.config.manifestPath:
                 package['withManifest'] = base.config.manifestPath
 
-            s3 = {
+            s3: typing.Dict[str, typing.Dict[str, typing.Union[str, typing.Dict[str, typing.Dict[str, str]]]]] = {
                 'endpoint': {"value": source.s3.location.endpoint},
                 'bucket': {"value": source.s3.location.bucket},
             }

@@ -1570,3 +1570,33 @@ m_utilities_pvep = api_utilities.model(
     },
     description="The DSL 2 definition"
 )
+
+
+############################ Library ############################
+
+api_library = Namespace(
+    "library",
+    description="Graph library operations"
+)
+
+
+m_library_graph = api_library.model(
+    "library-graph",
+    {
+        "workflows": fields.List(
+            fields.Raw(description="The DSL 2.0 definition of a workflow template, "
+                                   "there must be at least one.")
+        ),
+        "components": fields.List(
+            fields.Raw(description="The DSL 2.0 definition of a component template, "
+                                   "there must be at least one.")
+        ),
+        "entrypoint": fields.Raw(
+            description="The DSL 2.0 definition of the entrypoint "
+                        "- optional if there is exactly 1 workflow template. "
+                        "If set, it must point to a workflow template"
+        )
+    },
+    description="The DSL 2 definition of a graph"
+)
+

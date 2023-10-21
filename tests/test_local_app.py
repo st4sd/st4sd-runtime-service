@@ -7,13 +7,12 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import socket
 import os
+import typing
 
 import requests
 import experiment.service.db
@@ -22,6 +21,8 @@ import pytest
 import contextlib
 
 import apis.models.relationships
+
+from .test_library import simple_dsl2
 
 logger = logging.getLogger("tapp")
 
@@ -50,6 +51,7 @@ def initialise_api(output_dir) -> int:
             f"-e GUNICORN_PID_PATH={pid_path}",
             "-e LOCAL_DEPLOYMENT=True",
             f"-e LOCAL_STORAGE={output_dir}",
+            f"-e S3_ROOT_LIBRARY={output_dir}/library",
             "--timeout=120",
             "--threads=1",
             "--keep-alive=3",
@@ -80,7 +82,7 @@ def initialise_api(output_dir) -> int:
 
 
 @pytest.fixture()
-def api_wrapper(initialise_api: int):
+def api_wrapper(initialise_api: int) -> experiment.service.db.ExperimentRestAPI:
     try:
         api = experiment.service.db.ExperimentRestAPI(
             f"http://localhost:{initialise_api}/",
@@ -669,3 +671,58 @@ def test_url_map(api_wrapper):
     # GET /url-map/{service}
     with pytest.raises(experiment.service.errors.InvalidHTTPRequest):
         api_wrapper.api_request_get("url-map/consumable-computing")
+
+
+@rest_api()
+def test_basic_library_operations(
+    api_wrapper: experiment.service.db.ExperimentRestAPI,
+    simple_dsl2: typing.Dict[str, typing.Any]
+):
+    name = api_wrapper.api_request_post("library/", json_payload=simple_dsl2, decode_json=False)
+
+    ret = api_wrapper.api_request_get("library/")
+
+    api_wrapper.api_request_delete(f"library/{name}/")
+
+    assert ret["graphs"] == [
+        {
+            'components': [
+                {
+                    'command': {'arguments': '%(message)s',
+                                'executable': 'echo',
+                                'expandArguments': 'double-quote',
+                                'resolvePath': True},
+                    'resourceManager': {'config': {'backend': 'local',
+                                                   'walltime': 60.0}},
+                    'resourceRequest': {'numberProcesses': 1,
+                                        'numberThreads': 1,
+                                        'ranksPerNode': 1,
+                                        'threadsPerCore': 1},
+                    'signature': {'name': 'echo',
+                                  'parameters': [{'name': 'message'}]},
+                    'variables': {},
+                    'workflowAttributes': {'aggregate': False,
+                                           'memoization': {'disable': {'fuzzy': False,
+                                                                       'strong': False}},
+                                           'restartHookOn': ['ResourceExhausted'],
+                                           'shutdownOn': []}
+                }
+            ],
+            'entrypoint': {
+                'entry-instance': 'main',
+                'execute': [
+                    {'args': {}, 'target': '<entry-instance>'}
+                ]
+            },
+            'workflows': [
+                {
+                    'execute': [{'args': {'message': '%(foo)s'},
+                                 'target': '<hello>'}],
+                    'signature': {'name': 'main',
+                                  'parameters': [{'default': 'hello world',
+                                                  'name': 'foo'}]},
+                    'steps': {'hello': 'echo'}
+                }
+            ]
+        }
+    ]
