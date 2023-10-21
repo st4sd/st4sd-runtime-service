@@ -416,8 +416,11 @@ def get_s3_internal_storage_secret(
     with db_secrets:
         secret = db_secrets.secret_get(secret_name)
 
+    if not secret:
+        raise apis.models.errors.DBError(f"There is no S3 Secret {secret_name}")
+
     try:
-        return S3StorageSecret(**secret["data"])
+        return S3StorageSecret(**secret.data)
     except pydantic.ValidationError as e:
         raise apis.models.errors.DBError(f"The S3 Secret {secret_name} is invalid. Errors follow: {e.errors()}")
 

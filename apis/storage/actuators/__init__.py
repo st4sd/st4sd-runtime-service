@@ -43,7 +43,13 @@ def storage_actuator_for_package(
                 and package.source.s3.security.credentials.valueFrom
         ):
             info = package.source.s3.security.credentials.valueFrom
-            secret:typing.Dict[str, typing.Any] = db_secrets.secret_get(info.secretName)["data"]
+            secret = db_secrets.secret_get(info.secretName)
+
+            if not secret:
+                raise apis.models.errors.DBError(
+                    f"The Secret {info.secretName} containing the S3 credentials of package {package.name} is missing")
+
+            secret = secret.data
             args = {}
 
             try:

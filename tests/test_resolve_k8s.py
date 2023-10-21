@@ -18,19 +18,17 @@ def test_extract_oauth_token(mock_list_namespaced_secret):
     db_secret = apis.db.secrets.KubernetesSecrets(namespace=apis.models.constants.MONITORED_NAMESPACE)
     with db_secret:
         secret = db_secret.secret_get("my-test")
-    oauth_token = secret['data']['oauth-token']
+    oauth_token = secret.data['oauth-token']
 
     assert oauth_token == "my-token"
 
 
 def test_extract_oauth_token_no_secret(mock_list_namespaced_secret):
-    with pytest.raises(apis.k8s.errors.KubernetesObjectNotFound) as e:
-        db_secret = apis.db.secrets.KubernetesSecrets(namespace=apis.models.constants.MONITORED_NAMESPACE)
-        with db_secret:
-            _ = db_secret.secret_get("not-my-test")
+    db_secret = apis.db.secrets.KubernetesSecrets(namespace=apis.models.constants.MONITORED_NAMESPACE)
+    with db_secret:
+        x = db_secret.secret_get("not-my-test")
 
-    assert e.value.name == "not-my-test"
-    assert e.value.kind == "secret"
+    assert x is None
 
 
 def test_extract_oauth_token_default(mock_list_namespaced_secret, mock_list_config_map_configuration):
@@ -44,7 +42,7 @@ def test_extract_oauth_token_default(mock_list_namespaced_secret, mock_list_conf
     assert config.gitsecretOauth == "my-test"
     with db_secret:
         secret = db_secret.secret_get(config.gitsecretOauth)
-    oauth_token = secret['data']['oauth-token']
+    oauth_token = secret.data['oauth-token']
     assert oauth_token == "my-token"
 
 

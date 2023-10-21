@@ -199,7 +199,7 @@ def test_s3_library_operations(
         "S3_LIBRARY_SECRET_ACCESS_KEY": "secret_access_key",
         "S3_LIBRARY_REGION": "region_name"
     }
-    args = {arg_name: os.environ[env_var] for env_var, arg_name in lookup.items() if os.environ.get(env_var)}
+    args = {arg_name: os.environ.get(env_var) for env_var, arg_name in lookup.items()}
 
     rand = random.Random()
     characters = string.ascii_letters + string.digits

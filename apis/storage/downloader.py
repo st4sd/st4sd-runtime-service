@@ -172,7 +172,7 @@ class PackagesDownloader(PackageMetadataCollection):
                     f"the secret. Underlying error: {e}")
 
             try:
-                oauth_token = secret['data'][secret_key]
+                oauth_token = secret.data[secret_key]
             except KeyError as e:
                 raise apis.runtime.errors.CannotDownloadGitError(
                     f"Cannot git clone because the {what}secret {secret_name} does not contain "

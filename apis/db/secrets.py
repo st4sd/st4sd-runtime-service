@@ -59,19 +59,21 @@ class DatabaseSecrets(apis.db.base.Database, SecretsStorageTemplate):
         entry = tinydb.Query()
         return entry.name == name
 
-    def secret_get(self, name: str) -> Optional[Dict[str, Any]]:
+    def secret_get(self, name: str) -> Optional[Secret]:
         docs = self.query(self.construct_query(name=name))
 
         if len(docs) > 1:
             raise apis.models.errors.DBError(f"Multiple Secrets with name {name}")
 
         if len(docs) == 1:
-            return docs[0]
+            data = {key: base64.standard_b64decode(value) for key, value in docs[0].get("data", {}).items()}
+            return Secret(name=name, data=data)
 
     def secret_create(self, secret: Secret):
         existing = self.secret_get(secret.name)
         if existing is None:
-            self.insert_many([secret.dict()])
+            data = {key: b64_encode(value) for key, value in secret.data.items()}
+            self.insert_many([{"name": secret.name, "data": data}])
         else:
             raise apis.models.errors.DBError(f"Cannot create Secret {secret.name} because it already exists")
 
@@ -86,27 +88,26 @@ class KubernetesSecrets(SecretsStorageTemplate):
     def __init__(self, namespace: str):
         self.namespace = namespace
 
-    def secret_get(self, name: str) -> Dict[str, Any]:
+    def secret_get(self, name: str) -> Optional[SecretKubernetes]:
         api = kubernetes.client.CoreV1Api(kubernetes.client.ApiClient())
 
         secrets: kubernetes.client.V1SecretList = api.list_namespaced_secret(
             self.namespace, field_selector=f'metadata.name={name}')
 
         if len(secrets.items) == 0:
-            raise apis.k8s.errors.KubernetesObjectNotFound(k8s_kind='secret', k8s_name=name)
+            return None
 
         k8s_secret: kubernetes.client.V1Secret = secrets.items[0]
 
         data = {key: base64.standard_b64decode(k8s_secret.data[key]).decode() for key in k8s_secret.data}
 
-        return {"name": name, "data": data}
+        return SecretKubernetes(name=name, data=data)
 
     def secret_create(self, secret: SecretKubernetes):
         if not isinstance(secret, SecretKubernetes):
             secret = SecretKubernetes(
                 data=secret.data,
                 name=secret.name,
-                kind="generic"
             )
         data = {x: b64_encode(secret.data[x]) for x in secret.data}
 

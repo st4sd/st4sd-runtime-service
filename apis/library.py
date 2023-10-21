@@ -26,6 +26,11 @@ def generate_client() -> apis.kernel.library.LibraryClient:
     else:
         db_secrets = utils.secrets_git_open(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
         secret = db_secrets.secret_get(apis.models.constants.S3_LIBRARY_SECRET_NAME)
+        if secret is None:
+            raise  apis.models.errors.DBError(
+                f"Secret {apis.models.constants.S3_LIBRARY_SECRET_NAME} containing the S3 credentials for the Library "
+                f"does not exist")
+
         lookup = {
             "S3_LIBRARY_BUCKET": "bucket",
             "S3_LIBRARY_ENDPOINT": "endpoint_url",
@@ -34,8 +39,7 @@ def generate_client() -> apis.kernel.library.LibraryClient:
             "S3_LIBRARY_REGION": "region_name"
         }
         args = {
-            arg_name: secret.data[env_var] for env_var, arg_name in lookup.items()
-            if env_var in secret.data
+            arg_name: secret.data.get(env_var) for env_var, arg_name in lookup.items()
         }
         actuator = apis.storage.actuators.s3.S3Storage(**args)
 
