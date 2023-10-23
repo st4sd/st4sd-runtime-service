@@ -97,12 +97,14 @@ def dsl_invalid_dsl(dsl_no_entrypoint_workflow: typing.Dict[str, typing.Any]) ->
 @pytest.mark.parametrize("the_dsl_fixture_name", ["simple_dsl2", "simple_dsl2_with_inputs"])
 def test_simple_dsl_validate_only(the_dsl_fixture_name, request):
     dsl = request.getfixturevalue(the_dsl_fixture_name)
-    apis.kernel.library.LibraryClient.validate_graph(dsl)
+    entry = apis.kernel.library.Entry(graph=dsl)
+    apis.kernel.library.LibraryClient.validate(entry)
 
 
 def test_missing_workflow(dsl_no_workflow: typing.Dict[str, typing.Any]):
+    entry = apis.kernel.library.Entry(graph=dsl_no_workflow)
     with pytest.raises(apis.models.errors.InvalidModelError) as e:
-        apis.kernel.library.LibraryClient.validate_graph(dsl_no_workflow)
+        apis.kernel.library.LibraryClient.validate(entry)
 
     assert e.value.problems == [
         {"message": "There must be at least 1 workflow template"},
@@ -111,8 +113,10 @@ def test_missing_workflow(dsl_no_workflow: typing.Dict[str, typing.Any]):
 
 
 def test_missing_component(dsl_no_component: typing.Dict[str, typing.Any]):
+    entry = apis.kernel.library.Entry(graph=dsl_no_component)
+
     with pytest.raises(apis.models.errors.InvalidModelError) as e:
-        apis.kernel.library.LibraryClient.validate_graph(dsl_no_component)
+        apis.kernel.library.LibraryClient.validate(entry)
 
     assert e.value.problems == [
         {"message": "There must be at least 1 component template"},
@@ -121,8 +125,9 @@ def test_missing_component(dsl_no_component: typing.Dict[str, typing.Any]):
 
 
 def test_missing_entrypoint_workflow_template(dsl_no_entrypoint_workflow: typing.Dict[str, typing.Any]):
+    entry = apis.kernel.library.Entry(graph=dsl_no_entrypoint_workflow)
     with pytest.raises(apis.models.errors.InvalidModelError) as e:
-        apis.kernel.library.LibraryClient.validate_graph(dsl_no_entrypoint_workflow)
+        apis.kernel.library.LibraryClient.validate(entry)
 
     assert e.value.problems == [
         {"message": "Missing entrypoint workflow template"}
@@ -130,8 +135,9 @@ def test_missing_entrypoint_workflow_template(dsl_no_entrypoint_workflow: typing
 
 
 def test_dsl_invalid_dsl(dsl_invalid_dsl: typing.Dict[str, typing.Any]):
+    entry = apis.kernel.library.Entry(graph=dsl_invalid_dsl)
     with pytest.raises(apis.models.errors.InvalidModelError) as e:
-        apis.kernel.library.LibraryClient.validate_graph(dsl_invalid_dsl)
+        apis.kernel.library.LibraryClient.validate(entry=entry)
 
     exc = e.value
 
@@ -147,10 +153,11 @@ def check_basic_library_operations(
     dsl: typing.Dict[str, typing.Any],
     client: apis.kernel.library.LibraryClient,
 ):
-    namespace_orig = client.add(dsl)
+    entry = apis.kernel.library.Entry(graph=dsl)
+    namespace_orig = client.add(entry)
     from_library = client.get(namespace_orig.entrypoint.entryInstance)
 
-    namespace_library = experiment.model.frontends.dsl.Namespace(**from_library)
+    namespace_library = experiment.model.frontends.dsl.Namespace(**from_library.graph)
 
     print(yaml.safe_dump(namespace_library.dict(by_alias=True, exclude_none=True, exclude_defaults=True), sort_keys=False))
 
@@ -165,7 +172,7 @@ def check_basic_library_operations(
     assert graph_names == [namespace_library.entrypoint.entryInstance]
 
     with pytest.raises(apis.models.errors.GraphAlreadyExistsError):
-        client.add(dsl)
+        client.add(entry)
 
     client.delete(namespace_orig.entrypoint.entryInstance)
 

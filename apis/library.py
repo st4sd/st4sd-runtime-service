@@ -61,7 +61,7 @@ class UtilityDSL(Resource):
 
         try:
             client = generate_client()
-            ret = client.add(graph)
+            ret = client.add(apis.kernel.library.Entry(graph=graph))
             return ret.entrypoint.entryInstance
         except werkzeug.exceptions.HTTPException:
             raise
@@ -90,7 +90,21 @@ class UtilityDSL(Resource):
                            f"- contact the administrator of this ST4SD deployment", problem=str(e))
 
     def get(self):
-        """Returns the contents of the Graph library - an array of Graphs"""
+        """Returns the contents of the Graph library.
+
+        The response contains a dictionary with the following format:
+
+        {
+            "entries": [
+                {
+                   "graph": { the graph }
+                }
+            ],
+            "problems": [
+               { a dictionary explaining 1 problem }
+            ]
+        }
+        """
 
         if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_LIBRARY_SECRET_NAME:
             api.abort(400, "Graph Library is disabled - contact the administrator of this ST4SD deployment")
@@ -98,20 +112,20 @@ class UtilityDSL(Resource):
 
         try:
             problems = []
-            graphs = []
+            entries = []
 
             client = generate_client()
 
             for name in client.list():
                 try:
-                    graph = client.get(name)
+                    entry = client.get(name)
                 except Exception as e:
                     problems.append({"message": f"Could not get graph {name} due to {e}"})
                 else:
-                    graphs.append(graph)
+                    entries.append({"graph": entry.graph})
 
             return {
-                "graphs": graphs,
+                "entries": entries,
                 "problems": problems
             }
         except werkzeug.exceptions.HTTPException:

@@ -684,45 +684,51 @@ def test_basic_library_operations(
 
     api_wrapper.api_request_delete(f"library/{name}/")
 
-    assert ret["graphs"] == [
-        {
-            'components': [
-                {
-                    'command': {'arguments': '%(message)s',
-                                'executable': 'echo',
-                                'expandArguments': 'double-quote',
-                                'resolvePath': True},
-                    'resourceManager': {'config': {'backend': 'local',
-                                                   'walltime': 60.0}},
-                    'resourceRequest': {'numberProcesses': 1,
-                                        'numberThreads': 1,
-                                        'ranksPerNode': 1,
-                                        'threadsPerCore': 1},
-                    'signature': {'name': 'echo',
-                                  'parameters': [{'name': 'message'}]},
-                    'variables': {},
-                    'workflowAttributes': {'aggregate': False,
-                                           'memoization': {'disable': {'fuzzy': False,
-                                                                       'strong': False}},
-                                           'restartHookOn': ['ResourceExhausted'],
-                                           'shutdownOn': []}
+    assert ret == {
+        "entries": [
+            {
+                "graph": {
+                    'components': [
+                        {
+                            'command': {'arguments': '%(message)s',
+                                        'executable': 'echo',
+                                        'expandArguments': 'double-quote',
+                                        'resolvePath': True},
+                            'resourceManager': {'config': {'backend': 'local',
+                                                           'walltime': 60.0}},
+                            'resourceRequest': {'numberProcesses': 1,
+                                                'numberThreads': 1,
+                                                'ranksPerNode': 1,
+                                                'threadsPerCore': 1},
+                            'signature': {'name': 'echo',
+                                          'parameters': [{'name': 'message'}]},
+                            'variables': {},
+                            'workflowAttributes': {'aggregate': False,
+                                                   'memoization': {'disable': {'fuzzy': False,
+                                                                               'strong': False}},
+                                                   'restartHookOn': ['ResourceExhausted'],
+                                                   'shutdownOn': []}
+                        }
+                    ],
+                    'entrypoint': {
+                        'entry-instance': 'main',
+                        'execute': [
+                            {'args': {}, 'target': '<entry-instance>'}
+                        ]
+                    },
+                    'workflows': [
+                        {
+                            'execute': [{'args': {'message': '%(foo)s'},
+                                         'target': '<hello>'}],
+                            'signature': {'name': 'main',
+                                          'parameters': [{'default': 'hello world',
+                                                          'name': 'foo'}]},
+                            'steps': {'hello': 'echo'}
+                        }
+                    ]
                 }
-            ],
-            'entrypoint': {
-                'entry-instance': 'main',
-                'execute': [
-                    {'args': {}, 'target': '<entry-instance>'}
-                ]
-            },
-            'workflows': [
-                {
-                    'execute': [{'args': {'message': '%(foo)s'},
-                                 'target': '<hello>'}],
-                    'signature': {'name': 'main',
-                                  'parameters': [{'default': 'hello world',
-                                                  'name': 'foo'}]},
-                    'steps': {'hello': 'echo'}
-                }
-            ]
-        }
-    ]
+            }
+        ],
+
+        "problems": []
+    }

@@ -31,6 +31,15 @@ import apis.models.errors
 import experiment.model.frontends.dsl
 import experiment.model.errors
 
+
+class Entry(typing.NamedTuple):
+    """An entry of the Graph Library
+
+    In the future we might add support for auxiliary files that the component templates in the graph need.
+    """
+    graph: typing.Dict[str, typing.Any]
+
+
 class LibraryClient:
     def __init__(
         self,
@@ -53,11 +62,11 @@ class LibraryClient:
     def _graph_path(self, name: str) -> pathlib.Path:
         return self._graph_dir_path(name) / "dsl.yaml"
 
-    def add(self, graph: typing.Dict[str, typing.Any]) -> experiment.model.frontends.dsl.Namespace:
+    def add(self, entry: Entry) -> experiment.model.frontends.dsl.Namespace:
         """Validates then adds valid graphs to the Library
 
         Args:
-            graph:
+            entry:
                 The graph to add to the library. The contents of the dictionary may be modified
 
         Returns:
@@ -71,7 +80,7 @@ class LibraryClient:
             apis.models.errors.StorageError:
                 If there is an issue accessing the Storage Actuator
         """
-        namespace = self.validate_graph(graph)
+        namespace = self.validate(entry)
         graph_name = namespace.entrypoint.entryInstance
         path = self._graph_path(graph_name)
 
@@ -90,12 +99,16 @@ class LibraryClient:
 
         return namespace
 
-    def get(self, graph_name: str) -> typing.Dict[str, typing.Any]:
+    def get(self, name: str) -> Entry:
         """Returns a Graph from the library
 
         Args:
-            graph_name:
+            name:
                 The name of the graph
+
+        Returns:
+            The corresponding entry in the Graph Library
+
         Raises:
             apis.models.errors.StorageError:
                 If there is an issue accessing the Storage Actuator
@@ -103,22 +116,22 @@ class LibraryClient:
                 If the graph does not exist
         """
 
-        path = self._graph_path(graph_name)
+        path = self._graph_path(name)
 
         try:
-            return yaml.safe_load(self.actuator.read(path))
+            return Entry(graph=yaml.safe_load(self.actuator.read(path)))
         except apis.models.errors.StorageError:
             raise
         except FileNotFoundError:
-            raise apis.models.errors.GraphDoesNotExistError(graph_name)
+            raise apis.models.errors.GraphDoesNotExistError(name)
         except Exception as e:
             raise apis.models.errors.StorageError(f"Unable to get Graph under {path} due to {e}")
 
-    def delete(self, graph_name: str):
+    def delete(self, name: str):
         """Deletes a Graph from the library
 
         Args:
-            graph_name:
+            name:
                 The name of the graph
         Raises:
             apis.models.errors.StorageError:
@@ -127,7 +140,7 @@ class LibraryClient:
                 If the graph does not exist
         """
 
-        path = self._graph_dir_path(graph_name)
+        path = self._graph_dir_path(name)
         path = self.actuator.as_posix(path) + "/"
 
         try:
@@ -135,7 +148,7 @@ class LibraryClient:
         except apis.models.errors.StorageError:
             raise
         except FileNotFoundError:
-            raise apis.models.errors.GraphDoesNotExistError(graph_name)
+            raise apis.models.errors.GraphDoesNotExistError(name)
         except Exception as e:
             raise apis.models.errors.StorageError(f"Unable to delete Graph in {path} due to {e}")
 
@@ -161,7 +174,7 @@ class LibraryClient:
             raise apis.models.errors.StorageError(f"Unable to list graphs due to {type(e)}: {e}")
 
     @classmethod
-    def _preprocess_entrypoint(cls, graph: typing.Dict[str, typing.Any]):
+    def _preprocess_entrypoint(cls, entry: Entry):
         """Utility method to auto-generate the entrypoint of a Graph and preprocess it
 
         Auto-generation:
@@ -171,9 +184,10 @@ class LibraryClient:
         - If the entrypoint contains arguments, remove them
 
         Args:
-            graph:
-                The graph to test. The contents of the dictionary may be modified
+            entry:
+                The graph to test. The definition of the graph may be modified
         """
+        graph = entry.graph
 
         if (
             isinstance(graph, dict)
@@ -203,12 +217,12 @@ class LibraryClient:
             graph['entrypoint']['execute'][0]['args'] = {}
 
     @classmethod
-    def validate_graph(cls, graph: typing.Dict[str, typing.Any]) -> experiment.model.frontends.dsl.Namespace:
-        """Tests whether a Graph is valid
+    def validate(cls, entry: Entry) -> experiment.model.frontends.dsl.Namespace:
+        """Tests whether a Graph Library entry is valid
 
         Args:
-            graph:
-                The graph to test. The contents of the dictionary may be modified
+            entry:
+                The graph to test. The graph definition may be modified
 
         Returns:
             The Namespace representation of the graph
@@ -217,11 +231,16 @@ class LibraryClient:
             apis.models.errors.InvalidModelError:
                 If the graph is invalid
         """
+        if not isinstance(entry, Entry):
+            raise apis.models.errors.InvalidModelError(
+                "Invalid graph", problems=[
+                    {"message": f"Unexpected type of parameter to validate() {type(entry)}"}]
+            )
 
-        cls._preprocess_entrypoint(graph)
+        cls._preprocess_entrypoint(entry)
 
         try:
-            namespace = experiment.model.frontends.dsl.Namespace(**graph)
+            namespace = experiment.model.frontends.dsl.Namespace(**entry.graph)
         except pydantic.ValidationError as e:
             errors = [dict(x) for x in e.errors()]
             for x in errors:
