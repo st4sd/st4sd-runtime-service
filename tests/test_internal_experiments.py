@@ -197,6 +197,167 @@ def mock_s3_storage():
         apis.storage.actuators.s3.S3Storage = actual_s3
 
 
+def test_internal_experiment_with_edges_and_extracting_dsl_for_viewing(
+    output_dir: str,
+    mock_s3_storage: apis.storage.actuators.memory.InMemoryStorage,
+):
+    payload = {
+        'pvep': {
+            'base': {
+                'packages': [
+                    {'name': 'main', 'source': {}}],
+            },
+            'metadata': {'package': {'name': 'aptest', 'tags': [], 'keywords': []}, 'registry': {
+                'digest': 'sha256x9a87f2f54cbb165f3b5ec2bc64b0e1fd7c3af5d258c5a12087490b40', 'tags': [],
+                'timesExecuted': 0, 'interface': {}, 'inputs': [], 'data': [], 'containerImages': [],
+                'executionOptionsDefaults': {'variables': [{'name': 'input.number.txt', 'valueFrom': [
+                    {'value': 'input/number.txt', 'platform': 'default'}]}, {'name': 'b', 'valueFrom': [
+                    {'value': '2', 'platform': 'default'}]}]}, 'platforms': ['default']}},
+            'parameterisation': {
+                'presets': {'variables': [], 'runtime': {'resources': {}, 'args': []}, 'data': [],
+                            'environmentVariables': []},
+                'executionOptions': {'variables': [], 'data': [], 'runtime': {'resources': {}, 'args': []},
+                                     'platform': []}}}, 'workflow': {
+            'dsl': {'entrypoint': {'entry-instance': 'main', 'execute': [
+                {'target': '<entry-instance>', 'args': {}}]},
+                    'workflows': [
+                        {'signature': {'name': 'main',
+                                       'description': "Adds 2 numbers, one from the input file `number.txt` "
+                                                      "and a second one from the parameter 'b'",
+                                       'parameters': [{'name': 'input.number.txt', 'default': ''},
+                                                      {'name': 'b', 'default': '2'}]},
+                         'steps': {'generator': 'generator', 'sum': 'sum'}, 'execute': [
+                            {'target': '<generator>', 'args': {'a': '%(input.number.txt)s', 'b': '%(b)s'}},
+                            {'target': '<sum>',
+                             'args': {'left': '<generator>/a.txt:output', 'right': '<generator>/b.txt:output'}}]}],
+                    'components': [
+                        {'signature': {
+                            'name': 'generator',
+                            'description': "Produces 2 files (a.txt and b.txt) using the contents of the "
+                                           "parameters 'a' and 'b' respectively",
+                            'parameters': [{'name': 'a', 'default': '10'},
+                                           {'name': 'b', 'default': '20'}]},
+                            'command': {'executable': 'bash',
+                                        'arguments': '-c "echo \'generating files\' && echo -n \'%(a)s\'>a.txt '
+                                                     '&& echo -n \'%(b)s\'>b.txt && echo Done"',
+                                        'expandArguments': 'none'},
+                            'workflowAttributes': {'aggregate': True, 'restartHookOn': ['ResourceExhausted']},
+                            'resourceManager': {'lsf': {'statusRequestInterval': '20'}}}, {
+                            'signature': {'name': 'sum', 'description': 'Adds 2 numbers',
+                                          'parameters': [{'name': 'left', 'default': ''},
+                                                         {'name': 'right', 'default': ''}]},
+                            'command': {'executable': 'python',
+                                        'arguments': '-c "print(%(left)s + %(right)s, end=\'\')"',
+                                        'expandArguments': 'none'},
+                            'workflowAttributes': {
+                                'aggregate': True, 'restartHookOn': ['ResourceExhausted']},
+                            'resourceManager': {'lsf': {'statusRequestInterval': '20'}}}]}}}
+
+    db_secrets = apis.db.secrets.DatabaseSecrets(db_path=os.path.join(output_dir, "secrets.db"))
+    db_experiments = apis.db.exp_packages.DatabaseExperiments(db_path=os.path.join(output_dir, "experiments.db"))
+
+    with db_secrets:
+        db_secrets.secret_create(
+            apis.db.secrets.Secret(
+                name="default-s3-secret",
+                data={
+                    "S3_BUCKET": "a-bucket",
+                    "S3_ENDPOINT": "https://my.endpoint",
+                    "S3_ACCESS_KEY_ID": "access-key-id",
+                    "S3_SECRET_ACCESS_KEY": "secret-access-key",
+                    "S3_REGION": "region"
+                }
+            )
+        )
+
+    pvep = apis.models.virtual_experiment.ParameterisedPackage(**payload["pvep"])
+
+    pvep = apis.kernel.internal_experiments.upsert_internal_experiment(
+        dsl2_definition=payload["workflow"]["dsl"],
+        pvep=pvep,
+        db_secrets=db_secrets,
+        db_experiments=db_experiments,
+        package_source="default-s3-secret",
+    )
+
+    download = apis.storage.PackagesDownloader(pvep, db_secrets=db_secrets)
+
+    dsl = apis.kernel.experiments.api_get_experiment_dsl(
+        pvep=pvep,
+        packages=download
+    )
+
+    one_component = [x for x in dsl['components'] if x['signature']['name'] == "sum"]
+    assert len(one_component) == 1
+
+    one_component = one_component[0]
+
+    assert one_component == {
+        'command': {
+            'arguments': '-c "print(%(left)s + %(right)s, end=\'\')"',
+            'environment': None,
+            'executable': 'python',
+            'expandArguments': 'none',
+            'interpreter': None,
+            'resolvePath': True},
+        'resourceManager': {
+            'config': {
+                'backend': 'local', 'walltime': 60.0},
+            'docker': {'image': None,
+                       'imagePullPolicy': 'Always',
+                       'platform': None},
+            'kubernetes': {'api-key-var': None,
+                           'cpuUnitsPerCore': None,
+                           'gracePeriod': None,
+                           'host': 'http://localhost:8080',
+                           'image': None,
+                           'image-pull-secret': None,
+                           'namespace': 'default',
+                           'podSpec': None,
+                           'qos': None},
+            'lsf': {'dockerImage': None,
+                    'dockerOptions': None,
+                    'dockerProfileApp': None,
+                    'queue': 'normal',
+                    'reservation': None,
+                    'resourceString': None,
+                    'statusRequestInterval': 20}},
+        'resourceRequest': {'gpus': None,
+                            'memory': None,
+                            'numberProcesses': 1,
+                            'numberThreads': 1,
+                            'ranksPerNode': 1,
+                            'threadsPerCore': 1},
+        'signature': {'description': 'Adds 2 numbers',
+                      'name': 'sum',
+                      'parameters': [{'default': '', 'name': 'left'},
+                                     {'default': '', 'name': 'right'}]},
+        'variables': {},
+        'workflowAttributes': {
+            'aggregate': True,
+            'isMigratable': False,
+            'isMigrated': False,
+            'isRepeat': False,
+            'maxRestarts': None,
+            'memoization': {
+                'disable': {'fuzzy': False,
+                            'strong': False},
+                'embeddingFunction': None},
+            'optimizer': {
+                'disable': False,
+                'exploitChance': 0.9,
+                'exploitTarget': 0.75,
+                'exploitTargetHigh': 0.5,
+                'exploitTargetLow': 0.25},
+            'repeatInterval': None,
+            'repeatRetries': 3,
+            'replicate': None,
+            'restartHookFile': None,
+            'restartHookOn': ['ResourceExhausted'],
+            'shutdownOn': [],
+            'stage': None}}
+
+
 def test_internal_experiment_simple(
     output_dir: str,
     simple_dsl2: typing.Dict[str, typing.Any],
@@ -337,7 +498,8 @@ def test_internal_experiment_simple_real(
         'secretName': 'default-s3-secret'
     }
 
-    assert sorted(pvep.base.packages[0].source.s3.location.dict(exclude_none=True)) == ["bucket", "endpoint", "region"]
+    assert sorted(pvep.base.packages[0].source.s3.location.dict(exclude_none=True)) == [
+        "bucket", "endpoint", "region"]
     contents = s3_storage.read(f"unit-tests-experiments/{pvep_name}/conf/dsl.yaml").decode()
     s3_storage.remove(f"unit-tests-experiments/{pvep_name}/")
 

@@ -243,12 +243,12 @@ def update_component_defaults_in_namespace(namespace: experiment.model.frontends
 
     for idx, comp in enumerate(namespace.components):
         comp = comp.dict(by_alias=True, exclude_unset=True, exclude_defaults=True)
-
+        defaults = copy.deepcopy(default_comp)
         experiment.model.frontends.flowir.FlowIR.override_object(
-            comp, copy.deepcopy(default_comp)
+            defaults, comp
         )
 
-        namespace.components[idx] = experiment.model.frontends.dsl.Component(**comp)
+        namespace.components[idx] = experiment.model.frontends.dsl.Component(**defaults)
 
 
 def api_get_experiment_dsl(
