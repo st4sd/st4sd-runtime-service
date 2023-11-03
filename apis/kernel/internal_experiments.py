@@ -256,12 +256,13 @@ def validate_internal_experiment(
         concrete.validate()
     except experiment.model.errors.FlowIRConfigurationErrors as e:
         raise apis.models.errors.InvalidModelError("Invalid DSL definition", [
-            {"problem": str(e)} for e in e.underlyingErrors
+            {
+                "loc": [],
+                "msg": str(e)
+            } for e in e.underlyingErrors
         ])
     except experiment.model.errors.DSLInvalidError as e:
-        raise apis.models.errors.InvalidModelError("Invalid DSL definition", [
-            {"problem": str(e)} for e in e.underlying_errors
-        ])
+        raise apis.models.errors.InvalidModelError("Invalid DSL definition", e.errors())
 
     pvep = pvep.copy(deep=True)
 

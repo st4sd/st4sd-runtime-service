@@ -787,8 +787,8 @@ def test_invalid_dsl():
 
     assert exc.problems == [
         {
-            'error': "'No template with name main'",
-            'location': ['entrypoint', 'entry-instance']
+            'msg': "No template with name main",
+            'loc': ['entrypoint', 'entry-instance']
         }
     ]
 
