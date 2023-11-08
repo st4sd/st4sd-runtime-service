@@ -20,6 +20,7 @@ Each graph in the library:
 """
 import pathlib
 import typing
+import copy
 
 import pydantic
 import yaml
@@ -174,6 +175,65 @@ class LibraryClient:
             raise apis.models.errors.StorageError(f"Unable to list graphs due to {type(e)}: {e}")
 
     @classmethod
+    def _preprocess_workflows(cls, namespace: experiment.model.frontends.dsl.Namespace):
+        """Utility method to auto-generate a wrapper workflow to the unique component of an entry which has no
+        workflows
+
+        Auto-generation:
+        - if there is exactly 1 component called X and no workflows then
+            - rename the component X-wrapped
+            - auto-generate a workflow called X
+            - copy the parameters of X-wrapped to X
+            - invoke X-wrapped inside X
+            - auto-generate the entrypoint
+
+        Args:
+            namespace:
+                The graph to preprocess, may change in place
+        """
+        if len(namespace.workflows) != 0:
+            return
+
+        if len(namespace.components) != 1:
+            return
+
+        workflow_name = namespace.components[0].signature.name
+
+        workflow = experiment.model.frontends.dsl.Workflow(
+            signature=copy.deepcopy(namespace.components[0].signature),
+            steps= {
+                f"{workflow_name}-wrapped": f"{workflow_name}-wrapped"
+            },
+            execute=[
+                experiment.model.frontends.dsl.ExecuteStep(
+                    target=f"<{workflow_name}-wrapped>",
+                    args={
+                        p.name: f"%({p.name})s" for p in namespace.components[0].signature.parameters
+                    }
+                )
+            ]
+        )
+
+        namespace.components[0].signature.name = f"{workflow_name}-wrapped"
+        namespace.workflows.append(workflow)
+
+        # VV: if there's no entrypoint auto generate. If there is one already then by definition it must be
+        # pointing to the Component. Now, the Workflow has the original name of the component and therefore the
+        # entrypoint is still valid
+        if not namespace.entrypoint:
+            namespace.entrypoint = experiment.model.frontends.dsl.Entrypoint(
+                execute=[
+                    experiment.model.frontends.dsl.ExecuteStep(
+                        target=f"<entry-instance>",
+                        args={}
+                    )
+                ],
+                **{
+                    "entry-instance": workflow_name
+                }
+            )
+
+    @classmethod
     def _preprocess_entrypoint(cls, entry: Entry):
         """Utility method to auto-generate the entrypoint of a Graph and preprocess it
 
@@ -192,6 +252,7 @@ class LibraryClient:
         if (
             isinstance(graph, dict)
             and "entrypoint" not in graph
+            and isinstance(graph.get("workflows", []), list)
             and len(graph.get("workflows", [])) == 1
             and isinstance(graph["workflows"][0], dict)
             and isinstance(graph["workflows"][0].get("signature"), dict)
@@ -215,6 +276,17 @@ class LibraryClient:
             and isinstance(graph['entrypoint']['execute'][0], dict)
         ):
             graph['entrypoint']['execute'][0]['args'] = {}
+        elif (
+            isinstance(graph, dict)
+            and isinstance(graph.get("entrypoint"), dict)
+            and 'execute' not in graph['entrypoint']
+        ):
+            graph['entrypoint']['execute'] = [
+                {
+                    "target": "<entry-instance>",
+                    "args": {}
+                }
+            ]
 
     @classmethod
     def validate(cls, entry: Entry) -> experiment.model.frontends.dsl.Namespace:
@@ -239,16 +311,39 @@ class LibraryClient:
 
         cls._preprocess_entrypoint(entry)
 
-        try:
-            namespace = experiment.model.frontends.dsl.Namespace(**entry.graph)
-        except pydantic.ValidationError as e:
-            errors = [dict(x) for x in e.errors()]
+        def reformat_errors(errors: typing.List[typing.Dict[str, typing.Any]]):
+            """Utility method to rewrite the dictionaries representing errors
+
+            Args:
+                errors:
+                    An array of dictionaries each of which represents an error.
+                    The array will be updated in place.
+
+            Returns:
+                The input argument `errors`
+            """
             for x in errors:
                 try:
                     message = x.pop('msg')
                 except KeyError:
-                    continue
-                x['message'] = message
+                    pass
+                else:
+                    x['message'] = message
+
+                try:
+                    location = x.pop('loc')
+                except KeyError:
+                    pass
+                else:
+                    x['location'] = location
+
+            return errors
+
+
+        try:
+            namespace = experiment.model.frontends.dsl.Namespace(**entry.graph)
+        except pydantic.ValidationError as e:
+            errors = reformat_errors(e.errors())
             raise apis.models.errors.InvalidModelError(
                 "Invalid graph", problems=errors
             )
@@ -258,12 +353,15 @@ class LibraryClient:
             )
 
         errors = []
+        if len(namespace.components) == 0:
+            errors.append({"message": "There must be at least 1 component template"})
+
+        cls._preprocess_workflows(namespace)
 
         if len(namespace.workflows) == 0:
             errors.append({"message": "There must be at least 1 workflow template"})
-        if len(namespace.components) == 0:
-            errors.append({"message": "There must be at least 1 component template"})
-        if len(namespace.entrypoint.execute) != 1:
+
+        if not namespace.entrypoint or len(namespace.entrypoint.execute) != 1:
             errors.append({"message": "Missing entrypoint workflow template"})
 
         if len(errors):
@@ -315,8 +413,7 @@ class LibraryClient:
             # VV: Discover all reachable templates. If there are no errors then the Graph is good enough
             scopes.discover_all_instances_of_templates(namespace, override_entrypoint_args=auto_args)
         except experiment.model.errors.DSLInvalidError as e:
-            raise apis.models.errors.InvalidModelError("Invalid graph", problems=[{
-                "message": str(exc.underlying_error), "location": exc.location
-            } for exc in e.underlying_errors])
+            errors = reformat_errors(e.errors())
+            raise apis.models.errors.InvalidModelError("Invalid graph", problems=errors)
 
         return namespace

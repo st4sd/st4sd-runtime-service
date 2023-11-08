@@ -84,6 +84,20 @@ def dsl_no_entrypoint_workflow() -> typing.Dict[str, typing.Any]:
 
 
 @pytest.fixture()
+def dsl_just_component() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    components:
+    - signature:
+        name: dummy
+        parameters:
+            - name: message
+      command:
+        executable: echo
+        arguments: "%(message)s"
+    """)
+
+
+@pytest.fixture()
 def dsl_invalid_dsl(dsl_no_entrypoint_workflow: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     dsl_no_entrypoint_workflow["entrypoint"]["execute"]= [
         {
@@ -101,15 +115,11 @@ def test_simple_dsl_validate_only(the_dsl_fixture_name, request):
     apis.kernel.library.LibraryClient.validate(entry)
 
 
-def test_missing_workflow(dsl_no_workflow: typing.Dict[str, typing.Any]):
-    entry = apis.kernel.library.Entry(graph=dsl_no_workflow)
-    with pytest.raises(apis.models.errors.InvalidModelError) as e:
-        apis.kernel.library.LibraryClient.validate(entry)
-
-    assert e.value.problems == [
-        {"message": "There must be at least 1 workflow template"},
-        {'message': 'Missing entrypoint workflow template'}
-    ]
+def test_missing_workflow(dsl_no_workflow: typing.Dict[str, typing.Any], output_dir: str):
+    library_path = os.path.join(output_dir, "library")
+    actuator = apis.storage.actuators.local.LocalStorage()
+    client = apis.kernel.library.LibraryClient(actuator=actuator, library_path=library_path)
+    check_basic_library_operations(dsl=dsl_no_workflow, client=client)
 
 
 def test_missing_component(dsl_no_component: typing.Dict[str, typing.Any]):
@@ -120,7 +130,6 @@ def test_missing_component(dsl_no_component: typing.Dict[str, typing.Any]):
 
     assert e.value.problems == [
         {"message": "There must be at least 1 component template"},
-        {'message': 'Missing entrypoint workflow template'}
     ]
 
 
@@ -130,7 +139,10 @@ def test_missing_entrypoint_workflow_template(dsl_no_entrypoint_workflow: typing
         apis.kernel.library.LibraryClient.validate(entry)
 
     assert e.value.problems == [
-        {"message": "Missing entrypoint workflow template"}
+        {
+            'message': 'Node [\'entry-instance\', \'hello\'] has no matching template',
+            'location': ['workflows', 0, 'execute', 0]
+        }
     ]
 
 
@@ -143,9 +155,9 @@ def test_dsl_invalid_dsl(dsl_invalid_dsl: typing.Dict[str, typing.Any]):
 
     assert exc.problems == [
         {
-            'message': '"Node [\'entry-instance\', \'hello\'] has no matching template"',
-            'location': ['workflows', 'main', 'execute', 0]
-         }
+            'message': 'Node [\'entry-instance\', \'hello\'] has no matching template',
+            'location': ['workflows', 0, 'execute', 0]
+        }
     ]
 
 
@@ -179,6 +191,8 @@ def check_basic_library_operations(
     with pytest.raises(apis.models.errors.GraphDoesNotExistError):
         client.get(namespace_orig.entrypoint.entryInstance)
 
+    return namespace_library
+
 
 def test_in_memory_library_operations(simple_dsl2: typing.Dict[str, typing.Any]):
     actuator = apis.storage.actuators.memory.InMemoryStorage({})
@@ -186,6 +200,35 @@ def test_in_memory_library_operations(simple_dsl2: typing.Dict[str, typing.Any])
     check_basic_library_operations(dsl=simple_dsl2, client=client)
 
     assert actuator.files == {"/": None, "library/": None}
+
+
+def test_just_component(dsl_just_component: typing.Dict[str, typing.Any]):
+    actuator = apis.storage.actuators.memory.InMemoryStorage({})
+    client = apis.kernel.library.LibraryClient(actuator=actuator)
+    namespace = check_basic_library_operations(dsl=dsl_just_component, client=client)
+
+    assert actuator.files == {"/": None, "library/": None}
+
+    assert len(namespace.workflows) == 1
+    assert namespace.workflows[0].signature.name == "dummy"
+
+    assert len(namespace.components) == 1
+    assert namespace.components[0].signature.name == "dummy-wrapped"
+
+    assert namespace.components[0].signature.parameters == namespace.workflows[0].signature.parameters
+
+    assert namespace.components[0].signature.parameters[0].dict(exclude_none=True) == {
+        "name": "message"
+    }
+
+    assert namespace.workflows[0].execute[0].args == {
+        'message': '%(message)s'
+    }
+
+    assert namespace.workflows[0].steps == {
+        "dummy-wrapped" : "dummy-wrapped"
+    }
+
 
 def test_local_library_operations(
     simple_dsl2: typing.Dict[str, typing.Any],
