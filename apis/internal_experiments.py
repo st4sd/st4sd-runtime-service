@@ -27,7 +27,7 @@ api = apis.models.api_internal_experiments
 class InternalExperiments(Resource):
     @api.expect(apis.models.m_internal_experiment)
     def post(self):
-        if not apis.models.constants.S3_CONFIG_SECRET_NAME:
+        if not apis.models.constants.S3_INTERNAL_EXPERIMENTS_SECRET_NAME:
             api.abort(400, "Internal Storage is disabled - contact the administrator of this ST4SD deployment")
             raise ValueError() # VV: keep linter happy
 
@@ -62,7 +62,7 @@ class InternalExperiments(Resource):
                 pvep=pvep,
                 db_secrets=db_secrets,
                 db_experiments=db_experiments,
-                package_source=apis.models.constants.S3_CONFIG_SECRET_NAME,
+                package_source=apis.models.constants.S3_INTERNAL_EXPERIMENTS_SECRET_NAME,
                 dest_path=pathlib.Path(apis.models.constants.S3_ROOT_INTERNAL_EXPERIMENTS)
             )
 

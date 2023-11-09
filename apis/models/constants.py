@@ -100,7 +100,7 @@ LOCAL_STORAGE = EnvVar("LOCAL_STORAGE", os.getcwd()).value
 # S3_BUCKET
 # S3_PREFIX
 # When set, it switches on the `/internal-experiments/` APIs
-S3_CONFIG_SECRET_NAME = EnvVar("S3_CONFIG_SECRET_NAME", "").value
+S3_INTERNAL_EXPERIMENTS_SECRET_NAME = EnvVar("S3_INTERNAL_EXPERIMENTS_SECRET_NAME", "").value
 
 # VV: The suffix under which to store the internal experiments inside the internal storage (e.g. S3)
 S3_ROOT_INTERNAL_EXPERIMENTS = EnvVar("S3_ROOT_INTERNAL_EXPERIMENTS", "experiments").value
