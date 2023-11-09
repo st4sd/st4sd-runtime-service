@@ -25,10 +25,10 @@ def generate_client() -> apis.kernel.library.LibraryClient:
         actuator = apis.storage.actuators.local.LocalStorage()
     else:
         db_secrets = utils.secrets_git_open(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
-        secret = db_secrets.secret_get(apis.models.constants.S3_LIBRARY_SECRET_NAME)
+        secret = db_secrets.secret_get(apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME)
         if secret is None:
             raise  apis.models.errors.DBError(
-                f"Secret {apis.models.constants.S3_LIBRARY_SECRET_NAME} containing the S3 credentials for the Library "
+                f"Secret {apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME} containing the S3 credentials for the Library "
                 f"does not exist")
 
         lookup = {
@@ -44,7 +44,7 @@ def generate_client() -> apis.kernel.library.LibraryClient:
         actuator = apis.storage.actuators.s3.S3Storage(**args)
 
     return apis.kernel.library.LibraryClient(
-        actuator=actuator, library_path=apis.models.constants.S3_ROOT_LIBRARY
+        actuator=actuator, library_path=apis.models.constants.S3_ROOT_GRAPH_LIBRARY
     )
 
 
@@ -53,7 +53,7 @@ class UtilityDSL(Resource):
     @api.expect(apis.models.m_library_graph)
     def post(self):
         """Validates a DSL graph and adds it to the library."""
-        if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_LIBRARY_SECRET_NAME:
+        if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME:
             api.abort(400, "Graph Library is disabled - contact the administrator of this ST4SD deployment")
             raise ValueError()  # VV: keep linter happy
 
@@ -106,7 +106,7 @@ class UtilityDSL(Resource):
         }
         """
 
-        if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_LIBRARY_SECRET_NAME:
+        if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME:
             api.abort(400, "Graph Library is disabled - contact the administrator of this ST4SD deployment")
             raise ValueError()  # VV: keep linter happy
 
@@ -144,7 +144,7 @@ class UtilityDSL(Resource):
 class UtilityDSL(Resource):
     def delete(self, name: str):
         """Removes 1 Graph from the library"""
-        if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_LIBRARY_SECRET_NAME:
+        if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME:
             api.abort(400, "Graph Library is disabled - contact the administrator of this ST4SD deployment")
             raise ValueError()  # VV: keep linter happy
 

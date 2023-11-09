@@ -15,7 +15,7 @@ Each graph in the library:
 5. All templates that are reachable from the entrypoint workflow **must** be valid
 6. The name of the graph, is the name of the entry workflow
 7. There **must not** be an existing graph with the same name in the library
-8. The Graph DSL is stored under ${S3_ROOT_LIBRARY}/${graphName}/dsl.yaml
+8. The Graph DSL is stored under ${S3_ROOT_GRAPH_LIBRARY}/${graphName}/dsl.yaml
 
 """
 import pathlib
@@ -50,7 +50,7 @@ class LibraryClient:
         self.actuator = actuator
 
         if library_path is None:
-            library_path = apis.models.constants.S3_ROOT_LIBRARY
+            library_path = apis.models.constants.S3_ROOT_GRAPH_LIBRARY
 
         if not isinstance(library_path, pathlib.Path):
             library_path = pathlib.Path(library_path)

@@ -113,7 +113,7 @@ S3_ROOT_INTERNAL_EXPERIMENTS = EnvVar("S3_ROOT_INTERNAL_EXPERIMENTS", "experimen
 # S3_BUCKET
 # S3_PREFIX
 # When set, it switches on the `/library/` APIs
-S3_LIBRARY_SECRET_NAME = EnvVar("S3_LIBRARY_SECRET_NAME", "").value
+S3_GRAPH_LIBRARY_SECRET_NAME = EnvVar("S3_GRAPH_LIBRARY_SECRET_NAME", "").value
 
 # VV: The suffix under which to store the graph library inside the library storage (e.g. S3)
-S3_ROOT_LIBRARY = EnvVar("S3_ROOT_LIBRARY", "library").value
+S3_ROOT_GRAPH_LIBRARY = EnvVar("S3_ROOT_GRAPH_LIBRARY", "library").value

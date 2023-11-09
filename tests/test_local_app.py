@@ -51,7 +51,7 @@ def initialise_api(output_dir) -> int:
             f"-e GUNICORN_PID_PATH={pid_path}",
             "-e LOCAL_DEPLOYMENT=True",
             f"-e LOCAL_STORAGE={output_dir}",
-            f"-e S3_ROOT_LIBRARY={output_dir}/library",
+            f"-e S3_ROOT_GRAPH_LIBRARY={output_dir}/library",
             "--timeout=120",
             "--threads=1",
             "--keep-alive=3",
