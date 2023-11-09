@@ -41,13 +41,13 @@ class DerivedVirtualExperimentMetadata(apis.models.virtual_experiment.VirtualExp
 
 class PackageConflictMetadata(apis.models.common.Digestable):
     name: str
-    value: Any  # ellipsis indicates that there is no value
+    value: Any = None  # ellipsis indicates that there is no value
 
 
 class _book(pydantic.BaseModel):
     location: List[Union[str, int]]
     package: str
-    value: Any
+    value: Any = None
 
 
 class VariableOverride(apis.models.common.Digestable):
@@ -129,7 +129,7 @@ class InstructionRewireSymbol(apis.models.common.Digestable):
         elif dest_symbol.valueFrom.applicationDependency:
             rewire_symbol_source.reference = dest_symbol.valueFrom.applicationDependency.reference
         else:
-            raise apis.runtime.errors.RuntimeError(f"Cannot rewire symbols using {dest_symbol.json(indent=2)}")
+            raise apis.runtime.errors.RuntimeError(f"Cannot rewire symbols using {dest_symbol.model_dump_json(indent=2)}")
 
         return rewire
 
@@ -526,9 +526,9 @@ class InstructionRewireSymbol(apis.models.common.Digestable):
                 ret.variables[key] = RewireSymbol(reference=value)
         else:
             raise apis.runtime.errors.RuntimeError(f"Unable to rewire symbols of {comp_label} with "
-                                                   f"{self.json(indent=2)}")
+                                                   f"{self.model_dump_json(indent=2)}")
 
-        logger.info(f"Rewiring results: {ret.json(indent=2)} {op}")
+        logger.info(f"Rewiring results: {ret.model_dump_json(indent=2)} {op}")
 
         return ret
 
@@ -604,12 +604,13 @@ class PackageConflict(apis.models.common.Digestable):
 
         return conflicts
 
-
 class PlatformVariables(apis.models.common.Digestable):
     # VV: `global` is a reserved python word and we cannot use it here
-    vGlobal: Dict[str, str] = pydantic.Field(
+    vGlobal: Dict[str, apis.models.common.MustBeString] = pydantic.Field(
         {}, description="Global variables", alias="global")
-    stages: Dict[int, Dict[str, str]] = pydantic.Field({}, description="Variables in stages")
+    stages: Dict[
+        int, Dict[str, apis.models.common.MustBeString]
+    ] = pydantic.Field({}, description="Variables in stages")
 
 
 class VariableCollection(apis.models.common.Digestable):
@@ -852,7 +853,7 @@ def explain_choices_in_derived(
                 continue
 
             if dest_symbol.valueFrom.graph is None:
-                raise apis.runtime.errors.RuntimeError(f'inputBinding {dest_symbol.json(indent=2)} is invalid')
+                raise apis.runtime.errors.RuntimeError(f'inputBinding {dest_symbol.model_dump_json(indent=2)} is invalid')
 
             graph = ve.base.get_package(last_package).get_graph(graph_name)
 
@@ -862,7 +863,7 @@ def explain_choices_in_derived(
                 continue
 
             if input_binding.text not in graph_variables:
-                raise apis.runtime.errors.RuntimeError(f'inputBinding {input_binding.json(indent=2)} in '
+                raise apis.runtime.errors.RuntimeError(f'inputBinding {input_binding.model_dump_json(indent=2)} in '
                                                        f'{connection.graph.name} is an invalid Variable definition '
                                                        f'it points to a variable that does not exist')
             dest_name = input_binding.text
@@ -878,8 +879,8 @@ def explain_choices_in_derived(
             value = source_symbol.text
             if value is None:
                 raise apis.runtime.errors.RuntimeError(
-                    f'The value to {input_binding.json(indent=2)} in {connection.graph.name} does not '
-                    f'have .text but {source_symbol.json(indent=2)}')
+                    f'The value to {input_binding.model_dump_json(indent=2)} in {connection.graph.name} does not '
+                    f'have .text but {source_symbol.model_dump_json(indent=2)}')
 
             # VV: FIXME what about indirect variables?
             platform_vars = {
@@ -969,8 +970,8 @@ class DerivedPackage:
             instruction = InstructionRewireSymbol.generate_instruction_to_rewire_parameter(
                 ve=self._ve, dest_symbol=dest_symbol, connection=connection)
 
-            self._log.info(f"Generated InstructionRewireSymbol {instruction.json(indent=2)} "
-                           f"from {dest_symbol.json(indent=2)}")
+            self._log.info(f"Generated InstructionRewireSymbol {instruction.model_dump_json(indent=2)} "
+                           f"from {dest_symbol.model_dump_json(indent=2)}")
 
             x = instruction.apply_to_component(component=component, comp_label=comp_label)
 
@@ -1081,8 +1082,8 @@ class DerivedPackage:
 
                         if not meta.ownerGraphName:
                             raise apis.runtime.errors.RuntimeError(
-                                f"InstructionRewireSymbol results {meta.json(indent=2)} does not contain an "
-                                f"ownerGraphName")
+                                f"InstructionRewireSymbol results {meta.model_dump_json(indent=2)} does not contain "
+                                f"an ownerGraphName")
                         owner_package, _ = meta.ownerGraphName.split('/')
                         for var_name in other_vars:
                             variable_overrides[var_name] = VariableOverride(
@@ -1169,7 +1170,7 @@ class DerivedPackage:
                         concrete.get_platform_stage_blueprint(stage_idx, platform)
                     )
 
-                vars_platform = PlatformVariables.parse_obj(concrete.get_platform_variables(platform))
+                vars_platform = PlatformVariables.model_validate(concrete.get_platform_variables(platform))
                 all_vars[pkg_name].platforms[platform] = vars_platform
                 all_global = all_vars[pkg_name].platforms[platform].vGlobal
                 all_stages = all_vars[pkg_name].platforms[platform].stages
@@ -1203,10 +1204,10 @@ class DerivedPackage:
                 try:
                     aggregate_vars.platforms[p].vGlobal[v.variableName] = platform_vars['global'][v.variableName]
                 except KeyError as e:
-                    self._log.warning(f"Cannot copy {v.json(indent=2)} for platform {p} - will ignore")
+                    self._log.warning(f"Cannot copy {v.model_dump_json(indent=2)} for platform {p} - will ignore")
                     continue
-                self._log.info(f"Copied {v.json(indent=2)} = {platform_vars['global'][v.variableName]} from "
-                               f"platform {p}")
+                self._log.info(f"Copied {v.model_dump_json(indent=2)} = {platform_vars['global'][v.variableName]} "
+                               f"from platform {p}")
 
         # VV: Finally trim the aggregate variables to remove variables whose value is identical to the variable value
         # in the default platform
@@ -1281,7 +1282,7 @@ class DerivedPackage:
         self._log.info(f"Synthesizing parameterised virtual experiment package for Derived (platforms: {platforms})")
         graphs_meta = self.extract_graphs(package_metadata, platforms)
 
-        self._log.info(f"Extracted graphsMetadata: {graphs_meta.json(indent=2)}")
+        self._log.info(f"Extracted graphsMetadata: {graphs_meta.model_dump_json(indent=2)}")
 
         # VV: Step 2 -  identify conflicts between variables and blueprints in the many base-packages
         # We have a conflict, when more than 1 packages define a variable/blueprintField with more than 1 unique value
@@ -1305,6 +1306,8 @@ class DerivedPackage:
         # VV: Step 3 - put aggregate_blueprints, aggregate_variables, and all_components in a single FlowIRConcrete
         blueprints = graphs_meta.aggregate_blueprints.dict(exclude_none=True)['platforms']
         variables = graphs_meta.aggregate_variables.dict(exclude_none=True)['platforms']
+
+        logging.getLogger().warning(f"THE BASE IS {self._ve.base.model_dump_json(indent=2)}")
 
         top_level_directories = sorted({apis.models.virtual_experiment.extract_top_level_directory(x.dest.path)
                                         for x in self._ve.base.includePaths})
@@ -1370,7 +1373,7 @@ class DerivedPackage:
 
             if os.path.exists(src_path) is False:
                 raise apis.models.errors.ApiError(
-                    f"The source path in IncludePath {ip.json(indent=2)} does not exist")
+                    f"The source path in IncludePath {ip.model_dump_json(indent=2)} does not exist")
 
             if os.path.isdir(src_path):
                 dirname = dst_path

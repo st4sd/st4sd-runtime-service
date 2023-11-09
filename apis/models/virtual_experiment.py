@@ -12,6 +12,9 @@ import datetime
 import difflib
 import logging
 import os.path
+import typing
+
+import typing_extensions
 from collections import namedtuple
 from typing import Any
 from typing import Dict
@@ -27,7 +30,7 @@ import experiment.model.graph
 import experiment.model.storage
 import pydantic
 import six
-from pydantic import validator
+from pydantic import ConfigDict, validator
 
 import apis.models.common
 import apis.models.constants
@@ -78,7 +81,7 @@ class BasePackageSourceGit(BasePackageSource):
     location: SourceGitLocation = pydantic.Field(description="The location of the package on git")
     version: Optional[str] = pydantic.Field(None, description="The commit id of the package on git")
 
-    @validator('location')
+    @pydantic.field_validator('location')
     def single_location_source(cls, value: SourceGitLocation):
         raw = value.dict(exclude_none=True)
         raw = {x: raw[x] for x in raw if x != "url"}
@@ -97,15 +100,16 @@ class BasePackageSourceDataset(BasePackageSource):
     security: Optional[DatasetInfo] = pydantic.Field(
         None, description="The information required to get the package from the dataset")
 
-    @validator('security', always=True)
+    @pydantic.field_validator('security')
     def set_default_security(cls, value: DatasetInfo | None, values: Dict[str, Any]) -> DatasetInfo:
         if value is None:
             return values.get('location')
+        return value
 
 
 class DependencyImageRegistry(apis.models.common.Digestable):
     serverUrl: str
-    security: Optional[apis.models.common.Option]
+    security: Optional[apis.models.common.Option] = None
 
 
 class BasePackageDependencies(apis.models.common.Digestable):
@@ -118,8 +122,7 @@ class BasePackageConfig(apis.models.common.Digestable):
 
 
 class VirtualExperimentMetadata(pydantic.BaseModel):
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     concrete: experiment.model.frontends.flowir.FlowIRConcrete
     manifestData: Dict[str, str] = pydantic.Field(
@@ -290,8 +293,8 @@ class BaseSource(apis.models.common.Digestable):
 
 
 class OrchestratorResources(apis.models.common.Digestable):
-    cpu: Optional[str]
-    memory: Optional[str]
+    cpu: Optional[str] = None
+    memory: Optional[str] = None
 
 
 class ParameterisationRuntime(apis.models.common.Digestable):
@@ -301,8 +304,8 @@ class ParameterisationRuntime(apis.models.common.Digestable):
 
 class Configuration(apis.models.common.Digestable):
     image: Optional[str] = None
-    s3FetchFilesImage: Optional[str] = pydantic.Field(alias="s3-fetch-files-image")
-    workflowMonitoringImage: Optional[str] = pydantic.Field(alias="workflow-monitoring-image")
+    s3FetchFilesImage: Optional[str] = pydantic.Field(None, alias="s3-fetch-files-image")
+    workflowMonitoringImage: Optional[str] = pydantic.Field(None, alias="workflow-monitoring-image")
     gitsecret: Optional[str] = None
     gitsecretOauth: Optional[str] = pydantic.Field(
         None,
@@ -357,7 +360,7 @@ class NamespacePresets(apis.models.common.Digestable):
 class VolumePersistentVolumeClaim(apis.models.common.Digestable):
     claimName: str
     readOnly: bool = True
-    subPath: Optional[str]
+    subPath: Optional[str] = None
 
 
 class KubernetesNestedItem(apis.models.common.Digestable):
@@ -380,19 +383,19 @@ class VolumeSecret(apis.models.common.Digestable):
 class VolumeDataset(apis.models.common.Digestable):
     name: str
     readOnly: bool = True
-    subPath: Optional[str]
+    subPath: Optional[str] = None
 
 
 class PayloadVolumeType(apis.models.common.Digestable):
-    persistentVolumeClaim: Optional[VolumePersistentVolumeClaim]
-    configMap: Optional[VolumeConfigMap]
-    dataset: Optional[VolumeDataset]
-    secret: Optional[VolumeSecret]
+    persistentVolumeClaim: Optional[VolumePersistentVolumeClaim] = None
+    configMap: Optional[VolumeConfigMap] = None
+    dataset: Optional[VolumeDataset] = None
+    secret: Optional[VolumeSecret] = None
 
 
 class PayloadVolume(apis.models.common.Digestable):
     type: PayloadVolumeType
-    applicationDependency: Optional[str]
+    applicationDependency: Optional[str] = None
 
 
 def partition_dataset_uri(uri: str, protocol='dataset') -> Tuple[str, str]:
@@ -440,17 +443,14 @@ class OldFileContent(apis.models.common.Digestable):
 
         return value
 
-    @pydantic.root_validator()
-    def mutually_exclusive_fields(cls, value: Dict[str, Optional[str]]) -> Dict[str, Optional[str]]:
-        if isinstance(value, dict) is False:
-            raise ValueError("Not a dictionary")
-
-        if (value.get('filename') is not None or value.get('content') is not None) and \
-                (value.get('sourceFilename') is not None or value.get('targetFilename') is not None):
+    @pydantic.model_validator(mode="after")
+    def mutually_exclusive_fields(cls, value: "OldFileContent") -> "OldFileContent":
+        if (value.filename is not None or value.content is not None) and \
+                (value.sourceFilename is not None or value.targetFilename is not None):
             raise ValueError("filename/content are mutually exclusive with sourceFilename/targetFilename")
 
-        if (value.get('sourceFilename') is not None and value.get('targetFilename') is None) or \
-                (value.get('targetFilename') is not None and value.get('sourceFilename') is None):
+        if (value.sourceFilename is not None and value.targetFilename is None) or \
+                (value.targetFilename is not None and value.sourceFilename is None):
             raise ValueError("If either targetFilename and sourceFilename is set, then both must be set")
 
         return value
@@ -466,8 +466,8 @@ class OldVolumeType(apis.models.common.Digestable):
 class OldVolume(apis.models.common.Digestable):
     type: OldVolumeType
     applicationDependency: str
-    subPath: Optional[str]
-    mountPath: Optional[str]
+    subPath: Optional[str] = None
+    mountPath: Optional[str] = None
     readOnly: bool = True
 
 
@@ -481,7 +481,7 @@ class OldS3Credentials(apis.models.common.Digestable):
 
 
 class OldS3Store(apis.models.common.Digestable):
-    credentials: Optional[OldS3Credentials]
+    credentials: Optional[OldS3Credentials] = None
     bucketPath: Optional[str] = "workflow_instances/"
 
 
@@ -505,7 +505,7 @@ class DeprecatedExperimentStartPayload(apis.models.common.Digestable):
     platform: Optional[str] = None
     runtimePolicy: Optional[PayloadExecutionRuntimePolicy] = None
 
-    @validator('metadata', 'variables', 'environmentVariables')
+    @pydantic.field_validator('metadata', 'variables', 'environmentVariables')
     def ensure_strings(cls, value: Dict[str, Any]):
         value = value or {}
 
@@ -530,8 +530,21 @@ class DeprecatedExperimentStartPayload(apis.models.common.Digestable):
                     .parse_obj(*args, **payload))
 
 
+def no_colon_in_name_value(value: apis.models.common.Option):
+    if value.value is None or value.valueFrom is not None:
+        raise ValueError(f"The value of userMetadata {value.name} must be a constant (i.e. field .value)")
+
+    if ':' in value.name:
+        raise ValueError(f"The name of userMetadata {value.name} contains illegal ':'")
+
+    if ':' in value.value:
+        raise ValueError(f"The value of userMetadata {value.name} (\"{value.value}\") contains illegal ':'")
+
+    return value
+
+
 class PayloadExecutionOptions(apis.models.common.Digestable):
-    platform: Optional[str]
+    platform: Optional[str] = None
     security: PayloadSecurity = PayloadSecurity()
     volumes: List[PayloadVolume] = []
     s3Output: Optional[apis.models.common.Option] = apis.models.common.Option()
@@ -540,21 +553,8 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
     data: List[apis.models.common.Option] = []
     variables: List[apis.models.common.Option] = []
     runtime: ParameterisationRuntime = ParameterisationRuntime()
-    userMetadata: List[apis.models.common.Option] = []
+    userMetadata: List[typing_extensions.Annotated[apis.models.common.Option, pydantic.functional_validators.AfterValidator(no_colon_in_name_value)]] = []
     runtimePolicy: Optional[PayloadExecutionRuntimePolicy] = None
-
-    @validator('userMetadata', each_item=True)
-    def no_colon_in_name_value(cls, value: apis.models.common.Option):
-        if value.value is None or value.valueFrom is not None:
-            raise ValueError(f"The value of userMetadata {value.name} must be a constant (i.e. field .value)")
-
-        if ':' in value.name:
-            raise ValueError(f"The name of userMetadata {value.name} contains illegal ':'")
-
-        if ':' in value.value:
-            raise ValueError(f"The value of userMetadata {value.name} (\"{value.value}\") contains illegal ':'")
-
-        return value
 
     @classmethod
     def from_old_payload(cls, old: DeprecatedExperimentStartPayload) -> PayloadExecutionOptions:
@@ -700,7 +700,7 @@ class ParameterisationPresets(apis.models.common.Digestable):
     runtime: ParameterisationRuntime = ParameterisationRuntime()
     data: List[apis.models.common.Option] = []
     environmentVariables: List[apis.models.common.Option] = []
-    platform: Optional[str]
+    platform: Optional[str] = None
 
     def get_variable(self, name: str) -> apis.models.common.Option:
         for v in self.variables:
@@ -748,7 +748,7 @@ class MetadataPackage(apis.models.common.Digestable):
         description="The description of the parameterised virtual experiment package"
     )
 
-    @validator('name')
+    @pydantic.field_validator('name')
     def name_must_be_valid_k8s_object_name(cls, name):
         valid_k8s = apis.models.common.valid_k8s_label(
             'name',
@@ -766,7 +766,7 @@ class MetadataPackage(apis.models.common.Digestable):
 
 
 class ValueInPlatform(apis.models.common.Digestable):
-    value: str
+    value: apis.models.common.MustBeString
     platform: Optional[str] = None
 
 
@@ -794,15 +794,31 @@ class ExecutionOptionDefaults(apis.models.common.Digestable):
         raise KeyError(f"Unknown variable", name)
 
 
+def must_only_contain_name(value: apis.models.common.Option) -> apis.models.common.Option:
+    raw = value.dict()
+    if list(raw) != ["name"]:
+        raise ValueError("Must contain just the key \"name\"")
+    return value
+
+MustContainName = Optional[List[
+    typing_extensions.Annotated[
+        apis.models.common.Option,
+        pydantic.functional_validators.AfterValidator(must_only_contain_name)
+    ]
+]]
+
+
 class MetadataRegistry(apis.models.common.Digestable):
-    createdOn: Optional[str] = None
+    createdOn: Optional[str] = pydantic.Field(
+        default_factory=lambda: MetadataRegistry.get_time_now_as_str()
+    )
     digest: Optional[str] = None
     tags: Optional[List[str]] = []
     timesExecuted: int = 0
     interface: Dict[str, Any] = {}
-    inputs: Optional[List[apis.models.common.Option]] = []
-    data: Optional[List[apis.models.common.Option]] = []
-    containerImages: Optional[List[apis.models.common.Option]] = []
+    inputs: MustContainName = []
+    data: MustContainName = []
+    containerImages: MustContainName = []
     executionOptionsDefaults: ExecutionOptionDefaults = ExecutionOptionDefaults()
     platforms: List[str] = []
 
@@ -813,19 +829,6 @@ class MetadataRegistry(apis.models.common.Digestable):
 
     def get_data_names(self) -> List[str]:
         return [x.name for x in self.data]
-
-    @validator('createdOn', always=True)
-    def set_default_value(cls, value: str | None) -> str:
-        if value is None:
-            return cls.get_time_now_as_str()
-        return value
-
-    @validator('inputs', 'data', 'containerImages', always=True, each_item=True)
-    def must_only_contain_name(cls, value: apis.models.common.Option) -> apis.models.common.Option:
-        raw = value.dict()
-        if list(raw) != ["name"]:
-            raise ValueError("Must contain just the key \"name\"")
-        return value
 
     def inherit_defaults(self, parameterisation: Parameterisation):
         """Extracts defaults from parameterisation and updates current executionOptionsDefaults
@@ -1108,7 +1111,7 @@ class GraphBinding(apis.models.common.Digestable):
         None, description="If reference points to multiple components which have the same name "
                           "but belong to multiple stages")
 
-    @validator('name')
+    @pydantic.field_validator('name')
     def check_name(cls, value: str):
         if value is None:
             return
@@ -1120,25 +1123,39 @@ class GraphBinding(apis.models.common.Digestable):
             raise ValueError("Name cannot contain new line characters (\\n)")
         return value
 
-    @validator('reference')
+    @pydantic.field_validator('reference')
     def must_be_valid_reference(cls, value: str | None):
         if value is not None:
             apis.models.from_core.DataReference(value)
             return value
 
-    @pydantic.root_validator()
-    def exclusive_variable_reference(cls, values: Dict[str, Any]):
+    @pydantic.model_validator(mode="after")
+    def exclusive_variable_reference(cls, value: "GraphBinding") -> "GraphBinding":
         # if values.get('reference') is None and values.get('variable') is None:
         #     raise ValueError("Must have either reference or variable", values)
-        if values.get('reference') and values.get('text'):
+        if value.reference and value.text:
             raise ValueError("reference and text are mutually exclusive")
 
-        return values
+        return value
+
+def ensure_correct_type(value: GraphBinding, correct_type: str):
+    if value.type is None:
+        value.type = correct_type
+    if value.type != correct_type:
+        raise ValueError(f"Binding {value.name} must have type \"{correct_type}\", "
+                         f"instead it has \"{value.type}\"")
+    return value
 
 
 class GraphBindingCollection(apis.models.common.Digestable):
-    input: List[GraphBinding] = []
-    output: List[GraphBinding] = []
+    input: List[typing_extensions.Annotated[
+        GraphBinding,
+        pydantic.functional_validators.AfterValidator(GraphBindingCollection.ensure_input_type)
+    ]] = []
+    output: List[typing_extensions.Annotated[
+        GraphBinding,
+        pydantic.functional_validators.AfterValidator(GraphBindingCollection.ensure_output_type)
+    ]] = []
 
     def get_input_binding(self, name: str) -> GraphBinding:
         for x in self.input:
@@ -1152,30 +1169,21 @@ class GraphBindingCollection(apis.models.common.Digestable):
                 return x
         raise KeyError(f"Unknown output binding {name} - known bindings are {[x.name for x in self.output]}")
 
-    @classmethod
-    def ensure_correct_type(cls, value: GraphBinding, correct_type: str):
-        if value.type is None:
-            value.type = correct_type
-        if value.type != correct_type:
-            raise ValueError(f"Binding {value.name} must have type \"{correct_type}\", "
-                             f"instead it has \"{value.type}\"")
-        return value
+    @staticmethod
+    def ensure_input_type(value: GraphBinding):
+        return ensure_correct_type(value, "input")
 
-    @validator('input', each_item=True)
-    def ensure_input_type(cls, value: GraphBinding):
-        return cls.ensure_correct_type(value, "input")
-
-    @validator('output', each_item=True)
-    def ensure_output_type(cls, value: GraphBinding):
-        return cls.ensure_correct_type(value, "output")
-
+    @staticmethod
+    def ensure_output_type(value: GraphBinding):
+        return ensure_correct_type(value, "output")
 
 
 class BasePackageGraphNode(apis.models.common.Digestable):
     reference: str = pydantic.Field(
         ..., description="An absolute FlowIR reference string of an un-replicated component, e.g. stage0.simulation")
 
-    @validator('reference')
+    @pydantic.field_validator('reference')
+    @classmethod
     def check_reference(cls, reference: str):
         dref = experiment.model.graph.ComponentIdentifier(reference)
         if dref.stageIndex is None:
@@ -1228,13 +1236,13 @@ class BindingOptionValueFromGraph(apis.models.common.Digestable):
             raise ValueError("Graph name must be in the format ${package.Name}/${graph.Name}")
         return package_name, graph_name
 
-    @validator('binding')
+    @pydantic.field_validator('binding')
     def check_source_binding_name(cls, binding: GraphBinding):
         if binding.name is None and binding.reference is None and binding.text is None:
             raise ValueError("Binding must have at least a name OR a text OR a reference-with-optional-stages")
         return binding
 
-    @validator('binding')
+    @pydantic.field_validator('binding')
     def check_source_binding_type(cls, binding: GraphBinding):
         if binding.type is None:
             binding.type = "output"
@@ -1243,7 +1251,7 @@ class BindingOptionValueFromGraph(apis.models.common.Digestable):
             raise ValueError("Must be output binding")
         return binding
 
-    @validator('name')
+    @pydantic.field_validator('name')
     def check_source_graph_name(cls, name: str):
         if not name:
             raise ValueError("Missing a name")
@@ -1265,7 +1273,7 @@ class BindingOptionValueFromGraph(apis.models.common.Digestable):
 class BindingOptionValueFromApplicationDependency(apis.models.common.Digestable):
     reference: str = pydantic.Field(..., description="Reference to application dependency in the derived package")
 
-    @validator('reference')
+    @pydantic.field_validator('reference')
     def must_be_valid_reference(cls, value: str):
         apis.models.from_core.DataReference(value)
         return value
@@ -1288,7 +1296,7 @@ class BasePackageGraphInstance(apis.models.common.Digestable):
     bindings: List[BindingOption] = []
 
 
-    @validator('graph')
+    @pydantic.field_validator('graph')
     def check_just_graph_name(cls, value: BasePackageGraph):
         if len(value.bindings.input) != 0 or len(value.bindings.output) != 0 or not value.name:
             raise ValueError("Must only contain the name field")
@@ -1298,8 +1306,7 @@ class BasePackageGraphInstance(apis.models.common.Digestable):
 class PathInsidePackage(apis.models.common.Digestable):
     packageName: Optional[str] = pydantic.Field(
         None, description="Package Name")
-    path: Optional[str] = pydantic.Field(
-        None, description="Relative path to location of package")
+    path: str = pydantic.Field(description="Relative path to location of package")
 
 
 class IncludePath(apis.models.common.Digestable):
@@ -1307,11 +1314,11 @@ class IncludePath(apis.models.common.Digestable):
     dest: Optional[PathInsidePackage] = pydantic.Field(
         None, description="Destination of path, defaults to just \"path: source.path\"")
 
-    @validator('dest', always=True)
-    def set_default_dest(cls, value: Optional[PathInsidePackage], values: Dict[str, Any]):
-        if value is None:
-            source: PathInsidePackage = values['source']
-            return PathInsidePackage(path=source.path)
+    @pydantic.model_validator(mode="after")
+    def set_default_dest(cls, value: "IncludePath"):
+        if value.dest is None:
+            value.dest = PathInsidePackage(path=value.source.path)
+
         return value
 
 
@@ -1334,7 +1341,7 @@ class VirtualExperimentBase(apis.models.common.Digestable):
                 return x
         raise KeyError(f"Unknown package {name}")
 
-    @validator('packages')
+    @pydantic.field_validator('packages')
     def unique_names(cls, value: List[BasePackage]):
         if len(value) == 0:
             raise ValueError("There must be at least 1 base package")
@@ -1347,12 +1354,13 @@ class VirtualExperimentBase(apis.models.common.Digestable):
 
         return value
 
-    @validator('output')
-    def check_outputs(cls, value: List[BindingOption], values: Dict[str, Any]):
+    @pydantic.field_validator('output')
+    def check_outputs(cls, value: List[BindingOption], info: pydantic.ValidationInfo):
         names = set()
 
         known_input_bindings: Dict[str, Dict[str, List[str]]] = {}
         known_output_bindings: Dict[str, Dict[str, List[str]]] = {}
+        values = info.data
 
         packages: List[BasePackage] = values['packages']
 
@@ -1406,7 +1414,7 @@ class ParameterisedPackage(apis.models.common.Digestable):
             return self.parameterisation.executionOptions.platform
         return None
 
-    @validator('base')
+    @pydantic.field_validator('base')
     def unique_base_identifiers(cls, value: VirtualExperimentBase):
         names = set()
         for base in value.packages:
@@ -1469,28 +1477,34 @@ class ParameterisedPackage(apis.models.common.Digestable):
 
 
 class ParameterisedPackageDropUnknown(ParameterisedPackage):
-    @classmethod
-    def parse_obj(cls, obj, *args, **kwargs) -> ParameterisedPackageDropUnknown:
-        # VV: Get rid of all "value_error.extra" errors by REMOVING the offending fields
+    @pydantic.model_validator(mode="before")
+    def try_drop(cls, obj: typing.Any) -> typing.Any:
+        if isinstance(obj, dict) is False:
+            return obj
 
         try:
-            return cast(ParameterisedPackageDropUnknown, super(ParameterisedPackageDropUnknown, cls) \
-                        .parse_obj(obj, *args, **kwargs))
+            ParameterisedPackage.model_validate(obj)
+            return obj
         except pydantic.error_wrappers.ValidationError as e:
             obj = copy.deepcopy(obj)
             logging.getLogger().info(f"This VirtualExperiment contains errors {e.errors()} - will delete uknown fields "
                                      f"and try again")
+
+            changes = 0
             for err in e.errors():
-                if err['type'] == 'value_error.extra':
+                logging.getLogger().warning(f"ERR: {err}")
+                if err['type'] == 'extra_forbidden':
                     what = obj
 
                     for x in err['loc'][:-1]:
                         what = what[x]
 
                     del what[err['loc'][-1]]
-
-            return cast(ParameterisedPackageDropUnknown, super(ParameterisedPackageDropUnknown, cls) \
-                        .parse_obj(obj, *args, **kwargs))
+                    changes += 1
+            if changes:
+                return obj
+            else:
+                raise
 
 
 def apply_parameterisation_options_to_dsl2(dsl: Dict[str, Any], parameterisation: Parameterisation):

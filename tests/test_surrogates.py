@@ -170,7 +170,7 @@ def test_gamess_homo_lumo_dft_surrogate_ani_stable_digest(
     multi.synthesize_derived_package(packages_metadata, derived_ve)
 
     for x in derived_ve.base.includePaths:
-        logger.info(x.json(indent=2, exclude_none=True))
+        logger.info(x.model_dump_json(indent=2, exclude_none=True))
         logger.info(x.source.path)
         logger.info(packages_metadata.get_root_directory_containing_package(x.source.packageName))
 
@@ -270,7 +270,7 @@ def test_psi4_surrogate_neural_potential_persist(
                 package=ve_neural_potential.base.packages[0],
             )))
 
-    logger.info(f"Relationship: {rel.json(exclude_none=True, exclude_unset=True, indent=2)}")
+    logger.info(f"Relationship: {rel.model_dump_json(exclude_none=True, exclude_unset=True, indent=2)}")
 
     transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
 
@@ -376,7 +376,7 @@ def test_modular_ani_band_gap_gamess_persist(
     rel.transform.inputGraph.package = ve_modular_ani.base.packages[0]
     rel.transform.outputGraph.package = ve_modular_band_gap_gamess.base.packages[0]
 
-    logger.info(f"Relationship: {rel.json(exclude_none=True, exclude_unset=True, indent=2)}")
+    logger.info(f"Relationship: {rel.model_dump_json(exclude_none=True, exclude_unset=True, indent=2)}")
 
     transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
 
@@ -413,7 +413,7 @@ def test_modular_optimizer_band_gap_reference_data(
 ):
     packages = package_metadata_modular_optimizer_band_gap_gamess
     rel = rel_optimizer_band_gap
-    logger.info(f"Relationship: {rel.json(exclude_none=True, exclude_unset=True, indent=2)}")
+    logger.info(f"Relationship: {rel.model_dump_json(exclude_none=True, exclude_unset=True, indent=2)}")
 
     transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
 
@@ -641,7 +641,8 @@ def test_synthesize(
         path_multipackage=os.path.join(output_dir, "synthesized")
     )
 
-    logger.warning(f"The resulting parameterisation options are {metadata.package.parameterisation.json(indent=2)}")
+    logger.warning(f"The resulting parameterisation options are "
+                   f"{metadata.package.parameterisation.model_dump_json(indent=2)}")
 
     dsl = apis.models.virtual_experiment.dsl_from_concrete(
         concrete=metadata.metadata.concrete,
@@ -766,7 +767,7 @@ def test_simple_relationship(
         db_experiments=db_experiments,
         packages=package_metadata_simple)
 
-    logger.info(f"Updated relationship: {rel.json(indent=2)}")
+    logger.info(f"Updated relationship: {rel.model_dump_json(indent=2)}")
 
     # VV: The 1-outputGraph components consume 1 component from outputGraph
     assert len(rel.transform.relationship.graphResults) == 1
@@ -868,7 +869,7 @@ def test_simple_relationship_with_variables(
         db_experiments=db_experiments,
         packages=package_metadata_simple)
 
-    logger.info(f"Updated relationship: {rel.json(indent=2)}")
+    logger.info(f"Updated relationship: {rel.model_dump_json(indent=2)}")
 
     # VV: The 1-outputGraph components consume 1 component from outputGraph
     assert len(rel.transform.relationship.graphResults) == 1

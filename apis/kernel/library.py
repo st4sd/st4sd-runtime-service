@@ -223,7 +223,7 @@ class LibraryClient:
         if not namespace.entrypoint:
             namespace.entrypoint = experiment.model.frontends.dsl.Entrypoint(
                 execute=[
-                    experiment.model.frontends.dsl.ExecuteStep(
+                    experiment.model.frontends.dsl.ExecuteStepEntryInstance(
                         target=f"<entry-instance>",
                         args={}
                     )

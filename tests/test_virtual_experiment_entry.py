@@ -274,7 +274,7 @@ components:
 
 
 def test_removing_unknown_fields():
-    ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj({
+    ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.model_validate({
         'hello': 'world',
         'metadata': {
             'package': {

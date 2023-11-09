@@ -19,12 +19,11 @@ from typing import Union
 from typing import cast
 
 import pydantic
-from pydantic import BaseModel
-from pydantic import Extra
-from pydantic import root_validator
+from pydantic import model_validator, ConfigDict, BaseModel
 from six import string_types
 
 import apis.models.errors
+import typing_extensions
 
 PRIMITIVE_TYPES = (float, int, bool, string_types)
 
@@ -32,9 +31,7 @@ PRIMITIVE_TYPES = (float, int, bool, string_types)
 class DigestableBase(BaseModel):
     """A class which generates a Digest (an embedding) out of dictionaries whose keys are strings and valeus are
     either strings or other Digestable instances"""
-
-    class Config:
-        extra = Extra.allow
+    model_config = ConfigDict(extra="allow")
 
     @classmethod
     def from_list(cls, items: List[Union[float, int, bool, string_types, DigestableBase]]) -> DigestableBase:
@@ -90,20 +87,19 @@ class DigestableBase(BaseModel):
 
 
 class Digestable(DigestableBase):
-    class Config:
-        extra = Extra.forbid
+    model_config = ConfigDict(extra="forbid")
 
     def to_digestable(self) -> Digestable:
         return self
 
 
 class DigestableSingleField(Digestable):
-    @root_validator()
-    def validate_only_one(cls, field_values: Dict[str, Any]):
-        what = {x: field_values[x] for x in field_values if field_values[x] is not None}
+    @model_validator(mode="after")
+    def validate_only_one(cls, value: "DigestableSingleField") -> "DigestableSingleField":
+        what = value.model_dump(exclude_none=True)
         if len(what) != 1:
             raise ValueError("Must define exactly 1 field")
-        return field_values
+        return value
 
 
 class OptionFromSecretKeyRef(Digestable):
@@ -121,27 +117,27 @@ class OptionFromS3SecretKeyRef(Digestable):
 
 
 class OptionFromS3Values(Digestable):
-    accessKeyID: Optional[str]
-    secretAccessKey: Optional[str]
-    bucket: Optional[str]
-    endpoint: Optional[str]
-    path: Optional[str]
+    accessKeyID: Optional[str] = None
+    secretAccessKey: Optional[str] = None
+    bucket: Optional[str] = None
+    endpoint: Optional[str] = None
+    path: Optional[str] = None
     rename: Optional[str] = pydantic.Field(
         None, description="If set, and path is not None then this means that the path filename should be renamed "
                           "to match @rename")
-    region: Optional[str]
+    region: Optional[str] = None
 
 
 class OptionFromDatasetRef(Digestable):
     name: str
-    path: Optional[str]
+    path: Optional[str] = None
     rename: Optional[str] = pydantic.Field(
         None, description="If set, and path is not None then this means that the path filename should be renamed "
                           "to match @rename")
 
 class OptionFromUsernamePassword(Digestable):
-    username: Optional[str]
-    password: Optional[str]
+    username: Optional[str] = None
+    password: Optional[str] = None
 
 
 TOptionValueFrom = Union[OptionFromSecretKeyRef, OptionFromDatasetRef, OptionFromUsernamePassword, \
@@ -178,9 +174,16 @@ class OptionValueFromMany(Digestable):
         return value
 
 
+def try_convert_to_str(value: typing.Union[str, float, int]) -> str:
+    if isinstance(value, (float, int)):
+        return str(value)
+    return value
+
+MustBeString = typing_extensions.Annotated[str, pydantic.functional_validators.BeforeValidator(try_convert_to_str)]
+
 class Option(Digestable):
     name: Optional[str] = None
-    value: Optional[str] = None
+    value: Optional[MustBeString] = None
     valueFrom: Optional[OptionValueFrom] = None
 
     @property
@@ -202,9 +205,9 @@ class OptionMany(Digestable):
                           "that the variable can recieve *any* value")
     valueFrom: Optional[List[OptionValueFromMany]] = None
 
-    @pydantic.root_validator()
-    def validate_exactly_one_field(cls, field_values: Dict[str, Any]):
-        if field_values.get('value') and field_values.get('valueFrom'):
+    @pydantic.model_validator(mode='after')
+    def validate_exactly_one_field(cls, field_values: "OptionMany"):
+        if field_values.value and field_values.valueFrom:
             raise ValueError(f"Cannot provide both value and valueFrom")
         return field_values
 

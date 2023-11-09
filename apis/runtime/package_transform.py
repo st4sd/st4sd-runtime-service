@@ -32,6 +32,7 @@ import apis.models.virtual_experiment
 import apis.runtime.errors
 import apis.runtime.package_derived
 import apis.storage
+from pydantic import ConfigDict
 
 
 def get_parameters_of_component(
@@ -42,8 +43,7 @@ def get_parameters_of_component(
 
 
 class ManyParameters(pydantic.BaseModel):
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     references: List[apis.models.from_core.DataReference] = []
     variables: List[str] = []
@@ -494,7 +494,7 @@ class TransformRelationship:
         """Updates the .relationship field of self._transform"""
         transform = self._transform
 
-        self._log.info(f"Inferring relationships for {transform.json(indent=2)}")
+        self._log.info(f"Inferring relationships for {transform.model_dump_json(indent=2)}")
 
         if transform.relationship.inferParameters or transform.relationship.inferResults:
             # VV: Try to infer relationships of graphParameters
@@ -504,7 +504,7 @@ class TransformRelationship:
                     and len(transform.inputGraph.components) == 1:
                 self._log.info("Inferring parameter mappings for 1-to-1 transform")
                 self._infer_relationship_single_component_graphs(packages_metadata)
-                self._log.info(f"Parameter Mappings (after 1-to-1): {self._transform.json(indent=2)}")
+                self._log.info(f"Parameter Mappings (after 1-to-1): {self._transform.model_dump_json(indent=2)}")
 
             # VV: After we've handled all the "special" cases, we can assume that if 2 parameters have the same name
             # in the 2 graphs, then they are "equivalent"
@@ -912,7 +912,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         if len(foundation_package.graphs) != 1:
             raise apis.models.errors.ApiError(f"Expected Foundation graph of {foundation_package.name} to "
                                               f"have exactly 1 graph, but it has {len(foundation_package.graphs)}\n"
-                                              f"{foundation_package.json(indent=2)}")
+                                              f"{foundation_package.model_dump_json(indent=2)}")
 
         foundation_connections = apis.models.virtual_experiment.BasePackageGraphInstance(
             graph=apis.models.virtual_experiment.BasePackageGraph(

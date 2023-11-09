@@ -1793,7 +1793,8 @@ def test_extract_all_variables_during_validate(
         apis.runtime.package.validate_parameterised_package(ve=ve_psi4, metadata=metadata)
 
     all_vars = ve_psi4.metadata.registry.executionOptionsDefaults.variables
-    logger.info(f"All executionOptionDefaults {ve_psi4.metadata.registry.executionOptionsDefaults.json(indent=2)}")
+    logger.info(f"All executionOptionDefaults "
+                f"{ve_psi4.metadata.registry.executionOptionsDefaults.model_dump_json(indent=2)}")
     extracted: Dict[str, List[apis.models.virtual_experiment.ValueInPlatform]] = {x.name: x.valueFrom for x in all_vars}
 
     assert 'overrideme' in extracted

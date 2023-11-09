@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import typing_extensions
 from enum import Enum
 from typing import Any
 from typing import Dict
@@ -19,31 +20,29 @@ import apis.models.errors
 import apis.models.common
 import apis.models.virtual_experiment
 
-validator = pydantic.validator
 
+
+def correct_reference(value: str) -> str:
+    cid = experiment.model.graph.ComponentIdentifier(value, index=0)
+
+    if cid.stageIndex is None or not cid.componentName or '/' in cid.componentName:
+        raise ValueError(f"invalid [stage<index>.]<componentName> = \"{value}\"")
+
+    return cid.identifier
 
 class GraphDescription(apis.models.common.Digestable):
     package: Optional[apis.models.virtual_experiment.BasePackage] = None
     identifier: str
-    components: List[str] = []
+    components: List[typing_extensions.Annotated[str, pydantic.functional_validators.AfterValidator(correct_reference)]] = []
 
-    @validator("identifier")
+    @pydantic.field_validator("identifier")
     def correct_identifier(cls, value: str) -> str:
         if not value:
             raise ValueError("Identifier cannot be empty")
         identifier = apis.models.common.PackageIdentifier(value)
         return identifier.identifier
 
-    @validator("components", each_item=True)
-    def correct_reference(cls, value: str) -> str:
-        cid = experiment.model.graph.ComponentIdentifier(value, index=0)
-
-        if cid.stageIndex is None or not cid.componentName or '/' in cid.componentName:
-            raise ValueError(f"invalid [stage<index>.]<componentName> = \"{value}\"")
-
-        return cid.identifier
-
-    @validator("components")
+    @pydantic.field_validator("components")
     def unique_component_references(cls, value: List[str]) -> List[str]:
         unique = set()
         duplicates = set()
@@ -59,8 +58,8 @@ class GraphDescription(apis.models.common.Digestable):
 
 
 class GraphValue(apis.models.common.Digestable):
-    name: Optional[str]
-    value: Optional[str]
+    name: Optional[str] = None
+    value: Optional[str] = None
 
 
 class RelationshipParameters(apis.models.common.Digestable):
@@ -140,15 +139,15 @@ class Transform(apis.models.common.Digestable):
     inputGraph: GraphDescription
     relationship: TransformRelationship = TransformRelationship()
 
-    @pydantic.root_validator()
-    def unique_graph_identifiers(cls, values: Dict[str, Any]):
-        inputGraph: GraphDescription = values['inputGraph']
-        outputGraph: GraphDescription = values['outputGraph']
+    @pydantic.model_validator(mode="after")
+    def unique_graph_identifiers(cls, value: "Transform") -> "Transform":
+        inputGraph: GraphDescription = value.inputGraph
+        outputGraph: GraphDescription = value.outputGraph
 
         if inputGraph.identifier == outputGraph.identifier:
             raise ValueError("Identifiers of inputGraph and outputGraph must be different")
 
-        return values
+        return value
 
 
 class Relationship(apis.models.common.Digestable):

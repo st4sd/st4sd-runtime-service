@@ -212,7 +212,7 @@ def test_synthesize_gamess_homo_lumo_dft_and_ANI(
 
     logger.info(f"IncludePaths")
     for x in derived_ve.base.includePaths:
-        logger.info(x.json(exclude_none=True, indent=2))
+        logger.info(x.model_dump_json(exclude_none=True, indent=2))
 
     dir_persist = os.path.join(output_dir, "persist")
     package.persist_to_directory(dir_persist, packages_metadata)

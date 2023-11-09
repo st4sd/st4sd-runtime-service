@@ -34,13 +34,13 @@ class FlowIROutputEntry(apis.models.common.Digestable):
                          "to outputs that a component (or components with same name in multiple stages) produces",
         alias="data-in", title="data-in")
 
-    @validator("data_in")
-    def is_valid_reference(cls, value: str, values: Dict[str, Any]) -> str:
+    @pydantic.field_validator("data_in")
+    def is_valid_reference(cls, value: str, info: pydantic.ValidationInfo) -> str:
         producer, filename, method = experiment.model.frontends.flowir.FlowIR.ParseDataReference(value)
 
         comp_id = experiment.model.graph.ComponentIdentifier(producer)
 
-        stages = values.get('stages', [])
+        stages = info.data.get('stages') or []
 
         if stages and comp_id.stageIndex is not None:
             raise ValueError(f"data-in must be relative reference when stages is non-empty, however it was {value}")

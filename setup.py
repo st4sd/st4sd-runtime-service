@@ -57,6 +57,8 @@ setup(
         # that you indicate whether you support Python 2, Python 3 or both.
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
 
     # What does your project relate to?
@@ -75,7 +77,7 @@ setup(
     # VV: Add `st4sd-runtime-core` here in the future
     install_requires=[
         'pytest', 'flask<=2.1.2', 'flask_restx', 'werkzeug<=2.1.2', 'flask-cors', 'tinydb',
-        'kubernetes', 'stream_zip', 'six', 'pydantic<2.0',
+        'kubernetes', 'stream_zip', 'six', 'pydantic>=2.0.0'
     ],
 
     # List additional groups of dependencies here (e.g. development

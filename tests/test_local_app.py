@@ -64,6 +64,8 @@ def initialise_api(output_dir) -> int:
     # VV: Wait for gunicorn to start serving requests
     logger.info("Waiting for REST api to begin serving requests")
 
+    time.sleep(1)
+
     try:
         started = time.time()
         while True:

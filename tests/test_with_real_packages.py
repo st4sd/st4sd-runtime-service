@@ -83,7 +83,7 @@ def test_transformation_pm3_to_dft(output_dir: str, local_deployment: bool):
 
     relationship: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(rel_raw)
 
-    logger.info(f"Original relationship {relationship.json(indent=2, exclude_none=True)}")
+    logger.info(f"Original relationship {relationship.model_dump_json(indent=2, exclude_none=True)}")
 
     db_experiments = apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "exps.txt"))
     db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationships.txt"))
@@ -101,7 +101,7 @@ def test_transformation_pm3_to_dft(output_dir: str, local_deployment: bool):
 
     rel_expanded = apis.kernel.relationships.get_relationship(relationship.identifier, db_relationships)
 
-    logger.info(f"Expanded relationship {rel_expanded.json(indent=2, exclude_none=True)}")
+    logger.info(f"Expanded relationship {rel_expanded.model_dump_json(indent=2, exclude_none=True)}")
 
     params = {
         x.inputGraphParameter.name: x.outputGraphParameter.name
@@ -230,7 +230,7 @@ def test_transformation_ani_to_inputgamess(output_dir: str, local_deployment: bo
 
     relationship: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(rel_raw)
 
-    logger.info(f"Original relationship {relationship.json(indent=2, exclude_none=True)}")
+    logger.info(f"Original relationship {relationship.model_dump_json(indent=2, exclude_none=True)}")
 
     db_experiments = apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "exps.txt"))
     db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationships.txt"))
@@ -248,7 +248,7 @@ def test_transformation_ani_to_inputgamess(output_dir: str, local_deployment: bo
 
     rel_expanded = apis.kernel.relationships.get_relationship(relationship.identifier, db_relationships)
 
-    logger.info(f"Expanded relationship {rel_expanded.json(indent=2, exclude_none=True)}")
+    logger.info(f"Expanded relationship {rel_expanded.model_dump_json(indent=2, exclude_none=True)}")
 
     params = {
         x.inputGraphParameter.name: x.outputGraphParameter.name
