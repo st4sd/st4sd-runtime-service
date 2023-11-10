@@ -13,6 +13,19 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import apis.models.virtual_experiment
+    import pydantic
+
+
+def make_pydantic_errors_jsonable(exc: pydantic.ValidationError) -> List[Dict[str, Any]]:
+    errors = exc.errors()
+
+    for err in errors:
+        if 'ctx' in err:
+            del err['ctx']
+        if 'url' in err:
+            del err['url']
+
+    return errors
 
 
 class ApiError(Exception):
@@ -30,6 +43,10 @@ class InvalidModelError(ApiError):
     def __init__(self, msg: str, problems: List[Dict[str, Any]]):
         super().__init__(msg=msg)
         self.problems = problems
+
+    @classmethod
+    def from_pydantic(cls, msg: str, exc: pydantic.ValidationError):
+        return cls(msg=msg, problems=make_pydantic_errors_jsonable(exc))
 
     def __str__(self):
         return f"{self.message}. Underlying problems:\n" + "\n".join( [str(e) for e in self.problems])

@@ -159,8 +159,7 @@ class TransformRelationship:
             try:
                 pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
             except pydantic.error_wrappers.ValidationError as e:
-                raise apis.models.errors.InvalidModelError(f"{kind} {identifier} is invalid",
-                                                           problems=e.errors())
+                raise apis.models.errors.InvalidModelError.from_pydantic(f"{kind} {identifier} is invalid", e)
             if len(pvep.base.packages) != 1:
                 raise apis.models.errors.ApiError(
                     f"Cannot use parameterised virtual experiment package {identifier} "

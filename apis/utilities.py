@@ -80,7 +80,7 @@ class UtilityPVEP(Resource):
                 try:
                     template = apis.models.virtual_experiment.ParameterisedPackage.validate(doc['pvep'])
                 except pydantic.ValidationError as e:
-                    raise apis.models.errors.InvalidModelError("Invalid payload field pvep", problems=e.errors())
+                    raise apis.models.errors.InvalidModelError.from_pydantic("Invalid payload field pvep", e)
 
             pvep_and_changes = apis.kernel.internal_experiments.generate_pvep_for_dsl(
                 dsl2_definition=dsl, template=template)

@@ -82,7 +82,7 @@ class Relationships(Resource):
                     identifier = doc.get("identifier", "**unknown**")
                     problems.append({
                         'identifier': identifier,
-                        'problems': e.errors()
+                        'problems': apis.models.errors.make_pydantic_errors_jsonable(e)
                     })
                     obj = doc
                 entries.append(do_format_relationship(obj, self._my_parser))
@@ -200,7 +200,8 @@ class TransformSynthesize(Resource):
             doc = request.get_json()
             synthesize = apis.models.relationships.PayloadSynthesize.parse_obj(doc)
         except pydantic.error_wrappers.ValidationError as e:
-            api.abort(400, f"Invalid synthesize payload, problems are {e.json()}", problems=e.errors())
+            api.abort(400, f"Invalid synthesize payload, problems are {e.json()}",
+                      problems=apis.models.errors.make_pydantic_errors_jsonable(e))
             raise e  # VV: Keep linter happy
 
         # VV: TODO FIX ME
@@ -272,7 +273,7 @@ class Relationship(Resource):
                 rel = apis.models.relationships.Relationship.parse_obj(docs[0]).dict()
                 problems = []
             except pydantic.error_wrappers.ValidationError as e:
-                problems = e.errors()
+                problems = apis.models.errors.make_pydantic_errors_jsonable(e)
                 rel = docs[0]
 
             return {

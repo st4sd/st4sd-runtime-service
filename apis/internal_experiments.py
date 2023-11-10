@@ -46,9 +46,9 @@ class InternalExperiments(Resource):
                     "message": f"Missing field {e}"
                 }])
             except pydantic.ValidationError as e:
-                raise apis.models.errors.InvalidModelError(
-                    f"Invalid Parameterised Virtual Experiment Package",
-                    problems=e.errors()
+                raise apis.models.errors.InvalidModelError.from_pydantic(
+                    msg=f"Invalid Parameterised Virtual Experiment Package",
+                    exc=e
                 )
 
             pvep.base.packages = []

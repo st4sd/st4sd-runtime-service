@@ -157,12 +157,12 @@ def format_documents(docs: List[Dict[str, Any]], format_options: FormatOptions) 
     for doc in docs:
         try:
             obj = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(doc)
-        except pydantic.error_wrappers.ValidationError as e:
+        except pydantic.ValidationError as e:
             package_name = doc.get('metadata', {}).get('package', {}).get('name', '**unknown**')
             digest = doc.get('metadata', {}).get('registry', {}).get('digest', '**unknown**')
             identifier = '@'.join((package_name, digest))
 
-            problems.append({'identifier': identifier, 'problems': e.errors()})
+            problems.append({'identifier': identifier, 'problems': apis.models.errors.make_pydantic_errors_jsonable(e)})
             obj = doc
 
         entries.append(do_format_parameterised_package(obj, format_options))
@@ -208,7 +208,7 @@ def api_get_experiment(
     try:
         ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
     except pydantic.error_wrappers.ValidationError as e:
-        problems = e.errors()
+        problems = apis.models.errors.make_pydantic_errors_jsonable(e)
 
         try:
             if try_drop_unknown:

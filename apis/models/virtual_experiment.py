@@ -1487,11 +1487,12 @@ class ParameterisedPackageDropUnknown(ParameterisedPackage):
             return obj
         except pydantic.error_wrappers.ValidationError as e:
             obj = copy.deepcopy(obj)
-            logging.getLogger().info(f"This VirtualExperiment contains errors {e.errors()} - will delete uknown fields "
+            errors = apis.models.errors.make_pydantic_errors_jsonable(e)
+            logging.getLogger().info(f"This VirtualExperiment contains errors {errors} - will delete uknown fields "
                                      f"and try again")
 
             changes = 0
-            for err in e.errors():
+            for err in errors:
                 logging.getLogger().warning(f"ERR: {err}")
                 if err['type'] == 'extra_forbidden':
                     what = obj

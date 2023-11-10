@@ -82,8 +82,8 @@ def get_default_platform_of_package(
     except KeyError:
         raise apis.models.errors.ApiError(f"Unknown package {identifier}")
     except pydantic.error_wrappers.ValidationError as e:
-        raise apis.models.errors.InvalidModelError(
-            f"Package {identifier} is invalid. Fix it first and then retry.", problems=e.errors())
+        raise apis.models.errors.InvalidModelError.from_pydantic(
+            f"Package {identifier} is invalid. Fix it first and then retry.", e)
 
 
 def get_relationship(
@@ -100,7 +100,7 @@ def get_relationship(
     try:
         rel = apis.models.relationships.Relationship.parse_obj(docs[0])
     except pydantic.error_wrappers.ValidationError as e:
-        raise apis.models.errors.InvalidModelError(f"Invalid relationship {identifier}", problems=e.errors())
+        raise apis.models.errors.InvalidModelError.from_pydantic(f"Invalid relationship {identifier}", e)
 
     if not rel.transform:
         raise apis.models.errors.InvalidModelError("Relationship is not Transform", problems=[])
@@ -195,8 +195,8 @@ def synthesize_from_transformation(
                 target = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
                 target_parameterisation = target.parameterisation
             except pydantic.error_wrappers.ValidationError as e:
-                raise apis.models.errors.InvalidModelError(
-                    f"outputGraph {rel.transform.outputGraph.identifier} is invalid", problems=e.errors())
+                raise apis.models.errors.InvalidModelError.from_pydantic(
+                    f"outputGraph {rel.transform.outputGraph.identifier} is invalid", e)
 
     transform = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(rel.transform)
 
@@ -468,7 +468,7 @@ def api_push_relationship(
     try:
         rel = apis.models.relationships.Relationship.parse_obj(rel)
     except pydantic.error_wrappers.ValidationError as e:
-        raise apis.models.errors.InvalidModelError(f"Relationship is invalid", e.errors())
+        raise apis.models.errors.InvalidModelError.from_pydantic(f"Relationship is invalid", e)
 
     return push_relationship(
         rel=rel,

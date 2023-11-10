@@ -343,7 +343,8 @@ class LibraryClient:
         try:
             namespace = experiment.model.frontends.dsl.Namespace(**entry.graph)
         except pydantic.ValidationError as e:
-            errors = reformat_errors(e.errors())
+            errors = apis.models.errors.make_pydantic_errors_jsonable(e)
+            errors = reformat_errors(errors)
             raise apis.models.errors.InvalidModelError(
                 "Invalid graph", problems=errors
             )
@@ -413,7 +414,8 @@ class LibraryClient:
             # VV: Discover all reachable templates. If there are no errors then the Graph is good enough
             scopes.discover_all_instances_of_templates(namespace, override_entrypoint_args=auto_args)
         except experiment.model.errors.DSLInvalidError as e:
-            errors = reformat_errors(e.errors())
+            errors = apis.models.errors.make_pydantic_errors_jsonable(e)
+            errors = reformat_errors(errors)
             raise apis.models.errors.InvalidModelError("Invalid graph", problems=errors)
 
         return namespace

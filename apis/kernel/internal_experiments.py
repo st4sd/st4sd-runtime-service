@@ -54,12 +54,12 @@ def validate_dsl(
     try:
         namespace = experiment.model.frontends.dsl.Namespace(**dsl2_definition)
     except pydantic.ValidationError as e:
-        raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=e.errors())
+        raise apis.models.errors.InvalidModelError.from_pydantic("Invalid DSL definition", e)
 
     try:
         flowir = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
     except experiment.model.errors.DSLInvalidError as e:
-        raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=e.errors())
+        raise apis.models.errors.InvalidModelError.from_pydantic("Invalid DSL definition", e)
 
     errors = flowir.validate()
 
@@ -249,7 +249,7 @@ def validate_internal_experiment(
     try:
         namespace = experiment.model.frontends.dsl.Namespace.validate(dsl2_definition)
     except pydantic.ValidationError as e:
-        raise apis.models.errors.InvalidModelError("Invalid DSL definition", problems=e.errors())
+        raise apis.models.errors.InvalidModelError.from_pydantic("Invalid DSL definition", e)
 
     try:
         concrete = experiment.model.frontends.dsl.namespace_to_flowir(namespace)
@@ -262,7 +262,7 @@ def validate_internal_experiment(
             } for e in e.underlyingErrors
         ])
     except experiment.model.errors.DSLInvalidError as e:
-        raise apis.models.errors.InvalidModelError("Invalid DSL definition", e.errors())
+        raise apis.models.errors.InvalidModelError.from_pydantic("Invalid DSL definition", e)
 
     pvep = pvep.copy(deep=True)
 
@@ -423,7 +423,8 @@ def get_s3_internal_storage_secret(
     try:
         return S3StorageSecret(**secret.data)
     except pydantic.ValidationError as e:
-        raise apis.models.errors.DBError(f"The S3 Secret {secret_name} is invalid. Errors follow: {e.errors()}")
+        problems = apis.models.errors.make_pydantic_errors_jsonable(e)
+        raise apis.models.errors.DBError(f"The S3 Secret {secret_name} is invalid. Errors follow: {problems}")
 
 def generate_s3_package_source_from_secret(
     secret_name: str,

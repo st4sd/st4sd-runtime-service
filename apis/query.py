@@ -61,7 +61,10 @@ class QueryRelationships(Resource):
         try:
             query = apis.models.query_relationship.QueryRelationship.parse_obj(doc)
         except pydantic.error_wrappers.ValidationError as e:
-            api.abort(400, f"Invalid query payload, problems are {e.json()}", problems=e.errors())
+            api.abort(
+                400, f"Invalid query payload, problems are {e.json()}",
+                problems=apis.models.errors.make_pydantic_errors_jsonable(e)
+            )
             raise e  # VV: Keep linter happy
 
         try:

@@ -792,3 +792,52 @@ def test_invalid_dsl():
         }
     ]
 
+
+def test_validate_dsl_with_nested_workflows():
+    dsl = yaml.safe_load("""
+    entrypoint:
+      entry-instance: test
+      execute:
+      - target: "<entry-instance>"
+        args: {}
+    workflows:
+    - signature:
+        name: test
+        parameters:
+        - name: input.a
+          default: ''
+        - name: b
+          default: '20'
+      steps:
+        generator: generator
+        consumer: consumer
+      execute:
+      - target: "<generator>"
+        args:
+          a: "%(input.a)s:output"
+          b: "%(b)s"
+      - target: "<consumer>"
+        args:
+          one: "<generator>"
+    components:
+    - signature:
+        name: generator
+        parameters:
+        - name: a
+          default: ''
+        - name: b
+          default: ''
+      command:
+        executable: a
+        arguments: "%(a)s %(b)s"
+    - signature:
+        name: consumer
+        parameters:
+        - name: one
+          default: ''
+      command:
+        executable: a
+        arguments: "%(one)s:ref"
+    """)
+
+    apis.kernel.internal_experiments.validate_dsl(dsl)
