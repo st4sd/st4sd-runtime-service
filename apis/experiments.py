@@ -18,6 +18,7 @@ import pprint
 import random
 import string
 import traceback
+import typing
 from typing import List, Dict, Optional, Any, Tuple
 
 import experiment.model.errors
@@ -169,6 +170,18 @@ class InaccessibleContainerRegistries(Exception):
             "There is no known imagePullSecret entry for referenced "
             f"container registries {container_registries}")
         self.container_registries = container_registries
+
+
+def make_pydantic_errors_jsonable(exc: pydantic.ValidationError) -> typing.List[typing.Dict[str, typing.Any]]:
+    errors = exc.errors()
+
+    for err in errors:
+        if 'ctx' in err:
+            del err['ctx']
+        if 'url' in err:
+            del err['url']
+
+    return errors
 
 
 class ExperimentFactory:
@@ -1048,15 +1061,17 @@ class ExperimentList(Resource):
             problems = []
             for doc in db.query():
                 try:
-                    obj = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(doc)
-                except pydantic.error_wrappers.ValidationError as e:
+                    obj = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(doc)
+                except pydantic.ValidationError as exc:
                     package_name = doc.get('metadata', {}).get('package', {}).get('name', '**unknown**')
                     digest = doc.get('metadata', {}).get('registry', {}).get('digest', '**unknown**')
                     identifier = '@'.join((package_name, digest))
 
+                    errors = make_pydantic_errors_jsonable(exc)
+
                     problems.append({
                         'identifier': identifier,
-                        'problems': e.errors()
+                        'problems': errors
                     })
                     obj = doc
 
@@ -1129,7 +1144,7 @@ class ExperimentDSL(Resource):
                     ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
                         .parse_obj(docs[0])
                 except pydantic.error_wrappers.ValidationError as e:
-                    return {'problems': e.errors()}
+                    return {'problems': make_pydantic_errors_jsonable(e)}
 
             if len(ve.base.packages) == 1:
                 download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
@@ -1225,7 +1240,8 @@ class ExperimentExplain(Resource):
                     ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
                         .parse_obj(docs[0])
                 except pydantic.error_wrappers.ValidationError as e:
-                    raise apis.models.errors.ApiError(f"Invalid experiment. Underlying problems {e.errors()}")
+                    errors = make_pydantic_errors_jsonable(e)
+                    raise apis.models.errors.ApiError(f"Invalid experiment. Underlying problems {errors}")
 
             if len(ve.base.packages) == 1:
                 api.abort(400, "Experiment has a single base package, there is no inheritance to explain")
@@ -1510,7 +1526,14 @@ class ExperimentStart(Resource):
             elif len(docs) > 1:
                 api.abort(400, message=f"Found too many parameterised packages {len(docs)} for your query {identifier}")
 
-            ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(docs[0])
+            try:
+                ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(docs[0])
+            except pydantic.ValidationError as e:
+                errors = make_pydantic_errors_jsonable(e)
+                raise apis.models.errors.InvalidModelError(
+                    "The parameterised virtual experiment is invalid. Please update it before trying to execute it.",
+                    problems=errors
+                )
 
             experiment_start_obj = request.json
             try:
