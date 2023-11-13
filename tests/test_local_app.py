@@ -682,7 +682,10 @@ def test_basic_library_operations(
 ):
     name = api_wrapper.api_request_post("library/", json_payload=simple_dsl2, decode_json=False)
 
-    ret = api_wrapper.api_request_get("library/")
+    ret = api_wrapper.api_request_get("library/", params={
+        "exclude_unset": "y",
+        "exclude_none": "y",
+    })
 
     api_wrapper.api_request_delete(f"library/{name}/")
 
@@ -692,39 +695,20 @@ def test_basic_library_operations(
                 "graph": {
                     'components': [
                         {
-                            'command': {'arguments': '%(message)s',
-                                        'executable': 'echo',
-                                        'expandArguments': 'double-quote',
-                                        'resolvePath': True},
-                            'resourceManager': {'config': {'backend': 'local',
-                                                           'walltime': 60.0}},
-                            'resourceRequest': {'numberProcesses': 1,
-                                                'numberThreads': 1,
-                                                'ranksPerNode': 1,
-                                                'threadsPerCore': 1},
-                            'signature': {'name': 'echo',
-                                          'parameters': [{'name': 'message'}]},
-                            'variables': {},
-                            'workflowAttributes': {'aggregate': False,
-                                                   'memoization': {'disable': {'fuzzy': False,
-                                                                               'strong': False}},
-                                                   'restartHookOn': ['ResourceExhausted'],
-                                                   'shutdownOn': []}
+                            'command': {'arguments': '%(message)s', 'executable': 'echo'},
+                            'signature': {'name': 'echo', 'parameters': [{'name': 'message'}]},
                         }
                     ],
                     'entrypoint': {
                         'entry-instance': 'main',
-                        'execute': [
-                            {'args': {}, 'target': '<entry-instance>'}
-                        ]
+                        'execute': [{'target': '<entry-instance>', 'args': {}}]
                     },
                     'workflows': [
                         {
-                            'execute': [{'args': {'message': '%(foo)s'},
-                                         'target': '<hello>'}],
-                            'signature': {'name': 'main',
-                                          'parameters': [{'default': 'hello world',
-                                                          'name': 'foo'}]},
+                            'execute': [
+                                {'args': {'message': '%(foo)s'}, 'target': '<hello>'}
+                            ],
+                            'signature': {'name': 'main', 'parameters': [{'default': 'hello world', 'name': 'foo'}]},
                             'steps': {'hello': 'echo'}
                         }
                     ]

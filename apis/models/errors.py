@@ -25,6 +25,20 @@ def make_pydantic_errors_jsonable(exc: pydantic.ValidationError) -> List[Dict[st
         if 'url' in err:
             del err['url']
 
+        try:
+            message = err.pop('msg')
+        except KeyError:
+            pass
+        else:
+            err['message'] = message
+
+        try:
+            location = err.pop('loc')
+        except KeyError:
+            pass
+        else:
+            err['location'] = location
+
     return errors
 
 

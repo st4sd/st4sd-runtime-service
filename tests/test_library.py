@@ -171,12 +171,17 @@ def check_basic_library_operations(
 
     namespace_library = experiment.model.frontends.dsl.Namespace(**from_library.graph)
 
-    print(yaml.safe_dump(namespace_library.dict(by_alias=True, exclude_none=True, exclude_defaults=True), sort_keys=False))
+    print(
+        yaml.safe_dump(namespace_library.model_dump(
+            by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
+        ),
+        sort_keys=False)
+    )
 
-    assert namespace_library.dict(
-        by_alias=True, exclude_none=True, exclude_defaults=True
-    ) == namespace_orig.dict(
-        by_alias=True, exclude_none=True, exclude_defaults=True
+    assert namespace_library.model_dump(
+        by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
+    ) == namespace_orig.model_dump(
+        by_alias=True, exclude_none=True, exclude_defaults=True, exclude_unset=True
     )
 
     graph_names = client.list()

@@ -10,6 +10,7 @@ import traceback
 import werkzeug.exceptions
 from flask import request, current_app
 from flask_restx import Resource
+import flask_restx.reqparse
 
 import apis.kernel.library
 import apis.models.constants
@@ -48,8 +49,39 @@ def generate_client() -> apis.kernel.library.LibraryClient:
     )
 
 
+def parser_formatting_dsl() -> flask_restx.reqparse.RequestParser:
+    arg_parser = flask_restx.reqparse.RequestParser()
+
+    arg_parser.add_argument(
+        "exclude_unset",
+        choices=["y", "n"],
+        default="n",
+        help='Whether to exclude fields that are unset or None from the output.',
+        location='args'
+    )
+
+    arg_parser.add_argument(
+        "exclude_defaults",
+        choices=["y", "n"],
+        default="n",
+        help='Whether to exclude fields that are unset or None from the output.',
+        location='args'
+    )
+
+    arg_parser.add_argument(
+        "exclude_none",
+        choices=["y", "n"],
+        default="n",
+        help='Whether to exclude fields that have a value of `None` from the output.',
+        location='args'
+    )
+
+    return arg_parser
+
 @api.route("/")
-class UtilityDSL(Resource):
+class GraphLibrary(Resource):
+    _my_parser = parser_formatting_dsl()
+
     @api.expect(apis.models.m_library_graph)
     def post(self):
         """Validates a DSL graph and adds it to the library."""
@@ -89,6 +121,7 @@ class UtilityDSL(Resource):
             api.abort(500, f"Internal error while adding a graph "
                            f"- contact the administrator of this ST4SD deployment", problem=str(e))
 
+    @api.expect(_my_parser)
     def get(self):
         """Returns the contents of the Graph library.
 
@@ -111,6 +144,8 @@ class UtilityDSL(Resource):
             raise ValueError()  # VV: keep linter happy
 
         try:
+            args = self._my_parser.parse_args()
+
             problems = []
             entries = []
 
@@ -118,7 +153,13 @@ class UtilityDSL(Resource):
 
             for name in client.list():
                 try:
-                    entry = client.get(name)
+                    entry = client.get(
+                        name,
+                        exclude_defaults=args.exclude_defaults == 'y',
+                        exclude_none=args.exclude_none == 'y',
+                        exclude_unset=args.exclude_unset == 'y',
+                    )
+
                 except Exception as e:
                     problems.append({"message": f"Could not get graph {name} due to {e}"})
                 else:
@@ -141,7 +182,45 @@ class UtilityDSL(Resource):
                            f"- contact the administrator of this ST4SD deployment", problem=str(e))
 
 @api.route("/<name>/")
-class UtilityDSL(Resource):
+class SingleGrapy(Resource):
+    _my_parser = parser_formatting_dsl()
+
+    def get(self, name: str):
+        """Returns 1 Graph from the library"""
+        if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME:
+            api.abort(400, "Graph Library is disabled - contact the administrator of this ST4SD deployment")
+            raise ValueError()  # VV: keep linter happy
+
+        try:
+            args = self._my_parser.parse_args()
+            client = generate_client()
+
+            try:
+                entry = client.get(
+                    name,
+                    exclude_defaults=args.exclude_defaults == 'y',
+                    exclude_none=args.exclude_none == 'y',
+                    exclude_unset=args.exclude_unset == 'y',
+                )
+
+            except apis.models.errors.GraphDoesNotExistError:
+                api.abort(400, "Graph does not exist")
+                raise  # VV: keeps linter happy
+            return {
+                "entry": entry.graph
+            }
+        except werkzeug.exceptions.HTTPException:
+            raise
+        except apis.models.errors.ApiError as e:
+            current_app.logger.warning(f"Run into {e} while deleting a graph from the library "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(400, f"Invalid internal experiment payload", problem=str(e))
+        except Exception as e:
+            current_app.logger.warning(f"Run into {e} while deleting a graph from the library "
+                                       f"Traceback: {traceback.format_exc()}")
+            api.abort(500, f"Internal error while returning the contents of the graph library "
+                           f"- contact the administrator of this ST4SD deployment", problem=str(e))
+
     def delete(self, name: str):
         """Removes 1 Graph from the library"""
         if not apis.models.constants.LOCAL_DEPLOYMENT and not apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME:

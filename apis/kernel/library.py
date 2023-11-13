@@ -91,7 +91,7 @@ class LibraryClient:
                     raise apis.models.errors.GraphAlreadyExistsError(graph_name)
             except FileNotFoundError:
                 pass
-            contents = yaml.safe_dump(namespace.dict(exclude_none=True, by_alias=True)).encode()
+            contents = yaml.safe_dump(namespace.model_dump(by_alias=True, exclude_unset=True)).encode()
             self.actuator.write(path, contents)
         except (apis.models.errors.StorageError, apis.models.errors.LibraryError):
             raise
@@ -100,12 +100,23 @@ class LibraryClient:
 
         return namespace
 
-    def get(self, name: str) -> Entry:
+    def get(
+        self, name: str,
+        exclude_unset: bool = False,
+        exclude_defaults: bool = False,
+        exclude_none: bool = False,
+    ) -> Entry:
         """Returns a Graph from the library
 
         Args:
             name:
                 The name of the graph
+            exclude_unset:
+                Whether to exclude fields that are unset or None from the output.
+            exclude_defaults:
+                Whether to exclude fields that are set to their default value from the output.
+            exclude_none:
+                Whether to exclude fields that have a value of `None` from the output.
 
         Returns:
             The corresponding entry in the Graph Library
@@ -118,9 +129,27 @@ class LibraryClient:
         """
 
         path = self._graph_path(name)
+        original = None # VV: keep linter happy
 
         try:
-            return Entry(graph=yaml.safe_load(self.actuator.read(path)))
+            original = self.actuator.read(path)
+            graph = yaml.safe_load(original)
+            graph = experiment.model.frontends.dsl.Namespace(**graph).model_dump(
+                exclude_unset=exclude_unset,
+                exclude_none=exclude_none,
+                exclude_defaults=exclude_defaults,
+                by_alias=True,
+            )
+            return Entry(graph=graph)
+        except pydantic.ValidationError as e:
+            errors = apis.models.errors.make_pydantic_errors_jsonable(e)
+            errors.append({
+                "location": [],
+                "message": yaml.safe_dump(original)
+            })
+            raise apis.models.errors.InvalidModelError(
+                "Invalid graph, you must delete it", problems=errors
+            )
         except apis.models.errors.StorageError:
             raise
         except FileNotFoundError:
@@ -217,6 +246,8 @@ class LibraryClient:
         namespace.components[0].signature.name = f"{workflow_name}-wrapped"
         namespace.workflows.append(workflow)
 
+        namespace.model_fields_set.add("workflows")
+
         # VV: if there's no entrypoint auto generate. If there is one already then by definition it must be
         # pointing to the Component. Now, the Workflow has the original name of the component and therefore the
         # entrypoint is still valid
@@ -232,6 +263,7 @@ class LibraryClient:
                     "entry-instance": workflow_name
                 }
             )
+            namespace.model_fields_set.add("entrypoint")
 
     @classmethod
     def _preprocess_entrypoint(cls, entry: Entry):
@@ -311,40 +343,10 @@ class LibraryClient:
 
         cls._preprocess_entrypoint(entry)
 
-        def reformat_errors(errors: typing.List[typing.Dict[str, typing.Any]]):
-            """Utility method to rewrite the dictionaries representing errors
-
-            Args:
-                errors:
-                    An array of dictionaries each of which represents an error.
-                    The array will be updated in place.
-
-            Returns:
-                The input argument `errors`
-            """
-            for x in errors:
-                try:
-                    message = x.pop('msg')
-                except KeyError:
-                    pass
-                else:
-                    x['message'] = message
-
-                try:
-                    location = x.pop('loc')
-                except KeyError:
-                    pass
-                else:
-                    x['location'] = location
-
-            return errors
-
-
         try:
             namespace = experiment.model.frontends.dsl.Namespace(**entry.graph)
         except pydantic.ValidationError as e:
             errors = apis.models.errors.make_pydantic_errors_jsonable(e)
-            errors = reformat_errors(errors)
             raise apis.models.errors.InvalidModelError(
                 "Invalid graph", problems=errors
             )
@@ -415,7 +417,6 @@ class LibraryClient:
             scopes.discover_all_instances_of_templates(namespace, override_entrypoint_args=auto_args)
         except experiment.model.errors.DSLInvalidError as e:
             errors = apis.models.errors.make_pydantic_errors_jsonable(e)
-            errors = reformat_errors(errors)
             raise apis.models.errors.InvalidModelError("Invalid graph", problems=errors)
 
         return namespace

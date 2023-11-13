@@ -1497,10 +1497,10 @@ class ParameterisedPackageDropUnknown(ParameterisedPackage):
                 if err['type'] == 'extra_forbidden':
                     what = obj
 
-                    for x in err['loc'][:-1]:
+                    for x in err['location'][:-1]:
                         what = what[x]
 
-                    del what[err['loc'][-1]]
+                    del what[err['location'][-1]]
                     changes += 1
             if changes:
                 return obj

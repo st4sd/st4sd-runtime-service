@@ -257,8 +257,8 @@ def validate_internal_experiment(
     except experiment.model.errors.FlowIRConfigurationErrors as e:
         raise apis.models.errors.InvalidModelError("Invalid DSL definition", [
             {
-                "loc": [],
-                "msg": str(e)
+                "location": [],
+                "message": str(e)
             } for e in e.underlyingErrors
         ])
     except experiment.model.errors.DSLInvalidError as e:
