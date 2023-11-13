@@ -660,8 +660,11 @@ definitions:
       dsl:
         description: The DSL 2.0 definition of a workflow
         type: object
+      pvep:
+        description: An optional template to use when constructing the Parameterised
+          Virtual Experiment Pakckage (PVEP)
+        type: object
     type: object
-    x-mask: '{pvep}'
   valueinplatform:
     properties:
       platform:
@@ -1773,15 +1776,45 @@ paths:
       - internal-experiments
   /library/:
     get:
-      operationId: get_utility_dsl
+      description: "The response contains a dictionary with the following format:\n\
+        \n{\n    \"entries\": [\n        {\n           \"graph\": { the graph }\n\
+        \        }\n    ],\n    \"problems\": [\n       { a dictionary explaining\
+        \ 1 problem }\n    ]\n}"
+      operationId: get_graph_library
+      parameters:
+      - default: n
+        description: Whether to exclude fields that are unset or None from the output.
+        enum:
+        - y
+        - n
+        in: query
+        name: exclude_unset
+        type: string
+      - default: n
+        description: Whether to exclude fields that are unset or None from the output.
+        enum:
+        - y
+        - n
+        in: query
+        name: exclude_defaults
+        type: string
+      - default: n
+        description: Whether to exclude fields that have a value of `None` from the
+          output.
+        enum:
+        - y
+        - n
+        in: query
+        name: exclude_none
+        type: string
       responses:
         '200':
           description: Success
-      summary: Returns the contents of the Graph library - an array of Graphs
+      summary: Returns the contents of the Graph library
       tags:
       - library
     post:
-      operationId: post_utility_dsl
+      operationId: post_graph_library
       parameters:
       - in: body
         name: payload
@@ -1796,11 +1829,19 @@ paths:
       - library
   /library/{name}/:
     delete:
-      operationId: delete_utility_dsl
+      operationId: delete_single_grapy
       responses:
         '200':
           description: Success
       summary: Removes 1 Graph from the library
+      tags:
+      - library
+    get:
+      operationId: get_single_grapy
+      responses:
+        '200':
+          description: Success
+      summary: Returns 1 Graph from the library
       tags:
       - library
     parameters:
@@ -2045,7 +2086,6 @@ paths:
       - utilities
   /utilities/pvep/:
     post:
-      description: starting from an optional PVEP template
       operationId: post_utility_pvep
       parameters:
       - in: body
@@ -2057,7 +2097,7 @@ paths:
         '200':
           description: Success
       summary: Generates the default Parameterised Virtual Experiment Package (PVEP)
-        for a DSL workflow
+        for a DSL workflow starting from an optional PVEP template
       tags:
       - utilities
 produces:

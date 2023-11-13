@@ -59,8 +59,8 @@ class UtilityDSL(Resource):
 class UtilityPVEP(Resource):
     @api.expect(apis.models.m_utilities_pvep)
     def post(self):
-        """Generates the default Parameterised Virtual Experiment Package (PVEP) for a DSL workflow
-        starting from an optional PVEP template
+        """Generates the default Parameterised Virtual Experiment Package (PVEP) for a DSL workflow starting from an \
+optional PVEP template
         """
         doc = request.get_json()
 

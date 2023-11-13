@@ -212,13 +212,13 @@ class SingleGrapy(Resource):
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.ApiError as e:
-            current_app.logger.warning(f"Run into {e} while deleting a graph from the library "
+            current_app.logger.warning(f"Run into {e} while getting a graph from the library "
                                        f"Traceback: {traceback.format_exc()}")
             api.abort(400, f"Invalid internal experiment payload", problem=str(e))
         except Exception as e:
-            current_app.logger.warning(f"Run into {e} while deleting a graph from the library "
+            current_app.logger.warning(f"Run into {e} while getting a graph from the library "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(500, f"Internal error while returning the contents of the graph library "
+            api.abort(500, f"Internal error while getting a graph from the graph library "
                            f"- contact the administrator of this ST4SD deployment", problem=str(e))
 
     def delete(self, name: str):
@@ -245,5 +245,5 @@ class SingleGrapy(Resource):
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while deleting a graph from the library "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(500, f"Internal error while returning the contents of the graph library "
+            api.abort(500, f"Internal error while deleting a graph from the graph library "
                            f"- contact the administrator of this ST4SD deployment", problem=str(e))

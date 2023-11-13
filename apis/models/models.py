@@ -1562,13 +1562,11 @@ m_utilities_dsl = api_utilities.model(
 m_utilities_pvep = api_utilities.model(
     "utilities-pvep",
     {
-        "dsl": fields.Raw(description="The DSL 2.0 definition of a workflow")
+        "dsl": fields.Raw(description="The DSL 2.0 definition of a workflow"),
+"pvep": fields.Raw(description="An optional template to use when constructing the "
+                                "Parameterised Virtual Experiment Pakckage (PVEP)")
     },
-    {
-        "pvep": fields.Raw(description="An optional template to use when constructing the "
-                                       "Parameterised Virtual Experiment Pakckage (PVEP)")
-    },
-    description="The DSL 2 definition"
+    description="The DSL 2 definition and accompanying PVEP template"
 )
 
 
