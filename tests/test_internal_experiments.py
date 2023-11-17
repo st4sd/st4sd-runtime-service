@@ -841,3 +841,36 @@ def test_validate_dsl_with_multiple_components():
     """)
 
     apis.kernel.internal_experiments.validate_dsl(dsl)
+
+
+def test_validate_dsl_with_unknown_params():
+    dsl = yaml.safe_load("""
+        entrypoint:
+          entry-instance: bad
+          execute:
+          - target: "<entry-instance>"
+            args: {}
+        workflows:
+        - signature:
+            name: bad
+          steps:
+            unknown: unknown
+          execute:
+          - target: "<unknown>"
+        components:
+        - signature:
+            name: unknown
+          command:
+            executable: echo
+            arguments: "%(hello)s"
+        """)
+
+    with pytest.raises(apis.models.errors.InvalidModelError) as e:
+        apis.kernel.internal_experiments.validate_dsl(dsl)
+
+    exc = e.value
+
+    assert len(exc.problems) == 1
+
+    assert exc.problems[0]['location'] == ['components', 0, 'command', 'arguments']
+    assert exc.problems[0]['message'] == 'Reference to unknown parameter "hello". Known parameters are {}'
