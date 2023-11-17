@@ -94,7 +94,10 @@ class GraphLibrary(Resource):
         try:
             client = generate_client()
             ret = client.add(apis.kernel.library.Entry(graph=graph))
-            return ret.entrypoint.entryInstance
+            return {
+                "graph": ret.model_dump(by_alias=True),
+                "problems": []
+            }
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.GraphAlreadyExistsError as e:

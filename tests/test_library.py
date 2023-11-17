@@ -98,6 +98,36 @@ def dsl_just_component() -> typing.Dict[str, typing.Any]:
 
 
 @pytest.fixture()
+def dsl_2_wfs() -> typing.Dict[str, typing.Any]:
+    return yaml.safe_load("""
+    entrypoint:
+      entry-instance: outer
+      execute:
+      - target: <entry-instance>
+    
+    workflows:
+    - signature:
+        name: inner
+      steps:
+        dummy: dummy
+      execute:
+        - target: <dummy>
+    - signature:
+        name: outer
+      steps:
+        inner: inner
+      execute:
+        - target: <inner>
+
+    components:
+    - signature:
+        name: dummy
+      command:
+        executable: echo
+        arguments: hello world
+    """)
+
+@pytest.fixture()
 def dsl_invalid_dsl(dsl_no_entrypoint_workflow: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
     dsl_no_entrypoint_workflow["entrypoint"]["execute"]= [
         {
@@ -270,3 +300,19 @@ def test_s3_library_operations(
     check_basic_library_operations(dsl=simple_dsl2, client=client)
 
     assert list(actuator.listdir(library_path)) == []
+
+
+def test_reordered_workflows(
+    dsl_2_wfs: typing.Dict[str, typing.Any],
+    output_dir: str,
+):
+    library_path = os.path.join(output_dir, "library")
+    actuator = apis.storage.actuators.local.LocalStorage()
+    client = apis.kernel.library.LibraryClient(actuator=actuator, library_path=library_path)
+
+    library_namespace = check_basic_library_operations(dsl_2_wfs, client)
+
+    orig_namespace = experiment.model.frontends.dsl.Namespace(**dsl_2_wfs)
+
+    assert orig_namespace.workflows[0].signature.name == "inner"
+    assert library_namespace.workflows[0].signature.name == "outer"

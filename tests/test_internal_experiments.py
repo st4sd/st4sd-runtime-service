@@ -793,7 +793,7 @@ def test_invalid_dsl():
     ]
 
 
-def test_validate_dsl_with_nested_workflows():
+def test_validate_dsl_with_multiple_components():
     dsl = yaml.safe_load("""
     entrypoint:
       entry-instance: test

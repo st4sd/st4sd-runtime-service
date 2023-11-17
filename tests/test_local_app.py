@@ -680,7 +680,17 @@ def test_basic_library_operations(
     api_wrapper: experiment.service.db.ExperimentRestAPI,
     simple_dsl2: typing.Dict[str, typing.Any]
 ):
-    name = api_wrapper.api_request_post("library/", json_payload=simple_dsl2, decode_json=False)
+    import experiment.model.frontends.dsl
+
+    ret = api_wrapper.api_request_post("library/", json_payload=simple_dsl2, decode_json=True)
+
+    assert ret["problems"] == []
+
+    namespace = experiment.model.frontends.dsl.Namespace(**simple_dsl2)
+    namespace.entrypoint.execute[0].args = {}
+
+    assert ret["graph"] == namespace.model_dump(by_alias=True)
+    name = ret['graph']['entrypoint']['entry-instance']
 
     ret = api_wrapper.api_request_get("library/", params={
         "exclude_unset": "y",
@@ -691,29 +701,7 @@ def test_basic_library_operations(
 
     assert ret == {
         "entries": [
-            {
-                "graph": {
-                    'components': [
-                        {
-                            'command': {'arguments': '%(message)s', 'executable': 'echo'},
-                            'signature': {'name': 'echo', 'parameters': [{'name': 'message'}]},
-                        }
-                    ],
-                    'entrypoint': {
-                        'entry-instance': 'main',
-                        'execute': [{'target': '<entry-instance>', 'args': {}}]
-                    },
-                    'workflows': [
-                        {
-                            'execute': [
-                                {'args': {'message': '%(foo)s'}, 'target': '<hello>'}
-                            ],
-                            'signature': {'name': 'main', 'parameters': [{'default': 'hello world', 'name': 'foo'}]},
-                            'steps': {'hello': 'echo'}
-                        }
-                    ]
-                }
-            }
+            {"graph": namespace.model_dump(by_alias=True, exclude_unset=True, exclude_none=True)}
         ],
 
         "problems": []

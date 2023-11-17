@@ -419,4 +419,17 @@ class LibraryClient:
             errors = apis.models.errors.make_pydantic_errors_jsonable(e)
             raise apis.models.errors.InvalidModelError("Invalid graph", problems=errors)
 
+        # VV: Finally, make it so the 1st workflow is the one that the entrypoint points to
+
+        if len(namespace.workflows) > 1:
+            # VV: enumerate messes up type-hints here ...
+            for i in range(len(namespace.workflows)):
+                wf = namespace.workflows[i]
+                if wf.signature.name == entry_template.signature.name:
+                    if i == 0:
+                        break
+                    else:
+                        namespace.workflows[0], namespace.workflows[i] = namespace.workflows[i], namespace.workflows[0]
+                        break
+
         return namespace
