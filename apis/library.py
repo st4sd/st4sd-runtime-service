@@ -102,8 +102,10 @@ class GraphLibrary(Resource):
             raise
         except apis.models.errors.GraphAlreadyExistsError as e:
             api.abort(
-                404, "Graph already exists. To update its definition delete the existing graph first",
-                graphName=e.graph_name
+                409, "Graph already exists. To update its definition delete the existing graph first",
+                graphName=e.graph_name, problems=[
+                    {"message": "Graph already exists. To update its definition delete the existing graph first."}
+                ]
             )
         except apis.models.errors.InvalidModelError as e:
             current_app.logger.warning(f"Run into {e} while adding a graph "
@@ -112,17 +114,25 @@ class GraphLibrary(Resource):
         except apis.models.errors.DBError as e:
             current_app.logger.warning(f"Run into {e} while adding a graph "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(400, f"Ran into issue when accessing the Secrets database - "
-                           f"contact the administrator of this ST4SD deployment", problem=str(e))
+            api.abort(
+                400, f"Ran into issue when accessing storage location of the Graph library - "
+                     f"contact the administrator of this ST4SD deployment", problems=[
+                    {"message": str(e)}
+                ]
+            )
         except apis.models.errors.ApiError as e:
             current_app.logger.warning(f"Run into {e} while adding a graph "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(400, f"Invalid internal experiment payload", problem=str(e))
+            api.abort(400, f"Error while adding a new graph to the library", problems=[
+                {"message": str(e)}
+            ])
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while adding a graph "
                                        f"Traceback: {traceback.format_exc()}")
             api.abort(500, f"Internal error while adding a graph "
-                           f"- contact the administrator of this ST4SD deployment", problem=str(e))
+                           f"- contact the administrator of this ST4SD deployment", problems=[
+                {"message": str(e)}
+            ])
 
     @api.expect(_my_parser)
     def get(self):

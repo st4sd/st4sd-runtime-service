@@ -54,7 +54,9 @@ class InternalExperiments(Resource):
             pvep.base.packages = []
             problems = []
             if not pvep.metadata.package.name:
-                api.abort(400, 'Missing "pvep.metadata.package.name"')
+                api.abort(400, 'Missing "pvep.metadata.package.name"', problems=[
+                    {"message": 'Missing "pvep.metadata.package.name"'}
+                ])
                 raise ValueError() # VV: keeping linter happy
 
             pvep = apis.kernel.internal_experiments.upsert_internal_experiment(
@@ -79,14 +81,20 @@ class InternalExperiments(Resource):
         except apis.models.errors.DBError as e:
             current_app.logger.warning(f"Run into {e} while registering internal-experiment "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(400, f"Ran into issue when accessing the Secrets database - "
-                           f"contact the administrator of this ST4SD deployment", problem=str(e))
+            api.abort(400, f"Ran into issue while accessing the storage location of Internal Experiments - "
+                           f"contact the administrator of this ST4SD deployment", problems=[
+                    {"message": str(e)}
+            ])
         except apis.models.errors.ApiError as e:
             current_app.logger.warning(f"Run into {e} while registering internal-experiment "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(400, f"Invalid internal experiment payload", problem=str(e))
+            api.abort(400, f"Invalid internal experiment payload", problems=[
+                    {"message": str(e)}
+            ])
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while registering internal-experiment "
                                        f"Traceback: {traceback.format_exc()}")
             api.abort(500, f"Internal error while registering internal-experiment "
-                           f"- contact the administrator of this ST4SD deployment", problem=str(e))
+                           f"- contact the administrator of this ST4SD deployment", problems=[
+                    {"message": str(e)}
+            ])
