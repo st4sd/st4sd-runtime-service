@@ -32,15 +32,22 @@ docker run --rm -it \
 #      -v `pwd`:/scripts -w /scripts --entrypoint /scripts/skopeo_copy.sh quay.io/skopeo/stable \
 #      ${IMAGE_BASE_URL}:${SRC_TAG_PPC64LE} ${IMAGE_BASE_URL}:${DST_TAG_PPC64LE}
 
-echo "Creating multi-arch manifest"
+all_labels=("${LABEL}" "${@:1}")
+push_images=()
+for label in "${all_labels[@]}"; do
+  push_images+=("${IMAGE_BASE_URL}:${label}")
+done
 
-docker manifest create ${IMAGE_BASE_URL}:${LABEL} \
+for target in "${push_images[@]}"; do
+  echo "Creating multi-arch manifest "${target}""
+  docker manifest create ${target} \
       ${IMAGE_BASE_URL}:${DST_TAG_X8664} # ${IMAGE_BASE_URL}:${DST_TAG_PPC64LE}
 
-echo "Annotating architectures of images in manifest"
-docker manifest annotate --arch=amd64 ${IMAGE_BASE_URL}:${LABEL} ${IMAGE_BASE_URL}:${DST_TAG_X8664}
+  echo "Annotating architectures of images in manifest"
+  docker manifest annotate --arch=amd64 ${target} ${IMAGE_BASE_URL}:${DST_TAG_X8664}
 
-#docker manifest annotate --arch=ppc64le ${IMAGE_BASE_URL}:${LABEL} ${IMAGE_BASE_URL}:${DST_TAG_PPC64LE}
+  #docker manifest annotate --arch=ppc64le ${target} ${IMAGE_BASE_URL}:${DST_TAG_PPC64LE}
 
-echo "Pushing manifest"
-docker manifest push ${IMAGE_BASE_URL}:${LABEL}
+  echo "Pushing manifest"
+  docker manifest push ${target}
+done

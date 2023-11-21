@@ -81,23 +81,24 @@ matrix:
 
     - stage: multiarch
       os: linux
-      python: "3.7"
+      python: "3.10"
       env:
-      - BUILD_PYTHON_VERSION=37
+      - BUILD_PYTHON_VERSION=310
       script:
         - export SRC_TAG_X8664="py${BUILD_PYTHON_VERSION}-latest-x86_64"
         - export DST_TAG_X8664="py${BUILD_PYTHON_VERSION}-x86_64"
         # VV: Disable ppc64le builds for now
         #- export SRC_TAG_PPC64LE="latest-ppc64le"
         #- export DST_TAG_PPC64LE="ppc64le"
-        - export LABEL="latest"
-        - ./deploy/build_multiarch.sh
+        - export LABEL="py${BUILD_PYTHON_VERSION}-latest"
+        # VV: Also push as `x86_64` and `latest`
+        - ./deploy/build_multiarch.sh x86_64 latest
 
     - stage: multiarch
       os: linux
-      python: "3.10"
+      python: "3.7"
       env:
-      - BUILD_PYTHON_VERSION=310
+      - BUILD_PYTHON_VERSION=37
       script:
         - export SRC_TAG_X8664="py${BUILD_PYTHON_VERSION}-latest-x86_64"
         - export DST_TAG_X8664="py${BUILD_PYTHON_VERSION}-x86_64"
@@ -120,10 +121,15 @@ matrix:
       services: docker
       script:
         - export DOCKER_CLI_EXPERIMENTAL=enabled
-        - docker login -u $DOCKER_USERNAME -p $DOCKER_TOKEN $DOCKER_REGISTRY
-        - docker manifest create ${IMAGE_BASE_URL}:${TRAVIS_TAG}
-          ${IMAGE_BASE_URL}:x86_64 # ${IMAGE_BASE_URL}:ppc64le
-        - docker manifest push ${IMAGE_BASE_URL}:${TRAVIS_TAG}
-        - docker manifest create ${IMAGE_BASE_URL}:release-candidate
-          ${IMAGE_BASE_URL}:x86_64 # ${IMAGE_BASE_URL}:ppc64le
-        - docker manifest push ${IMAGE_BASE_URL}:release-candidate
+        - cd deploy
+        - export IMAGE_SRC="${IMAGE_BASE_URL}:latest"
+        - export IMAGE_DEST="${IMAGE_BASE_URL}:${TRAVIS_TAG}"
+        - docker run --rm -it \
+          --env DOCKER_REGISTRY --env DOCKER_TOKEN --env DOCKER_USERNAME
+          -v `pwd`:/scripts -w /scripts --entrypoint /scripts/skopeo_copy.sh quay.io/skopeo/stable
+          ${IMAGE_SRC} ${IMAGE_DEST}
+        - export IMAGE_DEST="${IMAGE_BASE_URL}:release-candidate"
+        - docker run --rm -it \
+          --env DOCKER_REGISTRY --env DOCKER_TOKEN --env DOCKER_USERNAME
+          -v `pwd`:/scripts -w /scripts --entrypoint /scripts/skopeo_copy.sh quay.io/skopeo/stable
+          ${IMAGE_SRC} ${IMAGE_DEST}
