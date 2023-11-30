@@ -410,11 +410,13 @@ class LibraryClient:
         auto_args = {
             p.name: "dummy-value" for p in entry_template.signature.parameters if p.default is None
         }
-        scopes = experiment.model.frontends.dsl.ScopeStack()
 
         try:
             # VV: Discover all reachable templates. If there are no errors then the Graph is good enough
-            scopes.discover_all_instances_of_templates(namespace, override_entrypoint_args=auto_args)
+            experiment.model.frontends.dsl.lightweight_validate(
+                namespace=namespace,
+                override_entrypoint_args=auto_args
+            )
         except experiment.model.errors.DSLInvalidError as e:
             errors = apis.models.errors.make_pydantic_errors_jsonable(e)
             raise apis.models.errors.InvalidModelError("Invalid graph", problems=errors)
