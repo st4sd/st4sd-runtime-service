@@ -124,12 +124,12 @@ matrix:
         - cd deploy
         - export IMAGE_SRC="${IMAGE_BASE_URL}:latest"
         - export IMAGE_DEST="${IMAGE_BASE_URL}:${TRAVIS_TAG}"
-        - docker run --rm -it \
+        - docker run --rm -it 
           --env DOCKER_REGISTRY --env DOCKER_TOKEN --env DOCKER_USERNAME
           -v `pwd`:/scripts -w /scripts --entrypoint /scripts/skopeo_copy.sh quay.io/skopeo/stable
           ${IMAGE_SRC} ${IMAGE_DEST}
         - export IMAGE_DEST="${IMAGE_BASE_URL}:release-candidate"
-        - docker run --rm -it \
+        - docker run --rm -it
           --env DOCKER_REGISTRY --env DOCKER_TOKEN --env DOCKER_USERNAME
           -v `pwd`:/scripts -w /scripts --entrypoint /scripts/skopeo_copy.sh quay.io/skopeo/stable
           ${IMAGE_SRC} ${IMAGE_DEST}
