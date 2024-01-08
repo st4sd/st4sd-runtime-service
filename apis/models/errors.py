@@ -217,6 +217,11 @@ class InvalidInputsError(InvalidPayloadExperimentStartError):
 class DBError(ApiError):
     pass
 
+class DBNotFoundError(DBError):
+    def __init__(self, key: Any):
+        self.key = key
+        super().__init__(f"Key {key} not found")
+
 
 class ParameterisedPackageNotFoundError(DBError):
     def __init__(self, identifier: str):

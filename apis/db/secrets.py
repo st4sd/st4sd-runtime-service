@@ -18,6 +18,8 @@ import apis.k8s
 import apis.models.common
 import apis.models.errors
 
+import pydantic
+
 
 class Secret(apis.models.common.DigestableBase):
     name: str
@@ -26,6 +28,16 @@ class Secret(apis.models.common.DigestableBase):
 
 class SecretKubernetes(Secret):
     secretKind: str = "generic"
+
+
+class S3StorageSecret(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(extra="forbid")
+
+    S3_BUCKET: str
+    S3_ENDPOINT: str
+    S3_ACCESS_KEY_ID: Optional[str] = None
+    S3_SECRET_ACCESS_KEY: Optional[str] = None
+    S3_REGION: Optional[str] = None
 
 
 def b64_encode(which):
@@ -135,3 +147,43 @@ class KubernetesSecrets(SecretsStorageTemplate):
         except kubernetes.client.exceptions.ApiException as e:
             raise apis.models.errors.DBError(
                 f"Unable to delete K8s secret {self.namespace}/{name} due to {e}")
+
+
+def get_s3_secret(
+    secret_name: str,
+    db_secrets: DatabaseSecrets,
+) -> S3StorageSecret:
+    """Extracts the S3 Credentials and Location from a Secret in a secret database
+
+    The keys in the Secret are
+
+    - S3_BUCKET: str
+    - S3_ENDPOINT: str
+    - S3_ACCESS_KEY_ID: typing.Optional[str] = None
+    - S3_SECRET_ACCESS_KEY: typing.Optional[str] = None
+    - S3_REGION: typing.Optional[str] = None
+
+    Args:
+        secret_name:
+            The name containing the information
+        db_secrets:
+            A reference to the Secrets database
+    Returns:
+        The contents of the secret
+
+    Raises:
+        apis.models.errors.DBError:
+            When the secret is not found or it contains invalid information
+    """
+
+    with db_secrets:
+        secret = db_secrets.secret_get(secret_name)
+
+    if not secret:
+        raise apis.models.errors.DBNotFoundError(secret_name)
+
+    try:
+        return apis.db.secrets.S3StorageSecret(**secret.data)
+    except pydantic.ValidationError as e:
+        problems = apis.models.errors.make_pydantic_errors_jsonable(e)
+        raise apis.models.errors.DBError(f"The S3 Secret {secret_name} is invalid. Errors follow: {problems}")

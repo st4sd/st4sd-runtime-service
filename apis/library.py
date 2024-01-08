@@ -17,6 +17,7 @@ import apis.models.constants
 import apis.models.errors
 import apis.storage.actuators.local
 import apis.storage.actuators.s3
+import apis.db.secrets
 import utils
 
 api = apis.models.api_library
@@ -25,24 +26,29 @@ def generate_client() -> apis.kernel.library.LibraryClient:
     if apis.models.constants.LOCAL_DEPLOYMENT:
         actuator = apis.storage.actuators.local.LocalStorage()
     else:
-        db_secrets = utils.secrets_git_open(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
-        secret = db_secrets.secret_get(apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME)
-        if secret is None:
-            raise  apis.models.errors.DBError(
-                f"Secret {apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME} containing the S3 credentials for the Library "
-                f"does not exist")
+        db_secrets = utils.database_secrets_open(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
 
-        lookup = {
-            "S3_BUCKET": "bucket",
-            "S3_ENDPOINT": "endpoint_url",
-            "S3_ACCESS_KEY_ID": "access_key_id",
-            "S3_SECRET_ACCESS_KEY": "secret_access_key",
-            "S3_REGION": "region_name"
-        }
-        args = {
-            arg_name: secret.data.get(env_var) for env_var, arg_name in lookup.items()
-        }
-        actuator = apis.storage.actuators.s3.S3Storage(**args)
+        try:
+            secret = apis.db.secrets.get_s3_secret(
+                secret_name=apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME,
+                db_secrets=db_secrets
+            )
+        except apis.models.errors.DBNotFoundError:
+            raise  apis.models.errors.DBError(
+                f"Secret {apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME} containing the S3 credentials "
+                f"for the Graph Library does not exist - contact your ST4SD administrator")
+        except apis.models.errors.DBError:
+            raise  apis.models.errors.DBError(
+                f"Could not access the secret {apis.models.constants.S3_GRAPH_LIBRARY_SECRET_NAME} "
+                f"containing the S3 credentials for the Graph Library - contact your ST4SD administrator")
+
+        actuator = apis.storage.actuators.s3.S3Storage(
+            bucket=secret.S3_BUCKET,
+            endpoint_url=secret.S3_ENDPOINT,
+            secret_access_key=secret.S3_SECRET_ACCESS_KEY,
+            access_key_id=secret.S3_ACCESS_KEY_ID,
+            region_name=secret.S3_REGION
+        )
 
     return apis.kernel.library.LibraryClient(
         actuator=actuator, library_path=apis.models.constants.S3_ROOT_GRAPH_LIBRARY

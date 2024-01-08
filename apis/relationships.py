@@ -100,7 +100,7 @@ class Relationships(Resource):
                 rel=doc,
                 db_relationships=utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT),
                 db_experiments=utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT),
-                packages=apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+                packages=apis.storage.PackagesDownloader(ve=None, db_secrets=utils.database_secrets_open(
                     local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)),
             )
             return {
@@ -147,7 +147,7 @@ class TransformDSLPreview(Resource):
             db_relationships = utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT)
             db_experiments = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
 
-            downloader = apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+            downloader = apis.storage.PackagesDownloader(ve=None, db_secrets=utils.database_secrets_open(
                 local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
 
             ret = apis.kernel.relationships.api_preview_synthesize_dsl(
@@ -206,7 +206,7 @@ class TransformSynthesize(Resource):
 
         # VV: TODO FIX ME
         try:
-            downloader = apis.storage.PackagesDownloader(ve=None, db_secrets=utils.secrets_git_open(
+            downloader = apis.storage.PackagesDownloader(ve=None, db_secrets=utils.database_secrets_open(
                 local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
 
             ret = apis.kernel.relationships.api_synthesize_from_transformation(

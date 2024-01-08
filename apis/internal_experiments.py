@@ -34,7 +34,7 @@ class InternalExperiments(Resource):
         doc = request.get_json()
 
         try:
-            db_secrets = utils.secrets_git_open(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
+            db_secrets = utils.database_secrets_open(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
             db_experiments = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
 
             try:

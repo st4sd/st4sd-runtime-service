@@ -387,45 +387,6 @@ def point_base_package_to_s3_storage(
     return pvep
 
 
-def get_s3_internal_storage_secret(
-    secret_name: str,
-    db_secrets: apis.db.secrets.DatabaseSecrets,
-) -> S3StorageSecret:
-    """Extracts the S3 Credentials and Location from a Secret in a secret database
-
-    The keys in the Secret are
-
-    - S3_BUCKET: str
-    - S3_ENDPOINT: str
-    - S3_ACCESS_KEY_ID: typing.Optional[str] = None
-    - S3_SECRET_ACCESS_KEY: typing.Optional[str] = None
-    - S3_REGION: typing.Optional[str] = None
-
-    Args:
-        secret_name:
-            The name containing the information
-        db_secrets:
-            A reference to the Secrets database
-    Returns:
-        The contents of the secret
-
-    Raises:
-        apis.models.errors.DBError:
-            When the secret is not found or it contains invalid information
-    """
-
-    with db_secrets:
-        secret = db_secrets.secret_get(secret_name)
-
-    if not secret:
-        raise apis.models.errors.DBError(f"There is no S3 Secret {secret_name}")
-
-    try:
-        return S3StorageSecret(**secret.data)
-    except pydantic.ValidationError as e:
-        problems = apis.models.errors.make_pydantic_errors_jsonable(e)
-        raise apis.models.errors.DBError(f"The S3 Secret {secret_name} is invalid. Errors follow: {problems}")
-
 def generate_s3_package_source_from_secret(
     secret_name: str,
     db_secrets: apis.db.secrets.DatabaseSecrets,
@@ -449,7 +410,19 @@ def generate_s3_package_source_from_secret(
         The BasePackageSource
     """
 
-    secret =get_s3_internal_storage_secret(secret_name=secret_name, db_secrets=db_secrets)
+    try:
+        secret = apis.db.secrets.get_s3_secret(
+            secret_name=secret_name,
+            db_secrets=db_secrets
+        )
+    except apis.models.errors.DBNotFoundError:
+        raise apis.models.errors.DBError(
+            f"Secret {secret_name} containing the S3 credentials for Internal Experiments does not exist "
+            f"- contact your ST4SD administrator")
+    except apis.models.errors.DBError:
+        raise apis.models.errors.DBError(
+            f"Could not access the secret {secret_name} "
+            f"containing the S3 credentials for internal experiments - contact your ST4SD administrator")
 
     return apis.models.virtual_experiment.BasePackageSourceS3(
         security=apis.models.virtual_experiment.BasePackageSourceS3Security(

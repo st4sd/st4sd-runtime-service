@@ -1088,7 +1088,7 @@ class ExperimentList(Resource):
                 raise  # keep linter happy
 
             current_app.logger.info(f"Creating experiment definition")
-            download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
+            download = apis.storage.PackagesDownloader(ve, db_secrets=utils.database_secrets_open(
                 local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
             db = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
             apis.kernel.experiments.validate_and_store_pvep_in_db(download, ve, db)
@@ -1137,7 +1137,7 @@ class ExperimentDSL(Resource):
                     return {'problems': apis.models.errors.make_pydantic_errors_jsonable(e)}
 
             if len(ve.base.packages) == 1:
-                download = apis.storage.PackagesDownloader(ve, db_secrets=utils.secrets_git_open(
+                download = apis.storage.PackagesDownloader(ve, db_secrets=utils.database_secrets_open(
                     local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
             else:
                 download = None
@@ -1238,7 +1238,7 @@ class ExperimentExplain(Resource):
                 raise NotImplementedError()  # keep linter happy
             elif len(ve.base.packages) > 1:
 
-                downloader = apis.storage.PackagesDownloader(ve=ve, db_secrets=utils.secrets_git_open(
+                downloader = apis.storage.PackagesDownloader(ve=ve, db_secrets=utils.database_secrets_open(
                     local_deployment=apis.models.constants.LOCAL_DEPLOYMENT))
 
                 with downloader:

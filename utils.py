@@ -44,7 +44,7 @@ def database_experiments_open(local_deployment: bool) -> apis.db.exp_packages.Da
     return apis.db.exp_packages.DatabaseExperiments(path)
 
 
-def secrets_git_open(local_deployment: bool) -> apis.db.secrets.SecretsStorageTemplate:
+def database_secrets_open(local_deployment: bool) -> apis.db.secrets.SecretsStorageTemplate:
     if local_deployment is False:
         return apis.db.secrets.KubernetesSecrets(namespace=MONITORED_NAMESPACE)
     else:
