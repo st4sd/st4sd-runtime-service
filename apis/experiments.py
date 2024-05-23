@@ -1165,15 +1165,14 @@ class ExperimentDSL(Resource):
             return {
                 "dsl": None,
                 "problems": [str(e)]
-            }
+            }, 400
         except Exception as e:
             current_app.logger.warning(f"Run into {e} while generating the DSL of {identifier}. "
                                        f"Traceback: {traceback.format_exc()}")
-            api.abort(500, f"Run into internal error while querying for {identifier}")
-            return {
-                'dsl': None,
-                "problems": [str(e)]
-            }
+
+            api.abort(500, f"Run into internal error while querying for {identifier} "
+                           f"check the logs of the st4sd-runtime-service pod for more "
+                           f"information")
 
 
 @api.route('/<identifier>/package-inheritance/', doc=False)
