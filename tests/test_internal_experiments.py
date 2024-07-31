@@ -873,4 +873,5 @@ def test_validate_dsl_with_unknown_params():
     assert len(exc.problems) == 1
 
     assert exc.problems[0]['location'] == ['components', 0, 'command', 'arguments']
-    assert exc.problems[0]['message'] == 'Reference to unknown parameter "hello". Known parameters are {}'
+    assert exc.problems[0]['message'] == ('The component was instantiated at workflows/0/execute/0. '
+                                          'Error: Reference to unknown parameter "hello". Known parameters are {}')

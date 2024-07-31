@@ -1061,6 +1061,24 @@ def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experi
 
     configmap = package.construct_k8s_configmap_embedded_files('hello')
 
+    env = sorted([{'name': 'INSTANCE_DIR_NAME',
+                   'value': f'{package.instance_name}.instance'},
+                  {'name': 'ST4SD_S3_IN_ACCESS_KEY_ID',
+                   'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_ACCESS_KEY_ID',
+                                                  'name': f'env-{package.rest_uid}'}}},
+                  {'name': 'ST4SD_S3_IN_END_POINT',
+                   'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_END_POINT',
+                                                  'name': f'env-{package.rest_uid}'}}},
+                  {'name': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
+                   'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
+                                                  'name': f'env-{package.rest_uid}'}}}],
+                 key=lambda e: e["name"])
+
+    wf_env = sorted(spec["spec"].pop("env"),
+                    key=lambda e: e["name"])
+
+    assert wf_env == env
+
     assert spec == {'apiVersion': 'st4sd.ibm.com/v1alpha1',
                     'kind': 'Workflow',
                     'metadata': {'labels': {'rest-uid': package.rest_uid,
@@ -1070,8 +1088,6 @@ def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experi
                                  'name': constructed_name},
                     'spec': {'additionalOptions': package.runtime_args,
                              'data': [os.path.join(apis.runtime.package.ROOT_S3_FILES, 'data', 'some/path/cat_me.txt')],
-                             'env': [{'name': 'INSTANCE_DIR_NAME',
-                                      'value': instance_dir_name}],
                              'image': 'res-st4sd-team-official-base-docker-local.artifactory.'
                                       'swg-devops.com/st4sd-runtime-core',
                              'imagePullSecrets': [],
@@ -1084,12 +1100,17 @@ def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experi
                              'variables': [],
                              'volumeMounts': [],
                              's3BucketInput': {
-                                 x: {'valueFrom': {
+                                 label: {'valueFrom': {
                                      'secretKeyRef': {
                                          'name': f'env-{package.rest_uid}',
-                                         'key': f"ST4SD_S3_IN_{x.upper()}",
+                                         'key': f"ST4SD_S3_IN_{env_name}",
                                      }
-                                 }} for x in ['accessKeyID', 'secretAccessKey', 'bucket', 'endpoint']
+                                 }} for label, env_name in [
+                                    ('bucket', "BUCKET"),
+                                    ('endpoint', "END_POINT"),
+                                    ('accessKeyID', "ACCESS_KEY_ID"),
+                                    ('secretAccessKey', "SECRET_ACCESS_KEY")
+                                ]
                              },
                              's3FetchFilesImage': extra_opts.image_st4sd_runtime_k8s_input_s3,
                              'volumes': [],
@@ -1296,6 +1317,71 @@ def test_package_store_outputs_s3(ve_sum_numbers: apis.models.virtual_experiment
     _ = runtime_args.index("--s3AuthWithEnvVars")
     _ = runtime_args.index("--s3StoreToURI=s3://my-bucket/location")
 
+
+def test_read_s3_files_hide_env_vars(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="renamed.txt"))
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+        'inputs': [
+            {
+                'filename': 'renamed.txt'
+            }
+        ],
+        's3': {
+            'accessKeyID': "accessKeyID",
+            'secretAccessKey': "secretAccessKey",
+            'bucket': "bucket",
+            'endpoint': "endpoint"
+        }
+    })
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+    package = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    wf = package.construct_k8s_workflow()
+
+    secret = package.construct_k8s_secret_env_vars("hello")
+
+    assert secret["data"] == {
+        'ST4SD_S3_IN_ACCESSKEYID': 'YWNjZXNzS2V5SUQ=',
+        'ST4SD_S3_IN_BUCKET': 'YnVja2V0',
+        'ST4SD_S3_IN_ENDPOINT': 'ZW5kcG9pbnQ=',
+        'ST4SD_S3_IN_SECRETACCESSKEY': 'c2VjcmV0QWNjZXNzS2V5',
+    }
+
+    envs = sorted([{'name': 'INSTANCE_DIR_NAME',
+                    'value': f'{package.instance_name}.instance'},
+                   {'name': 'ST4SD_S3_IN_ACCESS_KEY_ID',
+                    'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_ACCESS_KEY_ID',
+                                                   'name': f'env-{package.rest_uid}'}}},
+                   {'name': 'ST4SD_S3_IN_END_POINT',
+                    'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_END_POINT',
+                                                   'name': f'env-{package.rest_uid}'}}},
+                   {'name': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
+                    'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
+                                                   'name': f'env-{package.rest_uid}'}}}],
+                  key=lambda e: e["name"])
+
+    assert sorted(wf["spec"]["env"],
+                  key=lambda e: e["name"]) == envs
+
+    assert payload_config.inputs[0].name == "renamed.txt"
+
+    # VV: st4sd-runtime-k8s will ask st4sd-runtime-k8s-input-s3 to download
+    # the file "/dir/file.txt" from the S3 bucket and store it under "/tmp/s3-root-dir/input/".
+    # Then it will configure elaunch.py (st4sd-runtime-core) to:
+    # 1. load the input file /tmp/s3-root-dir/input/dir/file.txt
+    # 2. store it as ${INSTANCE_DIR}/input/renamed.txt
+    assert wf['spec']['inputs'] == ["/tmp/s3-root-dir/input/renamed.txt"]
+
+    assert wf["spec"]["s3BucketInput"] == {
+        'accessKeyID': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_ACCESS_KEY_ID',
+                                                       'name': f'env-{package.rest_uid}'}}},
+        'bucket': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_BUCKET',
+                                                  'name': f'env-{package.rest_uid}'}}},
+        'endpoint': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_END_POINT',
+                                                    'name': f'env-{package.rest_uid}'}}},
+        'secretAccessKey': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
+                                                           'name': f'env-{package.rest_uid}'}}}}
 
 def test_read_s3_files_rename(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
