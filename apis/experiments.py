@@ -845,8 +845,10 @@ class ExperimentFactory:
 
         if (self.input_files or self.data_files) and self.s3_credentials:
             if self.s3_credentials.get('dataset', '') == '':
-                body['spec']['s3BucketInput'] = {key: {'value': self.s3_credentials[key]} for key in
-                                                 ['accessKeyID', 'secretAccessKey', 'bucket', 'endpoint']}
+                body['spec']['s3BucketInput'] = {
+                    "bucketInfo": {key: {'value': self.s3_credentials[key]}
+                                   for key in ['accessKeyID', 'secretAccessKey', 'bucket', 'endpoint']}
+                }
             else:
                 body['spec']['s3BucketInput'] = {'dataset': self.s3_credentials['dataset']}
 

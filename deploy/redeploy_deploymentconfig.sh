@@ -12,7 +12,7 @@ export PROJECT_NAME=$1
 export OC_LOGIN_URL=$2
 export OC_LOGIN_TOKEN=$3
 
-wget https://mirror.openshift.com/pub/openshift-v4/clients/ocp/latest/openshift-client-linux.tar.gz
+wget https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.14/openshift-client-linux.tar.gz
 tar -xvf openshift-client-linux.tar.gz
 rm openshift-client-linux.tar.gz
 

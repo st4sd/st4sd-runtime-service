@@ -919,8 +919,8 @@ class NamedPackage:
     def _spec_s3_bucket_input(self) -> Dict[str, typing.Any] | None:
         """ This returns what should go into Workflow.spec.s3BucketInput
             if self.s3_credentials.get('dataset', '') == '':
-                body['spec']['s3BucketInput'] = {key: {'value': self.s3_credentials[key]} for key in
-                                                 ['accessKeyID', 'secretAccessKey', 'bucket', 'endpoint']}
+                body['spec']['s3BucketInput'] = {"bucketInfo": {key: {'value': self.s3_credentials[key]} for key in
+                                                 ['accessKeyID', 'secretAccessKey', 'bucket', 'endpoint']}}
             else:
                 body['spec']['s3BucketInput'] = {'dataset': self.s3_credentials['dataset']}
 
@@ -931,24 +931,29 @@ class NamedPackage:
             return None
         elif isinstance(s3, apis.models.common.OptionFromS3Values):
             # VV: Again, this can only be fully resolved
+            s3_creds = s3.model_dump()
+
             return {
-                label: {
-                    # VV: We are injecting these environment variables in construct_k8s_secret_env_vars()
-                    'valueFrom': {
-                        'secretKeyRef': {
-                            'name': f'env-{self.rest_uid}',
-                            'key': f"ST4SD_S3_IN_{env_name}",
+                "bucketInfo": {
+                    label: {
+                        # VV: We are injecting these environment variables in construct_k8s_secret_env_vars()
+                        'valueFrom': {
+                            'secretKeyRef': {
+                                'name': f'env-{self.rest_uid}',
+                                'key': env_name,
+                            }
                         }
-                    }
-                    # VV: notice that we do not use the value of x, it's in the Secret object
-                    # also notice that we use the BUCKET name - i.e. we can download from a SINGLE bucket only
-                    # this is a limitation of current implementation of s3-runtime-k8s-input-s3 (can be addressed)
-                } for label, env_name in [
-                    ('bucket', "BUCKET"),
-                    ('endpoint', "END_POINT"),
-                    ('accessKeyID', "ACCESS_KEY_ID"),
-                    ('secretAccessKey', "SECRET_ACCESS_KEY")
-                ]
+                        # VV: notice that we do not use the value of x, it's in the Secret object
+                        # also notice that we use the BUCKET name - i.e. we can download from a SINGLE bucket only
+                        # this is a limitation of current implementation of s3-runtime-k8s-input-s3 (can be addressed)
+                    } for label, env_name in [
+                        ('bucket', 'ST4SD_S3_IN_BUCKET'),
+                        ('endpoint', 'ST4SD_S3_IN_END_POINT'),
+                        ('accessKeyID', 'ST4SD_S3_IN_ACCESS_KEY_ID'),
+                        ('secretAccessKey', 'ST4SD_S3_IN_SECRET_ACCESS_KEY'),
+                        ('region', 'ST4SD_S3_IN_REGION')
+                    ] if s3_creds[label] is not None
+                }
             }
         elif isinstance(s3, apis.models.common.OptionFromDatasetRef):
             return {'dataset': s3.name}
@@ -993,24 +998,22 @@ class NamedPackage:
 
         env_vars = [{'name': 'INSTANCE_DIR_NAME', 'value': '%s.instance' % self._instance_name}]
 
-        for (s3_creds, prefix) in [
-            (self._payload_config.security.s3Output.my_contents, "S3_"),
-            (self._payload_config.security.s3Input.my_contents, "ST4SD_S3_IN_")
-        ]:
+        # VV: Do **not** inject the ST4SD_S3_IN_ environment variables here. They should only be present in the
+        # s3-fetch init-container. The st4sd-runtime-k8s operator will ensure that.
+        s3_creds = self._payload_config.security.s3Output.my_contents
+        if isinstance(s3_creds, apis.models.common.OptionFromS3Values):
+            # VV: Notice that there's no `bucket` here - this is by design, we also don't need the values of these
+            # env vars, this is something that self.construct_k8s_secret_env_vars() handles for us
             secret_name = f'env-{self.rest_uid}'
-
-            if isinstance(s3_creds, apis.models.common.OptionFromS3Values):
-                # VV: Notice that there's no `bucket` here - this is by design, we also don't need the values of these
-                # env vars, this is something that self.construct_k8s_secret_env_vars() handles for us
-                env_vars.extend([{
-                    'name': what,
-                    'valueFrom': {
-                        'secretKeyRef': {
-                            'name': secret_name,
-                            'key': what,
-                        }
+            env_vars.extend([{
+                'name': what,
+                'valueFrom': {
+                    'secretKeyRef': {
+                        'name': secret_name,
+                        'key': what,
                     }
-                } for what in sorted([f'{prefix}ACCESS_KEY_ID', f'{prefix}END_POINT', f'{prefix}SECRET_ACCESS_KEY'])])
+                }
+            } for what in sorted(['S3_ACCESS_KEY_ID', 'S3_END_POINT', 'S3_SECRET_ACCESS_KEY'])])
 
         k8s_labels = self.k8s_labels
 
@@ -1048,7 +1051,7 @@ class NamedPackage:
         # VV: We will be storing the values of these environment variables in a Secret
         if self._environment_variables:
             obj_name = f"env-{self.rest_uid}"
-            env = body['spec']['env']
+            env: typing.List[typing.Dict[str, str]] = body['spec']['env']
             for x in self._environment_variables:
                 env.append({'name': x, 'valueFrom': {'secretKeyRef': {'key': x, 'name': obj_name}}})
 
@@ -1104,9 +1107,16 @@ class NamedPackage:
         s3_creds = self._payload_config.security.s3Input.my_contents
 
         if isinstance(s3_creds, apis.models.common.OptionFromS3Values):
-            s3_creds = s3_creds.dict()
+            env_names = {
+                "bucket": "ST4SD_S3_IN_BUCKET",
+                "endpoint": "ST4SD_S3_IN_END_POINT",
+                "accessKeyID": "ST4SD_S3_IN_ACCESS_KEY_ID",
+                "secretAccessKey": "ST4SD_S3_IN_SECRET_ACCESS_KEY",
+                "region": "ST4SD_S3_IN_REGION",
+            }
+            s3_creds = s3_creds.model_dump(exclude_none=True)
             agg_env_vars.update({
-                f'ST4SD_S3_IN_{x.upper()}': s3_creds[x] for x in s3_creds
+                env_names[x]: s3_creds[x] for x in s3_creds if x in env_names
             })
 
         s3_creds = self._payload_config.security.s3Output.my_contents
@@ -1115,10 +1125,13 @@ class NamedPackage:
             env_names = {
                 'accessKeyID': 'S3_ACCESS_KEY_ID',
                 'endpoint': 'S3_END_POINT',
-                'secretAccessKey': 'S3_SECRET_ACCESS_KEY'
+                'secretAccessKey': 'S3_SECRET_ACCESS_KEY',
+                'region': 'S3_REGION',
             }
-            s3_creds = s3_creds.dict()
-            agg_env_vars.update({env_names[x]: s3_creds[x] for x in env_names})
+            s3_creds = s3_creds.model_dump(exclude_none=True)
+            agg_env_vars.update({
+                env_names[x]: s3_creds[x] for x in s3_creds if x in env_names
+            })
 
         if not agg_env_vars:
             return None

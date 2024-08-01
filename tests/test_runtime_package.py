@@ -1074,10 +1074,7 @@ def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experi
                                                   'name': f'env-{package.rest_uid}'}}}],
                  key=lambda e: e["name"])
 
-    wf_env = sorted(spec["spec"].pop("env"),
-                    key=lambda e: e["name"])
-
-    assert wf_env == env
+    assert spec["spec"].pop("env") == [{'name': 'INSTANCE_DIR_NAME', 'value': f'{package.instance_name}.instance'}]
 
     assert spec == {'apiVersion': 'st4sd.ibm.com/v1alpha1',
                     'kind': 'Workflow',
@@ -1100,17 +1097,19 @@ def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experi
                              'variables': [],
                              'volumeMounts': [],
                              's3BucketInput': {
-                                 label: {'valueFrom': {
-                                     'secretKeyRef': {
-                                         'name': f'env-{package.rest_uid}',
-                                         'key': f"ST4SD_S3_IN_{env_name}",
-                                     }
-                                 }} for label, env_name in [
-                                    ('bucket', "BUCKET"),
-                                    ('endpoint', "END_POINT"),
-                                    ('accessKeyID', "ACCESS_KEY_ID"),
-                                    ('secretAccessKey', "SECRET_ACCESS_KEY")
-                                ]
+                                 "bucketInfo": {
+                                     label: {'valueFrom': {
+                                         'secretKeyRef': {
+                                             'name': f'env-{package.rest_uid}',
+                                             'key': f"ST4SD_S3_IN_{env_name}",
+                                         }
+                                     }} for label, env_name in [
+                                         ('bucket', "BUCKET"),
+                                         ('endpoint', "END_POINT"),
+                                         ('accessKeyID', "ACCESS_KEY_ID"),
+                                         ('secretAccessKey', "SECRET_ACCESS_KEY")
+                                     ]
+                                 }
                              },
                              's3FetchFilesImage': extra_opts.image_st4sd_runtime_k8s_input_s3,
                              'volumes': [],
@@ -1122,10 +1121,10 @@ def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experi
 
     # VV: We store the actual credentials in a secret!
     assert secret['data'] == {
-        'ST4SD_S3_IN_ACCESSKEYID': b64_str('accessKeyID'),
+        'ST4SD_S3_IN_ACCESS_KEY_ID': b64_str('accessKeyID'),
         'ST4SD_S3_IN_BUCKET': b64_str('bucket'),
-        'ST4SD_S3_IN_ENDPOINT': b64_str('endpoint'),
-        'ST4SD_S3_IN_SECRETACCESSKEY': b64_str('secretAccessKey')
+        'ST4SD_S3_IN_END_POINT': b64_str('endpoint'),
+        'ST4SD_S3_IN_SECRET_ACCESS_KEY': b64_str('secretAccessKey')
     }
 
 
@@ -1242,10 +1241,10 @@ def test_package_hide_s3_input_creds(
     secret = package.construct_k8s_secret_env_vars('hello')
 
     assert secret['data'] == {
-        'ST4SD_S3_IN_ACCESSKEYID': b64_str('accessKeyID'),
+        'ST4SD_S3_IN_ACCESS_KEY_ID': b64_str('accessKeyID'),
         'ST4SD_S3_IN_BUCKET': b64_str('bucket'),
-        'ST4SD_S3_IN_ENDPOINT': b64_str('endpoint'),
-        'ST4SD_S3_IN_SECRETACCESSKEY': b64_str('secretAccessKey')
+        'ST4SD_S3_IN_END_POINT': b64_str('endpoint'),
+        'ST4SD_S3_IN_SECRET_ACCESS_KEY': b64_str('secretAccessKey')
     }
 
 
@@ -1332,7 +1331,8 @@ def test_read_s3_files_hide_env_vars(ve_sum_numbers: apis.models.virtual_experim
             'accessKeyID': "accessKeyID",
             'secretAccessKey': "secretAccessKey",
             'bucket': "bucket",
-            'endpoint': "endpoint"
+            'endpoint': "endpoint",
+            'region': 'region',
         }
     })
     payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
@@ -1342,27 +1342,14 @@ def test_read_s3_files_hide_env_vars(ve_sum_numbers: apis.models.virtual_experim
     secret = package.construct_k8s_secret_env_vars("hello")
 
     assert secret["data"] == {
-        'ST4SD_S3_IN_ACCESSKEYID': 'YWNjZXNzS2V5SUQ=',
-        'ST4SD_S3_IN_BUCKET': 'YnVja2V0',
-        'ST4SD_S3_IN_ENDPOINT': 'ZW5kcG9pbnQ=',
-        'ST4SD_S3_IN_SECRETACCESSKEY': 'c2VjcmV0QWNjZXNzS2V5',
+        'ST4SD_S3_IN_ACCESS_KEY_ID': b64_str('accessKeyID'),
+        'ST4SD_S3_IN_BUCKET': b64_str('bucket'),
+        'ST4SD_S3_IN_END_POINT': b64_str('endpoint'),
+        'ST4SD_S3_IN_SECRET_ACCESS_KEY': b64_str('secretAccessKey'),
+        'ST4SD_S3_IN_REGION': b64_str('region'),
     }
 
-    envs = sorted([{'name': 'INSTANCE_DIR_NAME',
-                    'value': f'{package.instance_name}.instance'},
-                   {'name': 'ST4SD_S3_IN_ACCESS_KEY_ID',
-                    'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_ACCESS_KEY_ID',
-                                                   'name': f'env-{package.rest_uid}'}}},
-                   {'name': 'ST4SD_S3_IN_END_POINT',
-                    'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_END_POINT',
-                                                   'name': f'env-{package.rest_uid}'}}},
-                   {'name': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
-                    'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
-                                                   'name': f'env-{package.rest_uid}'}}}],
-                  key=lambda e: e["name"])
-
-    assert sorted(wf["spec"]["env"],
-                  key=lambda e: e["name"]) == envs
+    assert wf["spec"]["env"] == [{'name': 'INSTANCE_DIR_NAME', 'value': f'{package.instance_name}.instance'}]
 
     assert payload_config.inputs[0].name == "renamed.txt"
 
@@ -1374,14 +1361,20 @@ def test_read_s3_files_hide_env_vars(ve_sum_numbers: apis.models.virtual_experim
     assert wf['spec']['inputs'] == ["/tmp/s3-root-dir/input/renamed.txt"]
 
     assert wf["spec"]["s3BucketInput"] == {
-        'accessKeyID': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_ACCESS_KEY_ID',
-                                                       'name': f'env-{package.rest_uid}'}}},
-        'bucket': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_BUCKET',
-                                                  'name': f'env-{package.rest_uid}'}}},
-        'endpoint': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_END_POINT',
-                                                    'name': f'env-{package.rest_uid}'}}},
-        'secretAccessKey': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
-                                                           'name': f'env-{package.rest_uid}'}}}}
+        "bucketInfo": {
+            'accessKeyID': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_ACCESS_KEY_ID',
+                                                           'name': f'env-{package.rest_uid}'}}},
+            'bucket': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_BUCKET',
+                                                      'name': f'env-{package.rest_uid}'}}},
+            'endpoint': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_END_POINT',
+                                                        'name': f'env-{package.rest_uid}'}}},
+            'secretAccessKey': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_SECRET_ACCESS_KEY',
+                                                               'name': f'env-{package.rest_uid}'}}},
+            'region': {'valueFrom': {'secretKeyRef': {'key': 'ST4SD_S3_IN_REGION',
+                                                               'name': f'env-{package.rest_uid}'}}}
+        }
+    }
+
 
 def test_read_s3_files_rename(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
