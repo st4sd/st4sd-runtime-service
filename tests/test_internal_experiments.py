@@ -627,7 +627,9 @@ def test_recover_dsl_from_internal_experiment_with_input_params(
                     "input.my-inputs.csv": "input/my-inputs.csv"
                 }
             }
-        ]
+        ],
+        "interface": None,
+        "output": [],
     }
 
 
