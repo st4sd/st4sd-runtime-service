@@ -1454,7 +1454,11 @@ def update_registry_metadata_of_parameterised_package(
             variable_names=ve.parameterisation.get_configurable_variable_names()
         )
 
+        merged.digest = ve.metadata.registry.digest
+        merged.tags = ve.metadata.registry.tags
         merged.inherit_defaults(ve.parameterisation)
+
+        ve.metadata.registry = merged
 
         # VV: Now look at the global variables of all platforms in `concrete` and fill in any missing
         # default values (i.e. values for which there's no mention in ve.parameterisation)
@@ -1490,13 +1494,6 @@ def update_registry_metadata_of_parameterised_package(
                     if not any(filter(lambda pv: pv.platform == p, v.valueFrom)):
                         # VV: There is no information about this platform for this variable
                         v.valueFrom.append(apis.models.virtual_experiment.ValueInPlatform(value=p_value, platform=p))
-
-        ve.metadata.registry.inputs = merged.inputs
-        ve.metadata.registry.data = merged.data
-        ve.metadata.registry.containerImages = merged.containerImages
-        ve.metadata.registry.executionOptionsDefaults = merged.executionOptionsDefaults
-        ve.metadata.registry.interface = concrete.get_interface() or {}
-        ve.metadata.registry.platforms = merged.platforms
     except apis.models.errors.ApiError as e:
         logger.warning(f"Could not extract registry metadata due to {e}. "
                        f"Traceback: {traceback.format_exc()}")
@@ -1547,6 +1544,8 @@ def access_and_validate_virtual_experiment_packages(
         except ValueError:
             pass
 
+    if not ve.metadata.package.name:
+        raise apis.models.errors.ApiError("The virtual experiment does not have a name")
 
     prepare_parameterised_package_for_download_definition(ve, db_secrets=packages.db_secrets)
 

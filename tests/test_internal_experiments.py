@@ -658,6 +658,7 @@ def test_auto_pvep_for_simple(
             ]
         },
         'inputs': [],
+        'output': [],
         # VV: There's only one platform for **ALL** DSL workflows
         'platforms': ['default']
     }
@@ -737,6 +738,7 @@ def test_auto_update_pvep_for_simple(
             ]
         },
         'inputs': [],
+        'output': [],
         # VV: There's only one platform for **ALL** DSL workflows
         'platforms': ['default']
     }

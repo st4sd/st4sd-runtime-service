@@ -2142,6 +2142,51 @@ components:
 
 
 @pytest.fixture()
+def dsl2_with_key_output() -> str:
+    return """
+    entrypoint:
+      entry-instance: hello
+      execute:
+      - target: <entry-instance>
+        args:
+          message: Hello world
+      output:
+        - name: greeting
+          data-in: <entry-instance>:output
+    
+    components:
+    - signature:
+        name: hello
+        parameters:
+          - name: message
+      command:
+        executable: echo
+        arguments: "%(message)s"
+    """
+
+
+@pytest.fixture
+def ve_dsl2_with_key_output() -> apis.models.virtual_experiment.ParameterisedPackage:
+    desc = {
+        "base": {
+            "packages": [
+                {
+                    "name": "main",
+                    "source": {"git": {
+                        "location": {
+                            "commit": "some-commit",
+                            "url": "https://git.someserver/some-git-repo"}
+                    }}}]
+        },
+        "metadata": {"package": {
+            "description": "A simple DSL 2.0 workflow with a key output",
+            "name": "dsl2-with-key-output"
+        }}
+    }
+
+    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(desc)
+
+@pytest.fixture()
 def rel_simple_relationship() -> Dict[str, Any]:
     return {
         "identifier": "simple",

@@ -16,6 +16,7 @@ import typing
 
 import experiment.model.errors
 import experiment.model.frontends.flowir
+import experiment.model.frontends.dsl
 import pytest
 import yaml
 
@@ -497,6 +498,56 @@ def test_check_metadata_registry_platforms(flowir_fixture_name: str,
 
             assert "internal-experiment" not in retrieved_pvep.metadata.package.keywords
 
+
+
+def test_check_metadata_output(
+        dsl2_with_key_output: str,
+        ve_dsl2_with_key_output: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str
+):
+    dsl2 = yaml.load(dsl2_with_key_output, Loader=yaml.FullLoader)
+
+    dsl = experiment.model.frontends.dsl.Namespace.model_validate(dsl2)
+
+    concrete = experiment.model.frontends.dsl.namespace_to_flowir(namespace=dsl)
+
+    meta = apis.models.virtual_experiment.MetadataRegistry.from_flowir_concrete_and_data(
+        concrete,
+        data_files=[],
+        platforms=None,
+        variable_names=[]
+    )
+
+    # Create a PackageMetadataCollection by hand
+    pkg_location = conftest.package_from_files(
+        location=os.path.join(output_dir, "current_ve"),
+        files={'conf/dsl.yaml': dsl2_with_key_output, }
+    )
+
+    StorageMetadata = apis.models.virtual_experiment.StorageMetadata
+    collection = apis.storage.PackageMetadataCollection({
+        ve_dsl2_with_key_output.base.packages[0].name: StorageMetadata.from_config(
+            prefix_paths=pkg_location, config=apis.models.virtual_experiment.BasePackageConfig(),
+        )})
+
+    with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
+        with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
+            ve_val = apis.kernel.experiments.validate_and_store_pvep_in_db(collection, ve_dsl2_with_key_output, db)
+
+            print(ve_val.metadata.model_dump_json(indent=2))
+
+            assert ve_val.metadata.registry.output == [
+                apis.models.common.Option(name="greeting")
+            ]
+
+            res = db.query_identifier(ve_dsl2_with_key_output.metadata.package.name)
+            retrieved_pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(res[0])
+
+            assert "internal-experiment" not in retrieved_pvep.metadata.package.keywords
+
+            assert retrieved_pvep.metadata.registry.output == [
+                apis.models.common.Option(name="greeting")
+            ]
 
 def test_experiment_start_payload_skeleton(
         package_metadata_modular_optimizer_band_gap_gamess: apis.storage.PackageMetadataCollection,

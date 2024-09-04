@@ -821,6 +821,7 @@ class MetadataRegistry(apis.models.common.Digestable):
     containerImages: MustContainName = []
     executionOptionsDefaults: ExecutionOptionDefaults = ExecutionOptionDefaults()
     platforms: List[str] = []
+    output: MustContainName = []
 
     @classmethod
     def get_time_now_as_str(self) -> str:
@@ -829,6 +830,9 @@ class MetadataRegistry(apis.models.common.Digestable):
 
     def get_data_names(self) -> List[str]:
         return [x.name for x in self.data]
+
+    def get_output_names(self) -> List[str]:
+        return [x.name for x in self.output]
 
     def inherit_defaults(self, parameterisation: Parameterisation):
         """Extracts defaults from parameterisation and updates current executionOptionsDefaults
@@ -974,7 +978,8 @@ class MetadataRegistry(apis.models.common.Digestable):
             current = cls(
                 inputs=[apis.models.common.Option(name=filename) for filename in inputs],
                 containerImages=[apis.models.common.Option(name=name) for name in container_images],
-                executionOptionsDefaults=ExecutionOptionDefaults(variables=var_defaults)
+                executionOptionsDefaults=ExecutionOptionDefaults(variables=var_defaults),
+                interface=concrete.get_interface() or {}
             )
 
             if merged is None:
@@ -987,8 +992,10 @@ class MetadataRegistry(apis.models.common.Digestable):
                 except Exception as e:
                     raise apis.models.errors.InconsistentPlatformError(platform, f"Unexpected {type(e)}: {e}", e) from e
 
+        merged.output = [apis.models.common.Option(name=x) for x in sorted(concrete.get_output())]
         merged.platforms = concrete.platforms
         merged.data = [apis.models.common.Option(name=filename) for filename in data_files]
+
         return merged
 
     @classmethod
