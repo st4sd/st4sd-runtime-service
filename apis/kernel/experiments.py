@@ -332,29 +332,6 @@ def api_get_experiment_dsl(
     return dsl
 
 
-def fill_in_defaults(parameterised_package: apis.models.virtual_experiment.ParameterisedPackage):
-    """Updates a parameterised package in-memory with default values
-
-    Args:
-        parameterised_package:
-            The package to update in-memory
-
-    Returns:
-        Nothing
-    """
-
-    # VV: If the PVEP does not define --registerWorkflow arg of elaunch.py then set it to "yes"
-    for args in [
-        parameterised_package.parameterisation.presets.runtime.args,
-        parameterised_package.parameterisation.executionOptions.runtime.args
-    ]:
-        for arg in args:
-            if arg == "--registerWorkflow" or arg.startswith("--registerWorkflow="):
-                return
-
-    parameterised_package.parameterisation.presets.runtime.args.append("--registerWorkflow=yes")
-
-
 def validate_and_store_pvep_in_db(
     package_metadata_collection: apis.storage.PackageMetadataCollection,
     parameterised_package: apis.models.virtual_experiment.ParameterisedPackage,
@@ -382,9 +359,6 @@ def validate_and_store_pvep_in_db(
         is_internal_experiment=is_internal_experiment
     )
     apis.runtime.package.validate_parameterised_package(ve=parameterised_package, metadata=metadata)
-
-    fill_in_defaults(parameterised_package)
-
     with db:
         db.push_new_entry(parameterised_package)
 

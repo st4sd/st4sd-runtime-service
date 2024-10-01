@@ -498,11 +498,17 @@ def test_check_metadata_registry_platforms(flowir_fixture_name: str,
 
             assert "internal-experiment" not in retrieved_pvep.metadata.package.keywords
 
-def collection_with_named_dsl(
-    dsl: experiment.model.frontends.dsl.Namespace,
-    package_name: str,
-    output_dir: str
-) -> apis.storage.PackageMetadataCollection:
+
+
+def test_check_metadata_output(
+        dsl2_with_key_output: str,
+        ve_dsl2_with_key_output: apis.models.virtual_experiment.ParameterisedPackage,
+        output_dir: str
+):
+    dsl2 = yaml.load(dsl2_with_key_output, Loader=yaml.FullLoader)
+
+    dsl = experiment.model.frontends.dsl.Namespace.model_validate(dsl2)
+
     concrete = experiment.model.frontends.dsl.namespace_to_flowir(namespace=dsl)
 
     meta = apis.models.virtual_experiment.MetadataRegistry.from_flowir_concrete_and_data(
@@ -515,78 +521,14 @@ def collection_with_named_dsl(
     # Create a PackageMetadataCollection by hand
     pkg_location = conftest.package_from_files(
         location=os.path.join(output_dir, "current_ve"),
-        files={'conf/dsl.yaml': dsl.model_dump_json(by_alias=True), }
+        files={'conf/dsl.yaml': dsl2_with_key_output, }
     )
 
     StorageMetadata = apis.models.virtual_experiment.StorageMetadata
-    return apis.storage.PackageMetadataCollection({
-        package_name: StorageMetadata.from_config(
+    collection = apis.storage.PackageMetadataCollection({
+        ve_dsl2_with_key_output.base.packages[0].name: StorageMetadata.from_config(
             prefix_paths=pkg_location, config=apis.models.virtual_experiment.BasePackageConfig(),
         )})
-
-def test_auto_register_workflow(
-    dsl2_with_key_output: str,
-    ve_dsl2_with_key_output: apis.models.virtual_experiment.ParameterisedPackage,
-    output_dir: str,
-):
-    dsl2 = yaml.load(dsl2_with_key_output, Loader=yaml.FullLoader)
-    dsl = experiment.model.frontends.dsl.Namespace.model_validate(dsl2)
-    collection = collection_with_named_dsl(
-        dsl=dsl,
-        package_name=ve_dsl2_with_key_output.base.packages[0].name,
-        output_dir=output_dir
-    )
-
-    ve_dsl2_with_key_output.parameterisation.presets.runtime.args = []
-    ve_dsl2_with_key_output.parameterisation.executionOptions.runtime.args = []
-
-    with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
-        with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            ve_val = apis.kernel.experiments.validate_and_store_pvep_in_db(collection, ve_dsl2_with_key_output, db)
-
-            assert ve_val.parameterisation.presets.runtime.args == ["--registerWorkflow=yes"]
-            assert ve_val.parameterisation.executionOptions.runtime.args == []
-
-
-def test_auto_no_register_workflow(
-    dsl2_with_key_output: str,
-    ve_dsl2_with_key_output: apis.models.virtual_experiment.ParameterisedPackage,
-    output_dir: str,
-):
-    dsl2 = yaml.load(dsl2_with_key_output, Loader=yaml.FullLoader)
-    dsl = experiment.model.frontends.dsl.Namespace.model_validate(dsl2)
-
-    collection = collection_with_named_dsl(
-        dsl=dsl,
-        package_name=ve_dsl2_with_key_output.base.packages[0].name,
-        output_dir=output_dir
-    )
-
-    ve_dsl2_with_key_output.parameterisation.presets.runtime.args = ["--registerWorkflow=no"]
-    ve_dsl2_with_key_output.parameterisation.executionOptions.runtime.args = []
-
-    with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
-        with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            ve_val = apis.kernel.experiments.validate_and_store_pvep_in_db(collection, ve_dsl2_with_key_output, db)
-
-            assert ve_val.parameterisation.presets.runtime.args == ["--registerWorkflow=no"]
-            assert ve_val.parameterisation.executionOptions.runtime.args == []
-
-
-
-def test_check_metadata_output(
-        dsl2_with_key_output: str,
-        ve_dsl2_with_key_output: apis.models.virtual_experiment.ParameterisedPackage,
-        output_dir: str
-):
-    dsl2 = yaml.load(dsl2_with_key_output, Loader=yaml.FullLoader)
-    dsl = experiment.model.frontends.dsl.Namespace.model_validate(dsl2)
-
-    collection = collection_with_named_dsl(
-        dsl=dsl,
-        package_name=ve_dsl2_with_key_output.base.packages[0].name,
-        output_dir=output_dir
-    )
 
     with tempfile.NamedTemporaryFile(suffix=".json", prefix="experiments", delete=True) as f:
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
