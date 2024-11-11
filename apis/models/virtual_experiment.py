@@ -28,6 +28,7 @@ import experiment.model.errors
 import experiment.model.frontends.flowir
 import experiment.model.graph
 import experiment.model.storage
+import experiment.model.data
 import pydantic
 import six
 from pydantic import ConfigDict, validator
@@ -440,6 +441,22 @@ class OldFileContent(apis.models.common.Digestable):
         if isinstance(value, six.string_types):
             if '/' in value:
                 raise ValueError("Cannot contain / character")
+
+        return value
+
+    @pydantic.model_validator(mode="after")
+    def upgrade_filename(cls, value: "OldFileContent") -> "OldFileContent":
+        if (value.filename is not None
+                and "filename" in value.model_fields_set
+                and "sourceFilename" not in value.model_fields_set
+                and "targetFilename" not in value.model_fields_set):
+
+            source, target = experiment.model.data.split_path_to_source_path_and_target_name(value.filename)
+
+            if target:
+                value.filename = None
+                value.sourceFilename = source
+                value.targetFilename = target
 
         return value
 

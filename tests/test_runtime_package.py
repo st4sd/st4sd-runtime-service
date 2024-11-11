@@ -1961,3 +1961,52 @@ def test_extra_input(ve_sum_numbers: apis.models.virtual_experiment.Parameterise
     e = e.value
 
     assert e.extra_inputs == ['input_smiles.csv']
+
+
+def test_rename(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="input_smiles.csv"))
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
+        "inputs": [{"filename": "/foo/bar.csv:input_smiles.csv"}],
+        "s3": {
+            "accessKeyID": "AK",
+            "secretAccessKey": "SAK",
+            "bucket": "ap-st4sd-test",
+            "endpoint": "https://my-url.com",
+        },
+    })
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+
+    apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+
+    pkg = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    workflow = pkg.construct_k8s_workflow()
+
+    assert workflow["spec"]["inputs"] == [
+        "/tmp/s3-root-dir/input/foo/bar.csv:input_smiles.csv"
+    ]
+
+
+def test_rename_with_escaped_char(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="input_smiles.csv"))
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
+        "inputs": [{"filename": "/foo/bar\:with-escaped-character.csv:input_smiles.csv"}],
+        "s3": {
+            "accessKeyID": "AK",
+            "secretAccessKey": "SAK",
+            "bucket": "ap-st4sd-test",
+            "endpoint": "https://my-url.com",
+        },
+    })
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+
+    pkg = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    workflow = pkg.construct_k8s_workflow()
+    assert workflow["spec"]["inputs"] == [
+        "/tmp/s3-root-dir/input/foo/bar\\:with-escaped-character.csv:input_smiles.csv"
+    ]

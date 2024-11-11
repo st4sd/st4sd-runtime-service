@@ -875,7 +875,11 @@ class NamedPackage:
             path = value.path or x.name if value is not None else x.name
             if path.startswith(os.path.sep):
                 # VV: joining ("hello" with "/hi there") produces "/hi there"
-                path = path[1:]
+                path = path.lstrip(os.path.sep)
+
+            # VV: Escape the \ and : characters - elaunch.py will unescape them
+            path = path.replace("\\", "\\\\")
+            path = path.replace(":", "\\:")
 
             if value.rename:
                 path = ':'.join((path, value.rename))
