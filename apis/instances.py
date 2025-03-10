@@ -715,6 +715,10 @@ class InstanceProperties(Resource):
                 api.abort(400, message=f"Instance {id} does not have a status field")
 
             meta = instance['status']['meta']
+            if not meta:
+                api.abort(400, message=f"Instance {id} has an incomplete status.meta field "
+                                       "this indicates that the experiment has not finished syncing his status to "
+                                       "Kubernetes, try again later")
             instance_name = meta['instanceName']
             instance_dir = os.path.join(utils.WORKING_VOLUME_MOUNT, instance_name)
 
