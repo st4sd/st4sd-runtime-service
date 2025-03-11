@@ -2010,3 +2010,57 @@ def test_rename_with_escaped_char(ve_sum_numbers: apis.models.virtual_experiment
     assert workflow["spec"]["inputs"] == [
         "/tmp/s3-root-dir/input/foo/bar\\:with-escaped-character.csv:input_smiles.csv"
     ]
+
+
+def test_pvc_input(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="input_smiles.csv"))
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(
+        {
+            "inputs": [
+                {"sourceFilename":"bar.csv", "volume": "foo", "targetFilename": "input_smiles.csv"}
+            ],
+            "volumes": [
+                {"identifier": "foo", "type":{"persistentVolumeClaim": "the-pvc-name"}}
+            ]
+        }
+    )
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+
+    apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+
+    pkg = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    workflow = pkg.construct_k8s_workflow()
+
+    assert workflow["spec"]["inputs"] == [
+        "/tmp/st4sd-volumes/the-pvc-name/bar.csv:input_smiles.csv"
+    ]
+
+
+def test_pvc_data(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.parameterisation.executionOptions.data.append(apis.models.common.Option(name="input_smiles.csv"))
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(
+        {
+            "data": [
+                {"sourceFilename":"bar.csv", "volume": "foo", "targetFilename": "input_smiles.csv"}
+            ],
+            "volumes": [
+                {"identifier": "foo", "type":{"persistentVolumeClaim": "the-pvc-name"}}
+            ]
+        }
+    )
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+
+    apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+
+    pkg = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    workflow = pkg.construct_k8s_workflow()
+
+    assert workflow["spec"]["data"] == [
+        "/tmp/st4sd-volumes/the-pvc-name/bar.csv:input_smiles.csv"
+    ]

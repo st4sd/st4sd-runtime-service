@@ -397,6 +397,24 @@ class PayloadVolumeType(apis.models.common.Digestable):
 class PayloadVolume(apis.models.common.Digestable):
     type: PayloadVolumeType
     applicationDependency: Optional[str] = None
+    identifier: Optional[str] = None
+
+    def get_mount_name(self) -> str:
+        volume_raw = self.type.model_dump(exclude_none=True)
+
+        name_pvc = volume_raw.get('persistentVolumeClaim', {}).get('claimName')
+        name_config = volume_raw.get('configMap', {}).get('name')
+        name_dataset = volume_raw.get('dataset', {}).get('name')
+        name_secret = volume_raw.get('secret', {}).get('name')
+        if sum([1 for x in [name_pvc, name_config, name_dataset, name_secret] if x]) != 1:
+            raise ValueError("Volume %s must use exactly 1 of the fields "
+                             "persistentVolumeClaim, configMap, dataset, secret" % volume_raw)
+        return name_pvc or name_config or name_dataset or name_secret
+
+    def get_mountpath(self, root_volume_mounts: str) -> str:
+        underlying_name = self.get_mount_name()
+        return self.type.model_dump(exclude_none=True)\
+                    .get('mountPath', os.path.join(root_volume_mounts, underlying_name))
 
 
 def partition_dataset_uri(uri: str, protocol='dataset') -> Tuple[str, str]:
@@ -432,6 +450,7 @@ class OldFileContent(apis.models.common.Digestable):
     content: Optional[str] = None
     sourceFilename: Optional[str] = None
     targetFilename: Optional[str] = None
+    volume: Optional[str] = None
 
     @pydantic.validator("targetFilename")
     def no_directories_in_target(cls, value: Optional[str]) -> str:
@@ -462,9 +481,11 @@ class OldFileContent(apis.models.common.Digestable):
 
     @pydantic.model_validator(mode="after")
     def mutually_exclusive_fields(cls, value: "OldFileContent") -> "OldFileContent":
-        if (value.filename is not None or value.content is not None) and \
-                (value.sourceFilename is not None or value.targetFilename is not None):
-            raise ValueError("filename/content are mutually exclusive with sourceFilename/targetFilename")
+        if value.filename is not None and (value.sourceFilename is not None or value.targetFilename is not None):
+            raise ValueError("filename is mutually exclusive with sourceFilename/targetFilename")
+
+        if value.volume is not None and value.content is not None:
+            raise ValueError("volume and content are mutually exclusive")
 
         if (value.sourceFilename is not None and value.targetFilename is None) or \
                 (value.targetFilename is not None and value.sourceFilename is None):
@@ -482,10 +503,11 @@ class OldVolumeType(apis.models.common.Digestable):
 
 class OldVolume(apis.models.common.Digestable):
     type: OldVolumeType
-    applicationDependency: str
+    applicationDependency: Optional[str] = None
     subPath: Optional[str] = None
     mountPath: Optional[str] = None
     readOnly: bool = True
+    identifier: Optional[str] = None
 
 
 class OldS3Credentials(apis.models.common.Digestable):
@@ -597,16 +619,17 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
         old_volumes = old.volumes
         new_volumes = []
         for ov in old_volumes:
-            volume = ov.dict(exclude_none=True)
+            volume = ov.model_dump(exclude_none=True)
             new_vol = {}
-            if 'applicationDependency' in volume:
-                new_vol['applicationDependency'] = volume['applicationDependency']
+
+            for k in {"applicationDependency", "identifier"}.intersection(volume):
+                new_vol[k] = volume[k]
 
             for what in ['persistentVolumeClaim', 'configMap', 'dataset', 'secret']:
                 if volume['type'].get(what):
                     new_vol['type'] = {
                         what: {
-                            x: volume[x] for x in volume if x not in ('type', 'applicationDependency')
+                            x: volume[x] for x in volume if x not in ('type', 'applicationDependency', 'identifier')
                         }
                     }
                     if what == 'persistentVolumeClaim':
@@ -616,6 +639,24 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
 
             new_volumes.append(PayloadVolume.parse_obj(new_vol))
         config.volumes = new_volumes
+
+        all_volume_ids = []
+        volume_dups = set()
+        for x in new_volumes:
+            if x.identifier is None:
+                continue
+
+            if x.identifier in all_volume_ids:
+                volume_dups.add(x.identifier)
+                continue
+
+            all_volume_ids.append(x.identifier)
+
+        if volume_dups:
+            raise apis.models.errors.InvalidPayloadExperimentStartError(
+                f"The following volumes have been defined multiple times {sorted(volume_dups)}"
+            )
+
 
         if old.s3:
             if old.s3.dataset:
@@ -679,18 +720,30 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                     name=name_of_file_in_experiment,
                     valueFrom=apis.models.common.OptionValueFrom())
 
-                if config.security.s3Input.valueFrom is None:
-                    raise apis.models.errors.InvalidPayloadExperimentStartError(
-                        f"payload configuration for {kind} file {fc.dict()} is invalid because there is "
-                        f"no S3/Dataset security configuration")
+                if fc.volume:
+                    # VV: The contents of this file are in a Volume (pvc, dataset, secret)
+                    volume_identifiers = [x.identifier for x in config.volumes]
+                    if fc.volume not in volume_identifiers:
+                        raise apis.models.errors.InvalidPayloadExperimentStartError(
+                            f"There is no volume {fc.volume} definition for {kind} file {fc.dict()}"
+                        )
+                    ret.valueFrom.volumeRef = apis.models.common.OptionFromVolumeRef(
+                        name = fc.volume, path=filename_source, rename=filename_target
+                    )
                 else:
-                    if config.security.s3Input.valueFrom.s3Ref:
-                        ret.valueFrom.s3Ref = apis.models.common.OptionFromS3Values(
-                            path=filename_source, rename=filename_target)
+                    # VV: The contents of this file are in some S3 bucket
+                    if config.security.s3Input.valueFrom is None:
+                        raise apis.models.errors.InvalidPayloadExperimentStartError(
+                            f"payload configuration for {kind} file {fc.dict()} is invalid because there is "
+                            f"no S3/Dataset security configuration")
                     else:
-                        ret.valueFrom.datasetRef = apis.models.common.OptionFromDatasetRef(
-                            name=config.security.s3Input.valueFrom.datasetRef.name, path=filename_source,
-                            rename=filename_target)
+                        if config.security.s3Input.valueFrom.s3Ref:
+                            ret.valueFrom.s3Ref = apis.models.common.OptionFromS3Values(
+                                path=filename_source, rename=filename_target)
+                        else:
+                            ret.valueFrom.datasetRef = apis.models.common.OptionFromDatasetRef(
+                                name=config.security.s3Input.valueFrom.datasetRef.name, path=filename_source,
+                                rename=filename_target)
             return ret
 
         config.inputs = [parse_old_file_contents(x, "inputs") for x in old.inputs]

@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re as reg_ex
+import os
 from collections import namedtuple
 from typing import Any
 from typing import Dict
@@ -115,25 +116,52 @@ class OptionFromS3SecretKeyRef(Digestable):
     keyPath: Optional[str] = None
     objectName: str
 
+class RenamablePath(Digestable):
+    path: Optional[str] = None
+    rename: Optional[str] = pydantic.Field(
+        None, description="If set, and path is not None then this means that the path filename should be renamed "
+                          "to match @rename")
 
-class OptionFromS3Values(Digestable):
+    def to_path_instruction(self, default_path: Optional[str] = None) -> str:
+        """Produces a path that can be used as an input/data file for elaunch.py
+
+        Args:
+            default_path:
+                Used as the default vlaue for self.path
+
+        Returns:
+            A string which may include rename configuration (i.e. $source:$target)
+        """
+        path = self.path or default_path
+        if path.startswith(os.path.sep):
+            # VV: joining ("hello" with "/hi there") produces "/hi there"
+            path = path.lstrip(os.path.sep)
+
+        # VV: Escape the \ and : characters - elaunch.py will unescape them
+        path = path.replace("\\", "\\\\")
+        path = path.replace(":", "\\:")
+
+        if self.rename:
+            path = ':'.join((path, self.rename))
+
+        return path
+
+
+class OptionFromS3Values(RenamablePath):
     accessKeyID: Optional[str] = None
     secretAccessKey: Optional[str] = None
     bucket: Optional[str] = None
     endpoint: Optional[str] = None
-    path: Optional[str] = None
-    rename: Optional[str] = pydantic.Field(
-        None, description="If set, and path is not None then this means that the path filename should be renamed "
-                          "to match @rename")
     region: Optional[str] = None
 
 
-class OptionFromDatasetRef(Digestable):
+class OptionFromVolumeRef(RenamablePath):
     name: str
-    path: Optional[str] = None
-    rename: Optional[str] = pydantic.Field(
-        None, description="If set, and path is not None then this means that the path filename should be renamed "
-                          "to match @rename")
+
+
+class OptionFromDatasetRef(OptionFromVolumeRef):
+    pass
+
 
 class OptionFromUsernamePassword(Digestable):
     username: Optional[str] = None
@@ -150,6 +178,7 @@ class OptionValueFrom(Digestable):
     usernamePassword: Optional[OptionFromUsernamePassword] = None
     s3Ref: Optional[OptionFromS3Values] = None
     s3SecretKeyRef: Optional[OptionFromS3SecretKeyRef] = None
+    volumeRef: Optional[OptionFromVolumeRef] = None
 
     @property
     def my_contents(self) -> TOptionValueFrom:

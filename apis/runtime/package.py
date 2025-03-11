@@ -570,17 +570,8 @@ class NamedPackage:
             volume_raw = volume.type.dict()
 
             # VV: Ensure that there's exactly 1 volume-type definition
-            name_pvc = volume_raw.get('persistentVolumeClaim', {}).get('claimName')
-            name_config = volume_raw.get('configMap', {}).get('name')
-            name_dataset = volume_raw.get('dataset', {}).get('name')
-            name_secret = volume_raw.get('secret', {}).get('name')
-            if sum([1 for x in [name_pvc, name_config, name_dataset, name_secret] if x]) != 1:
-                raise ValueError("Volume %s must use exactly 1 of the fields "
-                                 "persistentVolumeClaim, configMap, dataset, secret" % volume_raw)
-            underlying_name = name_pvc or name_config or name_dataset or name_secret
-            mountpath = volume_raw.get('mountPath', os.path.join(ROOT_VOLUME_MOUNTS, underlying_name))
-
-            volume_raw['mountPath'] = mountpath
+            mount_name = volume.get_mount_name()
+            mountpath = volume.get_mountpath(ROOT_VOLUME_MOUNTS)
 
             app_dep = volume.applicationDependency
             if app_dep:
@@ -591,24 +582,24 @@ class NamedPackage:
             # VV: Populate this with whatever the user put in the payload
             volume_mount_entry = {}
 
-            if name_pvc:
-                volume_uid = ':'.join(('persistentVolumeClaim', name_pvc))
-                if name_pvc == self.pvc_working_volume:
+            if volume.type.persistentVolumeClaim:
+                volume_uid = ':'.join(('persistentVolumeClaim', mount_name))
+                if mount_name == self.pvc_working_volume:
                     raise ValueError("Volume \"%s\" attempts to mount working-volume as a PVC, this is not permitted" %
-                                     name_pvc)
-                volume_entry['persistentVolumeClaim'] = {'claimName': name_pvc}
+                                     mount_name)
+                volume_entry['persistentVolumeClaim'] = {'claimName': mount_name}
                 volume_mount_entry = volume_raw['persistentVolumeClaim']
-            elif name_config:
-                volume_uid = ':'.join(('configMap', name_config))
-                volume_entry['configMap'] = {'name': name_config}
+            elif volume.type.configMap:
+                volume_uid = ':'.join(('configMap', mount_name))
+                volume_entry['configMap'] = {'name': mount_name}
                 volume_mount_entry = volume_raw['configMap']
-            elif name_dataset:
-                volume_uid = ':'.join(('persistentVolumeClaim', name_dataset))
-                volume_entry['persistentVolumeClaim'] = {'claimName': name_dataset}
+            elif volume.type.dataset:
+                volume_uid = ':'.join(('persistentVolumeClaim', mount_name))
+                volume_entry['persistentVolumeClaim'] = {'claimName': mount_name}
                 volume_mount_entry = volume_raw['dataset']
-            elif name_secret:
-                volume_uid = ':'.join(('secret', name_secret))
-                volume_entry['secret'] = {'secretName': name_secret}
+            elif volume.type.secret:
+                volume_uid = ':'.join(('secret', mount_name))
+                volume_entry['secret'] = {'secretName': mount_name}
                 volume_mount_entry = volume_raw['secret']
             else:
                 raise ValueError("InputVolume \"%s\" defines an unknown volume type" % volume)
@@ -863,28 +854,20 @@ class NamedPackage:
 
         return package
 
-    @classmethod
-    def _to_filename(cls, x: apis.models.common.Option, file_type: str) -> str:
+    def _to_filename(self, x: apis.models.common.Option, file_type: str) -> str:
         value = x.my_contents
         from_s3 = (apis.models.common.OptionFromS3Values, apis.models.common.OptionFromDatasetRef)
-
         if isinstance(value, six.string_types):
             return os.path.join(ROOT_EMBEDDED_FILES, file_type, x.name)
-        elif value is None or isinstance(value, from_s3):
-            # VV: If it has no value then it definitely cannot be embedded therefore it has to be S3
-            path = value.path or x.name if value is not None else x.name
-            if path.startswith(os.path.sep):
-                # VV: joining ("hello" with "/hi there") produces "/hi there"
-                path = path.lstrip(os.path.sep)
-
-            # VV: Escape the \ and : characters - elaunch.py will unescape them
-            path = path.replace("\\", "\\\\")
-            path = path.replace(":", "\\:")
-
-            if value.rename:
-                path = ':'.join((path, value.rename))
-
+        elif isinstance(value, from_s3):
+            path = value.to_path_instruction(default_path=x.name)
             return os.path.join(ROOT_S3_FILES, file_type, path)
+        elif isinstance(value, apis.models.common.OptionFromVolumeRef):
+            path = value.to_path_instruction(default_path=x.name)
+            # VV: Due to error checking, we know there's exactly 1 volume that matches fc.name
+            volume = [x for x in self._payload_config.volumes if x.identifier == value.name][0]
+            mountpath = volume.get_mountpath(ROOT_VOLUME_MOUNTS)
+            return os.path.join(mountpath, path)
         else:
             raise NotImplementedError(f"Cannot construct filename of data {x.dict()}")
 
