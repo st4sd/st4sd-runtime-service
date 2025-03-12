@@ -30,17 +30,6 @@ matrix:
       services:
         - docker
       env:
-        - BUILD_PYTHON_VERSION=37
-      script:
-        - docker login -u "${DOCKER_USERNAME}" -p "${DOCKER_TOKEN}" "${DOCKER_REGISTRY}"
-        - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION} -f Dockerfile .
-        - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-test
-          --build-arg base_image=${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION} -f Dockerfile.test .
-
-    - stage: test
-      services:
-        - docker
-      env:
         BUILD_PYTHON_VERSION=310
       script:
         - docker login -u "${DOCKER_USERNAME}" -p "${DOCKER_TOKEN}" "${DOCKER_REGISTRY}"
@@ -48,16 +37,6 @@ matrix:
         - docker build -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-test
           --build-arg base_image=${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION} -f Dockerfile.test .
 
-    - stage: image
-      os: linux
-      python: "3.7"
-      env:
-        - BUILD_PYTHON_VERSION=37
-      script:
-        - docker login -u "${DOCKER_USERNAME}" -p "${DOCKER_TOKEN}" "${DOCKER_REGISTRY}"
-        - docker build --pull -t ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-latest-`arch` -f Dockerfile .
-          --build-arg base_image=${RUNTIMECORE_URL}:py${BUILD_PYTHON_VERSION}-latest-`arch`
-        - docker push ${IMAGE_BASE_URL}:py${BUILD_PYTHON_VERSION}-latest-`arch`
 
     - stage: image
       os: linux
@@ -93,20 +72,6 @@ matrix:
         - export LABEL="py${BUILD_PYTHON_VERSION}-latest"
         # VV: Also push as `x86_64` and `latest`
         - ./deploy/build_multiarch.sh x86_64 latest
-
-    - stage: multiarch
-      os: linux
-      python: "3.7"
-      env:
-      - BUILD_PYTHON_VERSION=37
-      script:
-        - export SRC_TAG_X8664="py${BUILD_PYTHON_VERSION}-latest-x86_64"
-        - export DST_TAG_X8664="py${BUILD_PYTHON_VERSION}-x86_64"
-        # VV: Disable ppc64le builds for now
-        #- export SRC_TAG_PPC64LE="latest-ppc64le"
-        #- export DST_TAG_PPC64LE="ppc64le"
-        - export LABEL="py${BUILD_PYTHON_VERSION}-latest"
-        - ./deploy/build_multiarch.sh
 
     - stage: deploy-to-dev
       os: linux

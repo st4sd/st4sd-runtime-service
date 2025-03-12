@@ -21,7 +21,6 @@ import apis.models.common
 import apis.models.errors
 import apis.models.virtual_experiment
 import apis.runtime.errors
-import apis.s3
 import utils
 
 import apis.storage.actuators.s3

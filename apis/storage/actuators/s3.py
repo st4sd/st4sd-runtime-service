@@ -41,15 +41,28 @@ class S3Storage(Storage):
     #### Utility methods ####
 
     def client(self) -> "botocore.client.S3":
+        # VV: The behaviour of boto3 changed in v1.36.0 causing AccessDenied exceptions.
+        # See v1.36.0 changes in https://github.com/boto/boto3/blob/develop/CHANGELOG.rst
+        config = botocore.config.Config(
+            request_checksum_calculation="when_required", response_checksum_validation="when_required"
+        )
+
         return boto3.client(
             's3',
               aws_access_key_id=self.access_key_id,
               aws_secret_access_key=self.secret_access_key,
               endpoint_url=self.endpoint_url,
               region_name=self.region_name,
+              config=config,
         )
 
     def resource(self) -> "botocore.resource.S3":
+        # VV: The behaviour of boto3 changed in v1.36.0 causing AccessDenied exceptions.
+        # See v1.36.0 changes in https://github.com/boto/boto3/blob/develop/CHANGELOG.rst
+        config = botocore.config.Config(
+            request_checksum_calculation="when_required", response_checksum_validation="when_required"
+        )
+
         return boto3.resource(
             's3',
             aws_access_key_id=self.access_key_id,
