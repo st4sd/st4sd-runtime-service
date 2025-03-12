@@ -187,6 +187,12 @@ def test_merge_metadata_registry_wrong_inputs():
 
 def test_extract_metadata_registry_useful_information_from_concrete_ok():
     flowir = """
+application-dependencies:
+ default:
+ - foo
+ cloud:
+ - bar
+ 
 variables:
   default:
     global:
@@ -225,6 +231,16 @@ components:
     assert {x.name for x in meta.inputs} == {'input.txt'}
     assert {x.name for x in meta.data} == {'data.txt'}
     assert {x.name for x in meta.containerImages} == {'st4sd.st4sd/st4sd:kubernetes', 'st4sd.st4sd/st4sd:lsf'}
+
+    assert {
+               platform: [
+                   x.name for x in application_deps
+               ] for platform, application_deps in meta.applicationDependencies.items()
+           } == {
+               "default": ["foo"],
+               "cloud": ["bar"],
+               "hpc": ["foo"]
+           }
 
 
 def test_extract_metadata_registry_useful_information_from_concrete_bad_inputs():

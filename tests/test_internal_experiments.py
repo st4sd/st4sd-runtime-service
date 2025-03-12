@@ -665,7 +665,8 @@ def test_auto_pvep_for_simple(
     pvep = pvep_and_changes.pvep
 
     assert pvep.metadata.registry.dict(exclude={
-        "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted"
+        "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted",
+        "applicationDependencies"
     }) == expected_registry
 
     # VV: No parameterisation at all
@@ -758,7 +759,8 @@ def test_auto_update_pvep_for_simple(
     ]
 
     assert pvep.metadata.registry.dict(exclude={
-        "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted"
+        "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted",
+        "applicationDependencies"
     }) == expected_registry
 
     assert pvep.parameterisation.presets.variables == []

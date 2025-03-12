@@ -877,6 +877,8 @@ MustContainName = Optional[List[
     ]
 ]]
 
+class ApplicationDependency(apis.models.common.Digestable):
+    name: str = pydantic.Field(description="The name of the application dependency")
 
 class MetadataRegistry(apis.models.common.Digestable):
     createdOn: Optional[str] = pydantic.Field(
@@ -889,9 +891,12 @@ class MetadataRegistry(apis.models.common.Digestable):
     inputs: MustContainName = []
     data: MustContainName = []
     containerImages: MustContainName = []
-    executionOptionsDefaults: ExecutionOptionDefaults = ExecutionOptionDefaults()
+    executionOptionsDefaults: ExecutionOptionDefaults = pydantic.Field(default_factory=ExecutionOptionDefaults)
     platforms: List[str] = []
     output: MustContainName = []
+    applicationDependencies: typing.Dict[str, typing.List[ApplicationDependency]] = pydantic.Field(
+        {}, description="A mapping of platforms to the application-dependencies for the platform"
+    )
 
     @classmethod
     def get_time_now_as_str(self) -> str:
@@ -1065,6 +1070,12 @@ class MetadataRegistry(apis.models.common.Digestable):
         merged.output = [apis.models.common.Option(name=x) for x in sorted(concrete.get_output())]
         merged.platforms = concrete.platforms
         merged.data = [apis.models.common.Option(name=filename) for filename in data_files]
+        merged.applicationDependencies = {
+            platform: [
+                ApplicationDependency(name=name) for name in concrete.get_application_dependencies(platform)
+            ] for platform in concrete.platforms or ["default"]
+        }
+
 
         return merged
 
