@@ -104,11 +104,11 @@ class InstructionRewireSymbol(apis.models.common.Digestable):
             if dest_symbol.valueFrom.graph.binding.type != "output":
                 raise apis.runtime.errors.RuntimeError(
                     f"Expected input binding to point to output binding a name "
-                    f"but input binding definition is {dest_symbol.dict()}")
+                    f"but input binding definition is {dest_symbol.model_dump()}")
 
             if not dest_symbol.valueFrom.graph.binding.name:
                 raise apis.runtime.errors.RuntimeError(
-                    f"Expected input binding to contain a name but it is {dest_symbol.dict()}")
+                    f"Expected input binding to contain a name but it is {dest_symbol.model_dump()}")
 
             try:
                 bind = source_graph.bindings.get_output_binding(dest_symbol.valueFrom.graph.binding.name)
@@ -630,7 +630,7 @@ class PlatformBlueprint(apis.models.common.Digestable):
             exclude_none: bool = True,
             **kwargs
     ) -> Dict[str, Any]:
-        to_rename = super(PlatformBlueprint, self).dict(exclude_none=exclude_none, **kwargs)
+        to_rename = super(PlatformBlueprint, self).model_dump(exclude_none=exclude_none, **kwargs)
 
         return {
             {'vGlobal': 'global'}.get(x, x): to_rename[x] for x in to_rename
@@ -1150,7 +1150,7 @@ class DerivedPackage:
                                       f"- will skip processing variables")
                     continue
 
-                all_blueprints[pkg_name].platforms[platform] = PlatformBlueprint().parse_obj({
+                all_blueprints[pkg_name].platforms[platform] = PlatformBlueprint.model_validate({
                     'global': concrete.get_platform_blueprint(platform)
                 })
 
@@ -1227,7 +1227,7 @@ class DerivedPackage:
             blueprints=all_blueprints,
             components=all_components,
             aggregate_variables=aggregate_vars,
-            aggregate_blueprints=BlueprintCollection.parse_obj(aggregate_bps),
+            aggregate_blueprints=BlueprintCollection.model_validate(aggregate_bps),
             aggregate_components=aggregate_components,
             aggregate_environments=aggregate_environments
         )
@@ -1242,7 +1242,7 @@ class DerivedPackage:
 
                 if o.valueFrom.graph.binding.type != "output":
                     raise NotImplementedError(f"Expected binding of keyOutput {o.name} to point to output binding "
-                                              f"but keyOutput binding definition is {o.dict()}")
+                                              f"but keyOutput binding definition is {o.model_dump()}")
 
                 pkg_name, graph_name = graph.partition_name()
                 package = self._ve.base.get_package(pkg_name)
@@ -1287,25 +1287,25 @@ class DerivedPackage:
         # VV: Step 2 -  identify conflicts between variables and blueprints in the many base-packages
         # We have a conflict, when more than 1 packages define a variable/blueprintField with more than 1 unique value
         # (the conflicts have ALREADY been resolved in step 1)
-        blueprints = {x: graphs_meta.blueprints[x].dict() for x in graphs_meta.blueprints}
+        blueprints = {x: graphs_meta.blueprints[x].model_dump() for x in graphs_meta.blueprints}
         bp_conflicts = PackageConflict.find_conflicts(blueprints)
 
-        variables = {x: graphs_meta.variables[x].dict() for x in graphs_meta.variables}
+        variables = {x: graphs_meta.variables[x].model_dump() for x in graphs_meta.variables}
         var_conflicts = PackageConflict.find_conflicts(variables)
 
         if bp_conflicts:
             self._log.info("Graphs define conflicting Blueprints - will layer the blueprints in the same order as "
                            "the graphs with the input bindings in VirtualExperiment.base.connections")
-            self._log.info(f"Blueprint Conflicts are\n:{yaml.dump([x.dict(exclude_none=False) for x in bp_conflicts])}")
+            self._log.info(f"Blueprint Conflicts are\n:{yaml.dump([x.model_dump(exclude_none=False) for x in bp_conflicts])}")
 
         if var_conflicts:
             self._log.info("Graphs define conflicting Variables - will layer the variables in the same order as "
                            "the graphs with the input bindings in VirtualExperiment.base.connections")
-            self._log.info(f"Variable Conflicts are\n:{yaml.dump([x.dict(exclude_none=False) for x in var_conflicts])}")
+            self._log.info(f"Variable Conflicts are\n:{yaml.dump([x.model_dump(exclude_none=False) for x in var_conflicts])}")
 
         # VV: Step 3 - put aggregate_blueprints, aggregate_variables, and all_components in a single FlowIRConcrete
-        blueprints = graphs_meta.aggregate_blueprints.dict(exclude_none=True)['platforms']
-        variables = graphs_meta.aggregate_variables.dict(exclude_none=True)['platforms']
+        blueprints = graphs_meta.aggregate_blueprints.model_dump(exclude_none=True)['platforms']
+        variables = graphs_meta.aggregate_variables.model_dump(exclude_none=True)['platforms']
 
         logging.getLogger().warning(f"THE BASE IS {self._ve.base.model_dump_json(indent=2)}")
 
@@ -1319,12 +1319,12 @@ class DerivedPackage:
             experiment.model.frontends.flowir.FlowIR.FieldVariables: variables,
             experiment.model.frontends.flowir.FlowIR.FieldComponents: graphs_meta.aggregate_components,
             experiment.model.frontends.flowir.FlowIR.FieldEnvironments: graphs_meta.aggregate_environments,
-            experiment.model.frontends.flowir.FlowIR.FieldOutput: {x: output[x].dict(by_alias=True) for x in output},
+            experiment.model.frontends.flowir.FlowIR.FieldOutput: {x: output[x].model_dump(by_alias=True) for x in output},
         }
 
         interface = self._ve.base.interface
         if interface is not None:
-            flowir[experiment.model.frontends.flowir.FlowIR.FieldInterface] = interface.dict(by_alias=True)
+            flowir[experiment.model.frontends.flowir.FlowIR.FieldInterface] = interface.model_dump(by_alias=True)
 
         self._synthesized_concrete = experiment.model.frontends.flowir.FlowIRConcrete(
             flowir, platform=None, documents={})

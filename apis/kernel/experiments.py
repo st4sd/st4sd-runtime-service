@@ -71,7 +71,7 @@ def api_query_experiments(
         package = query.package.definition
     elif query.relationship:
         if db_relationships is None:
-            raise apis.models.errors.ApiError(f"Invalid query for parameterised virtual experiments {query.dict()} - "
+            raise apis.models.errors.ApiError(f"Invalid query for parameterised virtual experiments {query.model_dump()} - "
                                               f"unable to access relationship database")
 
         with db_relationships:
@@ -82,14 +82,14 @@ def api_query_experiments(
             raise apis.models.errors.ApiError(f"Unknown relationship \"{query.relationship.identifier}\"")
 
         try:
-            rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(docs[0])
+            rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.model_validate(docs[0])
         except pydantic.error_wrappers.ValidationError:
             return []
 
         if query.relationship.transform:
             if (query.relationship.transform.matchInputGraph or query.relationship.transform.matchOutputGraph) is False:
                 raise apis.models.errors.ApiError(
-                    f"Invalid query for parameterised virtual experiments {query.dict()} - must set either "
+                    f"Invalid query for parameterised virtual experiments {query.model_dump()} - must set either "
                     f"relationship.transform.matchInputGraph or relationship.transform.matchOutputGraph to True")
 
             if query.relationship.transform.matchInputGraph:
@@ -98,7 +98,7 @@ def api_query_experiments(
                 package = rel.transform.outputGraph.package
 
     if package is None:
-        raise apis.models.errors.ApiError(f"Invalid query for parameterised virtual experiments {query.dict()}")
+        raise apis.models.errors.ApiError(f"Invalid query for parameterised virtual experiments {query.model_dump()}")
 
     if query.common.matchPackageVersion is False:
         if package.source.git:
@@ -122,7 +122,7 @@ def do_format_parameterised_package(
         format_options: FormatOptions
 ) -> Any:
     if isinstance(package, apis.models.virtual_experiment.ParameterisedPackage):
-        what = package.dict(exclude_none=format_options.hideNone == "y")
+        what = package.model_dump(exclude_none=format_options.hideNone == "y")
     else:
         what = copy.deepcopy(package)
 
@@ -156,7 +156,7 @@ def format_documents(docs: List[Dict[str, Any]], format_options: FormatOptions) 
 
     for doc in docs:
         try:
-            obj = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(doc)
+            obj = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.model_validate(doc)
         except pydantic.ValidationError as e:
             package_name = doc.get('metadata', {}).get('package', {}).get('name', '**unknown**')
             digest = doc.get('metadata', {}).get('registry', {}).get('digest', '**unknown**')
@@ -181,7 +181,7 @@ def api_list_queries(request: Dict[str, Any], format_options: FormatOptions):
             docs = db_experiments.query()
     else:
         try:
-            query = apis.models.query_experiment.QueryExperiment.parse_obj(request)
+            query = apis.models.query_experiment.QueryExperiment.model_validate(request)
         except pydantic.error_wrappers.ValidationError as e:
             raise apis.models.errors.ApiError(f"Invalid request, problems: {e.json(indent=2)}")
         db_relationships = utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT)
@@ -206,14 +206,14 @@ def api_get_experiment(
     problems = []
 
     try:
-        ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+        ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(docs[0])
     except pydantic.error_wrappers.ValidationError as e:
         problems = apis.models.errors.make_pydantic_errors_jsonable(e)
 
         try:
             if try_drop_unknown:
                 ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
-                    .parse_obj(docs[0])
+                    .model_validate(docs[0])
             else:
                 raise apis.models.errors.InvalidModelError(
                     f"Parameterised virtual experiment package {identifier} is invalid", problems)
@@ -242,7 +242,7 @@ def update_component_defaults_in_namespace(namespace: experiment.model.frontends
     del default_comp['executors']
 
     for idx, comp in enumerate(namespace.components):
-        comp = comp.dict(by_alias=True, exclude_unset=True, exclude_defaults=True)
+        comp = comp.model_dump(by_alias=True, exclude_unset=True, exclude_defaults=True)
         defaults = copy.deepcopy(default_comp)
         experiment.model.frontends.flowir.FlowIR.override_object(
             defaults, comp
@@ -300,7 +300,7 @@ def api_get_experiment_dsl(
                     # getting auto-added by FlowIR - therefore we manually inject them here
                     update_component_defaults_in_namespace(namespace)
 
-                    dsl = namespace.dict(by_alias=True)
+                    dsl = namespace.model_dump(by_alias=True)
                 else:
                     graph = experiment.model.graph.WorkflowGraph.graphFromPackage(
                         package, platform=platform_name, primitive=True, variable_substitute=False,

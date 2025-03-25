@@ -252,7 +252,7 @@ def test_just_component(dsl_just_component: typing.Dict[str, typing.Any]):
 
     assert namespace.components[0].signature.parameters == namespace.workflows[0].signature.parameters
 
-    assert namespace.components[0].signature.parameters[0].dict(exclude_none=True) == {
+    assert namespace.components[0].signature.parameters[0].model_dump(exclude_none=True) == {
         "name": "message"
     }
 

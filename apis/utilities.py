@@ -86,7 +86,7 @@ optional PVEP template
                 dsl2_definition=dsl, template=template)
 
             return {
-                "pvep": pvep_and_changes.pvep.dict(by_alias=True, exclude_none=True),
+                "pvep": pvep_and_changes.pvep.model_dump(by_alias=True, exclude_none=True),
                 "changes": pvep_and_changes.changes,
                 "problems": []
             }

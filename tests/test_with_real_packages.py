@@ -24,7 +24,7 @@ def add_from_github(
 ) -> apis.models.virtual_experiment.ParameterisedPackage:
     r = requests.get(url, allow_redirects=True)
     ve_raw = r.json()
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(ve_raw)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(ve_raw)
 
     with db_experiments:
         db_experiments.push_new_entry(ve)
@@ -81,7 +81,7 @@ def test_transformation_pm3_to_dft(output_dir: str, local_deployment: bool):
         }
     }
 
-    relationship: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(rel_raw)
+    relationship: apis.models.relationships.Relationship = apis.models.relationships.Relationship.model_validate(rel_raw)
 
     logger.info(f"Original relationship {relationship.model_dump_json(indent=2, exclude_none=True)}")
 
@@ -176,7 +176,7 @@ def test_transformation_pm3_to_dft(output_dir: str, local_deployment: bool):
 
     assert len(docs) == 1
 
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(docs[0])
 
     assert ve.get_packages_identifier() == metadata.package.get_packages_identifier()
     assert [x.name for x in ve.metadata.registry.inputs] == ["input_smiles.csv"]
@@ -228,7 +228,7 @@ def test_transformation_ani_to_inputgamess(output_dir: str, local_deployment: bo
         }
     }
 
-    relationship: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(rel_raw)
+    relationship: apis.models.relationships.Relationship = apis.models.relationships.Relationship.model_validate(rel_raw)
 
     logger.info(f"Original relationship {relationship.model_dump_json(indent=2, exclude_none=True)}")
 
@@ -307,7 +307,7 @@ def test_transformation_ani_to_inputgamess(output_dir: str, local_deployment: bo
 
     assert len(docs) == 1
 
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(docs[0])
 
     assert ve.get_packages_identifier() == metadata.package.get_packages_identifier()
 

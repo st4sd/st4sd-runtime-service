@@ -264,7 +264,7 @@ def validate_internal_experiment(
     except experiment.model.errors.DSLInvalidError as e:
         raise apis.models.errors.InvalidModelError.from_pydantic("Invalid DSL definition", e)
 
-    pvep = pvep.copy(deep=True)
+    pvep = pvep.model_copy(deep=True)
 
     if len(pvep.base.packages) != 1:
         raise apis.models.errors.InvalidPayloadError("The PVEP must point to exactly 1 base package")

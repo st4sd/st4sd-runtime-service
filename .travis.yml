@@ -23,6 +23,7 @@ before_script:
   - export IMAGE_BASE_URL="${DOCKER_REGISTRY}${IMAGE_NAME}"
   - export RUNTIMECORE_IMAGE_NAME=${ROOT_IMAGE_NAME:-/st4sd/official-base/st4sd-runtime-core}
   - export RUNTIMECORE_URL="${DOCKER_REGISTRY}${RUNTIMECORE_IMAGE_NAME}"
+  - export BUILDKIT_PROGRESS=plain
 
 matrix:
   include:

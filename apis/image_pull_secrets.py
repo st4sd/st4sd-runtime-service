@@ -66,7 +66,7 @@ def get_all_image_pull_secrets(which=None, out_config=None):
     configuration = utils.parse_configuration(local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)
 
     if out_config is not None:
-        out_config.update(configuration.dict().copy())
+        out_config.update(configuration.model_dump().copy())
 
     secrets_names = configuration.imagePullSecrets
 

@@ -98,10 +98,10 @@ def test_extract_graphs_and_metadata(
     )
     # VV: The important one is `force_tolerance` because its value (0.05) is the one in surrogate,
     # expensive has a different tolerance (0.005)
-    aggregate_variables = graph_meta.aggregate_variables.dict(exclude_none=True)
+    aggregate_variables = graph_meta.aggregate_variables.model_dump(exclude_none=True)
     assert sorted(aggregate_variables['platforms']) == sorted(['default', 'openshift'])
 
-    assert graph_meta.aggregate_blueprints.dict(exclude_none=True) == {
+    assert graph_meta.aggregate_blueprints.model_dump(exclude_none=True) == {
         'platforms': {
             'openshift': {'global': {}, 'stages': {0: {}}},
             'default': {'global': {}, 'stages': {0: {}}}

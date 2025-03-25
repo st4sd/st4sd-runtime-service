@@ -83,14 +83,14 @@ def test_gamess_homo_lumo_dft_surrogate_ani_single_component_graphs_flesh_out_tw
             multi = apis.runtime.package_transform.TransformRelationship(transform)
 
     packages_metadata = homolumogamess_ani_package_metadata
-    transform = multi.try_infer(packages_metadata).copy(deep=True)
+    transform = multi.try_infer(packages_metadata).model_copy(deep=True)
 
     # VV: infer twice and make sure that both times you get the exact same answer
     # this tests adding a relationship to the database then synthesizing a package and re-applying the logic
     # to infer the parameters/results OR asking to infer parameters/results for a Transform relationship
     # that already contains some parameter/results mappings.
     transform_copy = multi.try_infer(packages_metadata)
-    assert transform_copy.dict() == transform.dict()
+    assert transform_copy.model_dump() == transform.model_dump()
 
 
 def test_gamess_homo_lumo_dft_surrogate_ani_single_component_graphs_flesh_out(
@@ -216,7 +216,7 @@ def test_gamess_homo_lumo_dft_surrogate_ani_derive_persist(
             platform=['openshift', 'openshift-kubeflux'])
     ))
     multi.synthesize_derived_package(packages_metadata, derived_ve)
-    logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
+    logger.info(f"Resulting derived {json.dumps(derived_ve.model_dump(), indent=2)}")
 
     dir_persist = os.path.join(output_dir, "persist")
     package = apis.runtime.package_derived.DerivedPackage(
@@ -277,7 +277,7 @@ def test_psi4_surrogate_neural_potential_persist(
     derived_ve = transform.prepare_derived_package(
         "hello", parameterisation=apis.models.virtual_experiment.Parameterisation())
     transform.synthesize_derived_package(packages_metadata, derived_ve)
-    logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
+    logger.info(f"Resulting derived {json.dumps(derived_ve.model_dump(), indent=2)}")
 
     dir_persist = os.path.join(output_dir, "persist")
     package = apis.runtime.package_derived.DerivedPackage(
@@ -371,7 +371,7 @@ def test_modular_ani_band_gap_gamess_persist(
 ):
     packages = package_metadata_modular_ani_band_gap_gamess
 
-    rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(relationship)
+    rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.model_validate(relationship)
 
     rel.transform.inputGraph.package = ve_modular_ani.base.packages[0]
     rel.transform.outputGraph.package = ve_modular_band_gap_gamess.base.packages[0]
@@ -383,7 +383,7 @@ def test_modular_ani_band_gap_gamess_persist(
     derived_ve = transform.prepare_derived_package(
         "hello", parameterisation=apis.models.virtual_experiment.Parameterisation())
     transform.synthesize_derived_package(packages, derived_ve)
-    logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
+    logger.info(f"Resulting derived {json.dumps(derived_ve.model_dump(), indent=2)}")
 
     dir_persist = os.path.join(output_dir, "persist")
     platforms = packages.get_concrete_of_package("band-gap-dft-gamess-us:latest").platforms
@@ -420,7 +420,7 @@ def test_modular_optimizer_band_gap_reference_data(
     derived_ve = transform.prepare_derived_package(
         "hello", parameterisation=apis.models.virtual_experiment.Parameterisation())
     transform.synthesize_derived_package(packages, derived_ve)
-    logger.info(f"Resulting derived {json.dumps(derived_ve.dict(), indent=2)}")
+    logger.info(f"Resulting derived {json.dumps(derived_ve.model_dump(), indent=2)}")
 
     dir_persist = os.path.join(output_dir, "persist")
     platforms = packages.get_concrete_of_package("band-gap-dft-gamess-us:latest").platforms
@@ -524,7 +524,7 @@ components:
     all_vars = apis.models.virtual_experiment.characterize_variables(
         concrete, ['openshift', 'openshift-kubeflux', 'openshift-cpu'])
 
-    assert all_vars.dict() == {
+    assert all_vars.model_dump() == {
         'multipleValues': {
             'gamess-command',
             'gamess-image',
@@ -592,7 +592,7 @@ def test_preview_synthesize_dsl(
     db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
 
     with db_relationships:
-        db_relationships.insert_many([rel_optimizer_band_gap.dict()])
+        db_relationships.insert_many([rel_optimizer_band_gap.model_dump()])
 
     with db_experiments:
         db_experiments.push_new_entry(ve_modular_band_gap_gamess)
@@ -623,7 +623,7 @@ def test_synthesize(
     db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
 
     with db_relationships:
-        db_relationships.insert_many([rel_optimizer_band_gap.dict()])
+        db_relationships.insert_many([rel_optimizer_band_gap.model_dump()])
 
     with db_experiments:
         db_experiments.push_new_entry(ve_modular_band_gap_gamess)
@@ -663,7 +663,7 @@ def simple_push_and_synthesize(
         output_dir: str,
 ):
     with db_relationships:
-        db_relationships.insert_many([rel_optimizer_band_gap.dict()])
+        db_relationships.insert_many([rel_optimizer_band_gap.model_dump()])
 
     with db_experiments:
         db_experiments.push_new_entry(ve_modular_band_gap_gamess)
@@ -721,7 +721,7 @@ def test_transformation_push_and_then_synthesize(
 
     assert len(docs) == 1
 
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(docs[0])
 
     assert ve.metadata.registry.digest == metadata.package.metadata.registry.digest
 
@@ -733,7 +733,7 @@ def test_transformation_push_and_then_synthesize(
 
     assert ve.metadata.registry.digest != metadata.package.metadata.registry.digest
 
-    assert ve.base.to_digestable().dict() == metadata.package.base.to_digestable().dict()
+    assert ve.base.to_digestable().model_dump() == metadata.package.base.to_digestable().model_dump()
 
     assert ve.get_packages_identifier() == metadata.package.get_packages_identifier()
 
@@ -744,16 +744,16 @@ def test_simple_relationship(
         rel_simple_relationship: Dict[str, Any],
         output_dir: str,
 ):
-    rel = apis.models.relationships.Relationship.parse_obj(rel_simple_relationship)
+    rel = apis.models.relationships.Relationship.model_validate(rel_simple_relationship)
 
     db_experiments = apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "experiments.txt"))
     db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationship.txt"))
 
-    ve_fake_slow = ve_sum_numbers.copy(deep=True)
+    ve_fake_slow = ve_sum_numbers.model_copy(deep=True)
     ve_fake_slow.parameterisation.executionOptions.platform = ['default']
     ve_fake_slow.metadata.package.name = "simple-slow"
 
-    ve_fake_fast = ve_sum_numbers.copy(deep=True)
+    ve_fake_fast = ve_sum_numbers.model_copy(deep=True)
     ve_fake_fast.parameterisation.executionOptions.platform = ['default']
     ve_fake_fast.metadata.package.name = "simple-fast"
 
@@ -812,7 +812,7 @@ def test_simple_relationship(
     explained = apis.runtime.package_derived.explain_choices_in_derived(
         ve=metadata.package, packages=package_metadata_simple)
 
-    assert explained.dict() == {
+    assert explained.model_dump() == {
         'variables': {
             'option': {
                 'fromBasePackage': 'simple-slow:latest',
@@ -839,7 +839,7 @@ def test_simple_relationship_with_variables(
         rel_simple_relationship: Dict[str, Any],
         output_dir: str,
 ):
-    rel = apis.models.relationships.Relationship.parse_obj(rel_simple_relationship)
+    rel = apis.models.relationships.Relationship.model_validate(rel_simple_relationship)
 
     rel.transform.relationship.graphParameters.append(
         apis.models.relationships.RelationshipParameters(
@@ -851,11 +851,11 @@ def test_simple_relationship_with_variables(
     db_experiments = apis.db.exp_packages.DatabaseExperiments(os.path.join(output_dir, "experiments.txt"))
     db_relationships = apis.db.relationships.DatabaseRelationships(os.path.join(output_dir, "relationship.txt"))
 
-    ve_fake_slow = ve_sum_numbers.copy(deep=True)
+    ve_fake_slow = ve_sum_numbers.model_copy(deep=True)
     ve_fake_slow.parameterisation.executionOptions.platform = ['default']
     ve_fake_slow.metadata.package.name = "simple-slow"
 
-    ve_fake_fast = ve_sum_numbers.copy(deep=True)
+    ve_fake_fast = ve_sum_numbers.model_copy(deep=True)
     ve_fake_fast.parameterisation.executionOptions.platform = ['default']
     ve_fake_fast.metadata.package.name = "simple-fast"
 
@@ -878,7 +878,7 @@ def test_simple_relationship_with_variables(
 
     # VV: The inputGraph components consume 1 component from 1-outputGraph and 1 variable wrapped inside some text
     parameters = {
-        x.inputGraphParameter.name: x.outputGraphParameter.dict() for x in rel.transform.relationship.graphParameters
+        x.inputGraphParameter.name: x.outputGraphParameter.model_dump() for x in rel.transform.relationship.graphParameters
     }
 
     assert parameters == {
@@ -912,7 +912,7 @@ def test_simple_relationship_with_variables(
     explained = apis.runtime.package_derived.explain_choices_in_derived(
         ve=metadata.package, packages=package_metadata_simple)
 
-    assert explained.dict() == {
+    assert explained.model_dump() == {
         'variables': {
             'option': {
                 'fromBasePackage': 'simple-slow:latest',

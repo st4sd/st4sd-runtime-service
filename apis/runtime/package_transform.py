@@ -157,7 +157,7 @@ class TransformRelationship:
                 raise apis.models.errors.ApiError(f"Database contains multiple parameterised virtual experiment "
                                                   f"packages with the identifier \"{identifier}\"")
             try:
-                pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+                pvep = apis.models.virtual_experiment.ParameterisedPackage.model_validate(docs[0])
             except pydantic.error_wrappers.ValidationError as e:
                 raise apis.models.errors.InvalidModelError.from_pydantic(f"{kind} {identifier} is invalid", e)
             if len(pvep.base.packages) != 1:
@@ -589,8 +589,8 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         if surrogate_package is None:
             raise KeyError(f"Missing transform.inputGraph.package")
 
-        derived.base.packages.append(foundation_package.copy(deep=True))
-        derived.base.packages.append(surrogate_package.copy(deep=True))
+        derived.base.packages.append(foundation_package.model_copy(deep=True))
+        derived.base.packages.append(surrogate_package.model_copy(deep=True))
 
         self._log.info(f"Base packages: {[x.name for x in derived.base.packages]}")
 
@@ -710,7 +710,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
             # in the outputGraph to set the value of a parameter in the inputGraph
             if not x.inputGraphParameter.name:
                 problems.append(apis.models.errors.TransformationError(
-                    f"graphParameter {x.dict()} does not contain a valid inputGraphParameter name"))
+                    f"graphParameter {x.model_dump()} does not contain a valid inputGraphParameter name"))
 
             problems.extend(self._validate_reference_variable_name_or_string_in_concrete_context(
                 parameter_name=x.inputGraphParameter.name,
@@ -718,7 +718,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                 value_string_with_variable_refs=x.outputGraphParameter.value,
                 context_variables=outputgraph_variables,
                 all_parameter_variables=inputgraph_variables,
-                extra_msg_for_exception=f"graphParameters entry {x.dict()} references the variable",
+                extra_msg_for_exception=f"graphParameters entry {x.model_dump()} references the variable",
                 package_name_of_parameter="inputGraph",
                 package_name_of_context_vars="outputGraph",
             ))
@@ -726,7 +726,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
         for x in self._transform.relationship.graphResults:
             if not x.outputGraphResult.name:
                 problems.append(apis.models.errors.TransformationError(
-                    f"graphResult {x.dict()} does not contain a valid outputGraphResult name"))
+                    f"graphResult {x.model_dump()} does not contain a valid outputGraphResult name"))
 
             problems.extend(self._validate_reference_variable_name_or_string_in_concrete_context(
                 parameter_name=x.outputGraphResult.name,
@@ -734,7 +734,7 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                 value_string_with_variable_refs=x.inputGraphResult.value,
                 context_variables=inputgraph_variables,
                 all_parameter_variables=outputgraph_variables,
-                extra_msg_for_exception=f"graphResults entry {x.dict()} references the variable",
+                extra_msg_for_exception=f"graphResults entry {x.model_dump()} references the variable",
                 package_name_of_parameter="outputGraph",
                 package_name_of_context_vars="inputGraph",
             ))
@@ -1108,14 +1108,14 @@ class TransformRelationshipToDerivedPackage(TransformRelationship):
                 else:
                     raise apis.models.errors.ApiError(f"Could not rewrite keyOutput {name} of {self._output_graph_name}"
                                                       f"from {dref.absoluteReference} candidates "
-                                                      f"{transform.relationship.dict()}")
+                                                      f"{transform.relationship.model_dump()}")
             else:
                 self._log.info(f"Copying keyOutput {name} from {self._output_graph_name}")
                 add_key_output(name, dref.absoluteReference, None, True)
 
         interface = foundation.concrete.get_interface()
         if interface:
-            derived.base.interface = apis.models.from_core.FlowIRInterface.parse_obj(interface)
+            derived.base.interface = apis.models.from_core.FlowIRInterface.model_validate(interface)
 
     def prepare_derived_package(
             self,

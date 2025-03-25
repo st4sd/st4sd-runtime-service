@@ -564,7 +564,7 @@ def test_relationships(api_wrapper, dummy_payload):
     relationship = api_wrapper.api_request_get("/relationships/ani-to-band-gap-dft")
     logger.info(relationship)
 
-    rel = apis.models.relationships.Relationship.parse_obj(relationship['entry'])
+    rel = apis.models.relationships.Relationship.model_validate(relationship['entry'])
 
     parameters = {
         x.inputGraphParameter.name: x.outputGraphParameter.name for x in rel.transform.relationship.graphParameters

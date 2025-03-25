@@ -229,7 +229,7 @@ class LibraryClient:
         workflow_name = namespace.components[0].signature.name
 
         workflow = experiment.model.frontends.dsl.Workflow(
-            signature=copy.deepcopy(namespace.components[0].signature),
+            signature=namespace.components[0].signature.model_dump(),
             steps= {
                 f"{workflow_name}-wrapped": f"{workflow_name}-wrapped"
             },

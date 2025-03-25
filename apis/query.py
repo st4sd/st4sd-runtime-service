@@ -59,7 +59,7 @@ class QueryRelationships(Resource):
         doc = request.get_json()
 
         try:
-            query = apis.models.query_relationship.QueryRelationship.parse_obj(doc)
+            query = apis.models.query_relationship.QueryRelationship.model_validate(doc)
         except pydantic.error_wrappers.ValidationError as e:
             api.abort(
                 400, f"Invalid query payload, problems are {e.json()}",

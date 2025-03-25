@@ -69,7 +69,7 @@ class InternalExperiments(Resource):
             )
 
             return {
-                "result": pvep.dict(),
+                "result": pvep.model_dump(),
                 "problems": problems,
             }
         except werkzeug.exceptions.HTTPException:

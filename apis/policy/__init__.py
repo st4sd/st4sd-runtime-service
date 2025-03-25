@@ -99,7 +99,7 @@ class PolicyPrior:
           A MatchingDerived instance
         """
         pvep_source = self._api.api_experiment_get(pvep_identifier)
-        pvep_source = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(pvep_source)
+        pvep_source = apis.models.virtual_experiment.ParameterisedPackage.model_validate(pvep_source)
 
         if len(pvep_source.base.packages) != 1:
             raise apis.models.errors.ApiError(f"Source parameterised virtual experiment package does not contain "
@@ -107,7 +107,7 @@ class PolicyPrior:
         pvep_source.base.packages[0].name = None
         pvep_matching = list(self._api.api_experiment_query(query={
             "package": {
-                "definition": pvep_source.base.packages[0].dict(
+                "definition": pvep_source.base.packages[0].model_dump(
                     exclude_none=True, exclude_defaults=True, exclude_unset=True)
             },
             "common": {

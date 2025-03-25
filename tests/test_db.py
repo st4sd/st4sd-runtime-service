@@ -34,7 +34,7 @@ def test_insert(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPack
         base = ve_sum_numbers.base.packages[0]
 
         print("Base dict:")
-        print(base.dict())
+        print(base.model_dump())
         source = base.source
 
         assert source.git is not None
@@ -57,7 +57,7 @@ def test_insert(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPack
 
         # VV: Make sure that there are 2 entries in the db, and that the old one does not have a registry tag
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            many = [apis.models.virtual_experiment.ParameterisedPackage.parse_obj(x) for x in db.query()]
+            many = [apis.models.virtual_experiment.ParameterisedPackage.model_validate(x) for x in db.query()]
 
         many = sorted(many, key=lambda x: x.registry_created_on)
         assert len(many) == 2
@@ -68,7 +68,7 @@ def test_insert(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPack
         assert old.metadata.registry.digest == old_digest
         assert new.metadata.registry.digest == new_digest
 
-        print(old.metadata.registry.dict())
+        print(old.metadata.registry.model_dump())
 
         assert old.metadata.registry.tags == []
         assert old.metadata.package.tags == ['latest']
@@ -85,7 +85,7 @@ def test_insert_many_same(ve_sum_numbers: apis.models.virtual_experiment.Paramet
 
         # VV: Make sure that there are 2 entries in the db, and that the old one does not have a registry tag
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            many = [apis.models.virtual_experiment.ParameterisedPackage.parse_obj(x) for x in db.query()]
+            many = [apis.models.virtual_experiment.ParameterisedPackage.model_validate(x) for x in db.query()]
 
         assert len(many) == 1
 
@@ -97,12 +97,12 @@ def test_record_timesExecuted(ve_sum_numbers: apis.models.virtual_experiment.Par
 
             for idx in range(10):
                 ve_sum_numbers.metadata.registry.timesExecuted = idx
-                db.upsert(ve_sum_numbers.dict(exclude_none=False), ql=db.construct_query(
+                db.upsert(ve_sum_numbers.model_dump(exclude_none=False), ql=db.construct_query(
                     package_name=ve_sum_numbers.metadata.package.name,
                     registry_digest=ve_sum_numbers.metadata.registry.digest))
 
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            many = [apis.models.virtual_experiment.ParameterisedPackage.parse_obj(x) for x in db.query()]
+            many = [apis.models.virtual_experiment.ParameterisedPackage.model_validate(x) for x in db.query()]
 
         pprint.pprint(many)
 
@@ -203,7 +203,7 @@ def test_update_tags_with_single_parameterised_package(
                 db.tag_update(ve_sum_numbers.metadata.package.name, ["latest", f"lbl-{idx}"])
 
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            many = [apis.models.virtual_experiment.ParameterisedPackage.parse_obj(x) for x in db.query()]
+            many = [apis.models.virtual_experiment.ParameterisedPackage.model_validate(x) for x in db.query()]
 
         pprint.pprint(many)
 
@@ -217,7 +217,7 @@ def test_query_tag(
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
             ve_sum_numbers.metadata.package.tags = ["test", "foo"]
             ve_sum_numbers.metadata.registry.tags = ["test", "foo"]
-            db.insert_many([ve_sum_numbers.dict()])
+            db.insert_many([ve_sum_numbers.model_dump()])
 
             docs = db.query_identifier(apis.models.common.PackageIdentifier.from_parts(
                 package_name=ve_sum_numbers.metadata.package.name,
@@ -257,7 +257,7 @@ def test_update_tags_with_many_parameterised_packages(
 
         ql = db.construct_query(package_name=ve_sum_numbers.metadata.package.name)
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            many = [apis.models.virtual_experiment.ParameterisedPackage.parse_obj(x)
+            many = [apis.models.virtual_experiment.ParameterisedPackage.model_validate(x)
                     for x in db.query(ql)]
 
         log.info(pprint.pformat(many))
@@ -270,7 +270,7 @@ def test_update_tags_with_many_parameterised_packages(
             digest=None).identifier
 
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
-            single = [apis.models.virtual_experiment.ParameterisedPackage.parse_obj(x)
+            single = [apis.models.virtual_experiment.ParameterisedPackage.model_validate(x)
                       for x in db.query_identifier(new_identifier)]
 
         log.info(pprint.pformat(single))
@@ -299,11 +299,11 @@ def test_query_relationship_identifier(output_dir: str):
 
     with db:
         db.insert_many([
-            apis.models.relationships.Relationship.parse_obj({'identifier': 'hello-world'}).dict(),
-            apis.models.relationships.Relationship.parse_obj({'identifier': 'not-hello-world'}).dict(),
+            apis.models.relationships.Relationship.model_validate({'identifier': 'hello-world'}).model_dump(),
+            apis.models.relationships.Relationship.model_validate({'identifier': 'not-hello-world'}).model_dump(),
         ])
 
-    q = apis.models.query_relationship.QueryRelationship.parse_obj({'identifier': 'hello.*'})
+    q = apis.models.query_relationship.QueryRelationship.model_validate({'identifier': 'hello.*'})
 
     x = apis.kernel.relationships.api_list_queries(q, db)
 
@@ -319,23 +319,23 @@ def test_query_relationship_inputgraph_identifier(output_dir: str):
 
     with db:
         db.insert_many([
-            apis.models.relationships.Relationship.parse_obj({
+            apis.models.relationships.Relationship.model_validate({
                 'identifier': 'hello-world',
                 'transform': {
                     'outputGraph': {'identifier': 'dummy'},
                     'inputGraph': {'identifier': 'hello-world'}
                 }
-            }).dict(),
-            apis.models.relationships.Relationship.parse_obj({
+            }).model_dump(),
+            apis.models.relationships.Relationship.model_validate({
                 'identifier': 'not-hello-world',
                 'transform': {
                     'outputGraph': {'identifier': 'hello-world'},
                     'inputGraph': {'identifier': 'dummy'}
                 }
-            }).dict(),
+            }).model_dump(),
         ])
 
-    q = apis.models.query_relationship.QueryRelationship.parse_obj({
+    q = apis.models.query_relationship.QueryRelationship.model_validate({
         'transform': {
             'inputGraph': {'identifier': 'hello-world:.*$'}
         }})

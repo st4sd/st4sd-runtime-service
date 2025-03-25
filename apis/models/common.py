@@ -39,7 +39,7 @@ class DigestableBase(BaseModel):
         return cls(definition={f"item_{i}": x for i, x in enumerate(items)})
 
     def to_digest(self) -> str:
-        remaining = [self.dict() or {'what': 'empty'}]
+        remaining = [self.model_dump() or {'what': 'empty'}]
         sha256 = hashlib.sha256()
 
         while remaining:
@@ -69,7 +69,7 @@ class DigestableBase(BaseModel):
     def get_contents(self, skip=None) -> Digestable:
         skip = skip or ['name', 'definition']
 
-        for (key, value) in self.dict().items():
+        for (key, value) in self.model_dump().items():
             if value is not None and key not in skip:
                 return getattr(self, key)
 
@@ -77,14 +77,14 @@ class DigestableBase(BaseModel):
     def my_contents(self) -> Any:
         return self.get_contents()
 
-    def dict(
+    def model_dump(
             self,
             *,
             exclude_none: bool = True,
             by_alias=True,
             **kwargs
     ) -> Dict[str, Any]:
-        return super(DigestableBase, self).dict(exclude_none=exclude_none, by_alias=by_alias, **kwargs)
+        return super(DigestableBase, self).model_dump(exclude_none=exclude_none, by_alias=by_alias, **kwargs)
 
 
 class Digestable(DigestableBase):
@@ -222,10 +222,6 @@ class Option(Digestable):
             return value.my_contents
         return cast(Union[TOptionValueFrom, str], value)
 
-    @classmethod
-    def parse_obj(cls, *args, **kwargs) -> Option:
-        return cast(Option, super(Option, cls).parse_obj(*args, **kwargs))
-
 
 class OptionMany(Digestable):
     name: Optional[str] = None
@@ -239,10 +235,6 @@ class OptionMany(Digestable):
         if field_values.value and field_values.valueFrom:
             raise ValueError(f"Cannot provide both value and valueFrom")
         return field_values
-
-    @classmethod
-    def parse_obj(cls, *args, **kwargs) -> OptionMany:
-        return cast(cls, super(OptionMany, cls).parse_obj(*args, **kwargs))
 
 
 PackageIdentifierWithTag = namedtuple("PackageIdentifierWithTag", ["name", "tag"])

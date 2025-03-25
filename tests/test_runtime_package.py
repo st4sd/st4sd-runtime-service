@@ -46,13 +46,13 @@ def b64_str(value: str) -> str:
 def test_no_override_namespace_by_package(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     ve_sum_numbers.parameterisation.executionOptions.runtime.args.append('--helloFromExecutionOptions')
 
-    namespace_presets = apis.models.virtual_experiment.NamespacePresets.parse_obj({
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets.model_validate({
         'runtime': {
             'args':
                 ['--useMemoization=yes']
         }
     })
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'runtime': {
             'args':
                 ['--hello']
@@ -99,13 +99,13 @@ def test_override_platform_config(ve_sum_numbers: apis.models.virtual_experiment
 # VV: fixture in conftest
 def test_error_override_namespace_by_package_presets(
         ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
-    namespace_presets = apis.models.virtual_experiment.NamespacePresets.parse_obj({
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets.model_validate({
         'runtime': {
             'args':
                 ['--useMemoization=yes']
         }
     })
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'runtime': {
             'args':
                 ['--hello']
@@ -125,13 +125,13 @@ def test_error_override_namespace_by_package_presets(
 def test_error_override_namespace_by_package_execution_options(
         ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage
 ):
-    namespace_presets = apis.models.virtual_experiment.NamespacePresets.parse_obj({
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets.model_validate({
         'runtime': {
             'args':
                 ['--useMemoization=yes']
         }
     })
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'runtime': {
             'args':
                 ['--hello']
@@ -168,13 +168,13 @@ def test_error_override_resources_namespace_by_package_execution_options(
 
 # VV: fixture in conftest
 def test_error_override_namespace_by_payload(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
-    namespace_presets = apis.models.virtual_experiment.NamespacePresets.parse_obj({
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets.model_validate({
         'runtime': {
             'args':
                 ['--useMemoization=yes']
         }
     })
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'runtime': {
             'args':
                 ['--useMemoization=no']
@@ -190,9 +190,9 @@ def test_error_override_namespace_by_payload(ve_sum_numbers: apis.models.virtual
 
 
 def test_error_override_package_preset_by_payload(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
-    namespace_presets = apis.models.virtual_experiment.NamespacePresets.parse_obj({})
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets.model_validate({})
     ve_sum_numbers.parameterisation.presets.runtime.args = ['--useMemoization=yes']
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'runtime': {
             'args':
                 ['--useMemoization=no']
@@ -209,9 +209,9 @@ def test_error_override_package_preset_by_payload(ve_sum_numbers: apis.models.vi
 
 def test_error_override_package_execution_options_by_payload(
         ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
-    namespace_presets = apis.models.virtual_experiment.NamespacePresets.parse_obj({})
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets.model_validate({})
     ve_sum_numbers.parameterisation.executionOptions.runtime.args = ['--useMemoization=yes']
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'runtime': {
             'args':
                 ['--useMemoization=no']
@@ -227,8 +227,8 @@ def test_error_override_package_execution_options_by_payload(
 
 
 def test_decode_payload_volume(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
-    namespace_presets = apis.models.virtual_experiment.NamespacePresets.parse_obj({})
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets.model_validate({})
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'runtime': {
             'args':
                 ['--hello']
@@ -307,7 +307,7 @@ def test_decode_payload_volume(ve_sum_numbers: apis.models.virtual_experiment.Pa
 
 def test_environment_variables(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'environmentVariables': [
             {
                 'name': 'hello',
@@ -333,7 +333,7 @@ def test_environment_variables(ve_sum_numbers: apis.models.virtual_experiment.Pa
 
 def test_workflow_variables_unbounded(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'variables': [
             {
                 'name': 'hello',
@@ -343,7 +343,7 @@ def test_workflow_variables_unbounded(ve_sum_numbers: apis.models.virtual_experi
     })
 
     ve_sum_numbers.parameterisation.executionOptions.variables = [
-        apis.models.common.OptionMany.parse_obj({
+        apis.models.common.OptionMany.model_validate({
             'name': 'hello',
             # VV: missing/empty valueFrom/value keys means that this is an unbounded variable
         })
@@ -373,7 +373,7 @@ def test_workflow_variables_unbounded(ve_sum_numbers: apis.models.virtual_experi
 
 def test_workflow_variables_not_in_choices(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'variables': [
             {
                 'name': 'hello',
@@ -400,7 +400,7 @@ def test_workflow_variables_not_in_choices(ve_sum_numbers: apis.models.virtual_e
 
 def test_workflow_variables_in_choices(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'variables': [
             {
                 'name': 'hello',
@@ -461,7 +461,7 @@ def test_workflow_variables_default_choices_from_value(
 
 def test_workflow_variables_not_allowed(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'variables': [
             {
                 'name': 'hello',
@@ -482,7 +482,7 @@ def test_workflow_variables_not_allowed(ve_sum_numbers: apis.models.virtual_expe
 
 def test_workflow_data_files(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'data': [
             {
                 'name': 'hello',
@@ -492,16 +492,16 @@ def test_workflow_data_files(ve_sum_numbers: apis.models.virtual_experiment.Para
     })
 
     ve_sum_numbers.parameterisation.presets.data = [
-        apis.models.common.Option.parse_obj({'name': 'not-hello', 'value': 'default-not-hello'})
+        apis.models.common.Option.model_validate({'name': 'not-hello', 'value': 'default-not-hello'})
     ]
 
     ve_sum_numbers.parameterisation.executionOptions.data = [
-        apis.models.common.OptionMany.parse_obj({'name': 'hello'}),
-        apis.models.common.OptionMany.parse_obj({'name': 'not-hello'})
+        apis.models.common.OptionMany.model_validate({'name': 'hello'}),
+        apis.models.common.OptionMany.model_validate({'name': 'not-hello'})
     ]
 
     ve_sum_numbers.parameterisation.presets.variables = [
-        apis.models.common.Option.parse_obj({'name': 'variable', 'value': 'value'})
+        apis.models.common.Option.model_validate({'name': 'variable', 'value': 'value'})
     ]
 
     package = apis.runtime.package.NamedPackage(
@@ -534,7 +534,7 @@ def test_workflow_data_files(ve_sum_numbers: apis.models.virtual_experiment.Para
 
 def test_workflow_data_no_override_presets(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'data': [
             {
                 'name': 'hello',
@@ -544,8 +544,8 @@ def test_workflow_data_no_override_presets(ve_sum_numbers: apis.models.virtual_e
     })
 
     ve_sum_numbers.parameterisation.presets.data = [
-        apis.models.common.Option.parse_obj({'name': 'hello', 'value': 'default-hello'}),
-        apis.models.common.Option.parse_obj({'name': 'not-hello', 'value': 'default-not-hello'})
+        apis.models.common.Option.model_validate({'name': 'hello', 'value': 'default-hello'}),
+        apis.models.common.Option.model_validate({'name': 'not-hello', 'value': 'default-not-hello'})
     ]
 
     with pytest.raises(apis.models.errors.OverrideDataFilesError) as e:
@@ -559,7 +559,7 @@ def test_workflow_data_no_override_presets(ve_sum_numbers: apis.models.virtual_e
 
 def test_workflow_data_no_matching_execopts(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'data': [
             {
                 'name': 'hello',
@@ -569,7 +569,7 @@ def test_workflow_data_no_matching_execopts(ve_sum_numbers: apis.models.virtual_
     })
 
     ve_sum_numbers.parameterisation.presets.data = [
-        apis.models.common.Option.parse_obj({'name': 'not-hello', 'value': 'default-not-hello'})
+        apis.models.common.Option.model_validate({'name': 'not-hello', 'value': 'default-not-hello'})
     ]
 
     with pytest.raises(apis.models.errors.OverrideDataFilesError) as e:
@@ -616,7 +616,7 @@ def test_decode_experiment_start_payload():
         ]
     }
 
-    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj(payload)
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(payload)
     config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
 
     assert config.runtime.args == ["--useMemoisation=true"]
@@ -636,15 +636,15 @@ def test_decode_experiment_start_payload():
 
     assert len(volumes) == 2
 
-    print(volumes[0].dict())
+    print(volumes[0].model_dump())
 
-    assert volumes[0].type.dict() == {
+    assert volumes[0].type.model_dump() == {
         'persistentVolumeClaim': {
             'claimName': 'foo-pvc',
             'readOnly': False,
         },
     }
-    assert volumes[1].type.dict() == {
+    assert volumes[1].type.model_dump() == {
         'dataset': {
             'name': 'bar-dataset',
             'readOnly': True,
@@ -654,7 +654,7 @@ def test_decode_experiment_start_payload():
 
 def test_package_workflow_git_plain(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({})
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({})
     package = apis.runtime.package.NamedPackage(
         ve_sum_numbers,
         namespace_presets,
@@ -707,7 +707,7 @@ def test_package_workflow_s3_plain(
     ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage,
     output_dir: str,
 ):
-    ve_sum_numbers = ve_sum_numbers.copy(deep=True)
+    ve_sum_numbers = ve_sum_numbers.model_copy(deep=True)
 
     # VV: Echo the steps that the runtime-service follows to generate the base package for an internal experiment
     db_secrets = apis.db.secrets.DatabaseSecrets(db_path=os.path.join(output_dir, "secrets.db"))
@@ -737,7 +737,7 @@ def test_package_workflow_s3_plain(
     )
 
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({})
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({})
     package = apis.runtime.package.NamedPackage(
         ve_sum_numbers,
         namespace_presets,
@@ -811,7 +811,7 @@ def test_package_workflow_dataset_plain(
         sum_numbers_ve_dataset: apis.models.virtual_experiment.ParameterisedPackage, mock_list_dataset
 ):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({})
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({})
     package = apis.runtime.package.NamedPackage(
         sum_numbers_ve_dataset,
         namespace_presets,
@@ -865,7 +865,7 @@ def test_package_workflow_dataset_plain(
 
 def test_package_workflow_git_embedded_data(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'data': [
             {
                 'name': 'cat_me.txt',
@@ -875,7 +875,7 @@ def test_package_workflow_git_embedded_data(ve_sum_numbers: apis.models.virtual_
     })
 
     ve_sum_numbers.parameterisation.executionOptions.data = [
-        apis.models.common.OptionMany.parse_obj({
+        apis.models.common.OptionMany.model_validate({
             'name': 'cat_me.txt'
         })
     ]
@@ -948,7 +948,7 @@ def test_package_workflow_git_embedded_data(ve_sum_numbers: apis.models.virtual_
 
 def test_package_workflow_git_commitid(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({})
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({})
 
     base = ve_sum_numbers.base.packages[0]
 
@@ -1006,7 +1006,7 @@ def test_package_workflow_git_commitid(ve_sum_numbers: apis.models.virtual_exper
 
 def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'data': [
             {
                 'name': 'cat_me.txt',
@@ -1032,7 +1032,7 @@ def test_package_workflow_git_data_s3(ve_sum_numbers: apis.models.virtual_experi
     })
 
     ve_sum_numbers.parameterisation.executionOptions.data = [
-        apis.models.common.OptionMany.parse_obj({
+        apis.models.common.OptionMany.model_validate({
             'name': 'cat_me.txt'
         })
     ]
@@ -1146,10 +1146,10 @@ def test_package_workflow_git_data_s3_with_deprecated_payload(
             {"filename": "hello.txt", "content": "embed me"}
         ]
     }
-    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj(experiment_start_obj)
+    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(experiment_start_obj)
     from_deprecated = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(deprecated)
 
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'data': [
             {
                 'name': 'cat_me.txt',
@@ -1180,11 +1180,11 @@ def test_package_workflow_git_data_s3_with_deprecated_payload(
     })
 
     assert len(from_deprecated.data) == len(payload_config.data)
-    assert from_deprecated.data[0].dict() == payload_config.data[0].dict()
-    assert from_deprecated.security.s3Input.my_contents.dict() == payload_config.security.s3Input.my_contents.dict()
+    assert from_deprecated.data[0].model_dump() == payload_config.data[0].model_dump()
+    assert from_deprecated.security.s3Input.my_contents.model_dump() == payload_config.security.s3Input.my_contents.model_dump()
 
     assert len(from_deprecated.inputs) == 1
-    assert from_deprecated.inputs[0].dict() == payload_config.inputs[0].dict()
+    assert from_deprecated.inputs[0].model_dump() == payload_config.inputs[0].model_dump()
 
 
 def test_package_payload_extract_user_metadata():
@@ -1193,10 +1193,10 @@ def test_package_payload_extract_user_metadata():
             'hello': 'world',
         }
     }
-    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj(experiment_start_obj)
+    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(experiment_start_obj)
     from_deprecated = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(deprecated)
 
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'userMetadata': [
             {'name': 'hello', 'value': 'world'}
         ],
@@ -1211,14 +1211,14 @@ def test_package_payload_extract_user_metadata():
     assert from_deprecated.userMetadata == [
         apis.models.common.Option(name='hello', value='world')
     ]
-    assert from_deprecated.dict() == payload_config.dict()
+    assert from_deprecated.model_dump() == payload_config.model_dump()
 
 
 def test_package_hide_s3_input_creds(
         ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage
 ):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'security': {
             's3Input': {
                 'valueFrom': {
@@ -1252,7 +1252,7 @@ def test_package_hide_s3_output_creds(
         ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage
 ):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'security': {
             's3Output': {
                 'valueFrom': {
@@ -1283,7 +1283,7 @@ def test_package_hide_s3_output_creds(
 
 def test_package_store_outputs_s3(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         's3Output': {
             'valueFrom':
                 {
@@ -1321,7 +1321,7 @@ def test_read_s3_files_hide_env_vars(ve_sum_numbers: apis.models.virtual_experim
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
 
     ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="renamed.txt"))
-    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
         'inputs': [
             {
                 'filename': 'renamed.txt'
@@ -1380,7 +1380,7 @@ def test_read_s3_files_rename(ve_sum_numbers: apis.models.virtual_experiment.Par
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
 
     ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="renamed.txt"))
-    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
         'inputs': [
             {
                 'sourceFilename': '/dir/file.txt',
@@ -1413,7 +1413,7 @@ def test_read_dataset_files_rename(ve_sum_numbers: apis.models.virtual_experimen
 
     ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="renamed.txt"))
 
-    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
         'inputs': [
             {
                 'sourceFilename': '/dir/file.txt',
@@ -1445,7 +1445,7 @@ def test_read_dataset_files_rename(ve_sum_numbers: apis.models.virtual_experimen
 
 def test_invalid_payload_s3_missing_target_filename():
     with pytest.raises(pydantic.error_wrappers.ValidationError):
-        old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+        old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
             'inputs': [
                 {
                     'sourceFilename': '/dir/file.txt',
@@ -1456,7 +1456,7 @@ def test_invalid_payload_s3_missing_target_filename():
 
 def test_invalid_payload_s3_both_filename_and_target_filename():
     with pytest.raises(pydantic.error_wrappers.ValidationError):
-        old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+        old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
             'inputs': [
                 {
                     'sourceFilename': '/dir/file.txt',
@@ -1471,7 +1471,7 @@ def test_read_s3_files_simple(ve_sum_numbers: apis.models.virtual_experiment.Par
 
     ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="file.txt"))
 
-    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
         'inputs': [
             {'filename': '/dir/file.txt'}
         ],
@@ -1512,7 +1512,7 @@ def test_experiment_id_usermetadata(ve_sum_numbers: apis.models.virtual_experime
 
 def test_package_with_user_metadata(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         'userMetadata': [
             {'name': 'hello', 'value': 'world'}
         ]
@@ -1565,10 +1565,10 @@ def test_package_store_outputs_s3_from_deprecated(
             'bucketPath': "location"
         },
     }
-    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj(experiment_start_obj)
+    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(experiment_start_obj)
     from_deprecated = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(deprecated)
 
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         's3Output': {
             'valueFrom':
                 {
@@ -1592,10 +1592,10 @@ def test_package_store_outputs_s3_from_deprecated(
         }
     })
 
-    print("From Deprecated", from_deprecated.security.s3Output.my_contents.dict())
-    print("From PayloadConfig", payload_config.security.s3Output.my_contents.dict())
+    print("From Deprecated", from_deprecated.security.s3Output.my_contents.model_dump())
+    print("From PayloadConfig", payload_config.security.s3Output.my_contents.model_dump())
 
-    assert from_deprecated.security.s3Output.my_contents.dict() == payload_config.security.s3Output.my_contents.dict()
+    assert from_deprecated.security.s3Output.my_contents.model_dump() == payload_config.security.s3Output.my_contents.model_dump()
 
 
 def test_package_store_outputs_dataset(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
@@ -1603,7 +1603,7 @@ def test_package_store_outputs_dataset(ve_sum_numbers: apis.models.virtual_exper
     # Kubernetes for a Dataset object and then extracting its S3 credentials to convert it into 's3Ref'
 
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
-    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.parse_obj({
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.model_validate({
         's3Output': {
             'valueFrom':
                 {
@@ -1625,7 +1625,7 @@ def test_package_store_outputs_dataset(ve_sum_numbers: apis.models.virtual_exper
     })
 
     # VV: this happens inside apis.experiments.ExperimentStart.post()
-    s3_security = apis.models.common.OptionFromS3Values.parse_obj({
+    s3_security = apis.models.common.OptionFromS3Values.model_validate({
         "accessKeyID": "accessKeyID",
         "secretAccessKey": "secretAccessKey",
         "endpoint": "endpoint",
@@ -1726,7 +1726,7 @@ def test_package_deprecated_start_with_variables(ve_sum_numbers: apis.models.vir
             "numberOfPoints": 1,
         },
     }
-    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj(experiment_start_obj)
+    deprecated = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(experiment_start_obj)
     payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(deprecated)
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
 
@@ -1786,7 +1786,7 @@ def test_validate_adapt_and_store_experiment_to_database(
             doc = db.query()
             assert len(doc) == 1
 
-        x = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(doc[0])
+        x = apis.models.virtual_experiment.ParameterisedPackage.model_validate(doc[0])
         assert x.metadata.registry.createdOn > original_created_on
         assert x.metadata.registry.digest == x.to_digestable().to_digest()
         assert x.metadata.registry.digest != "invalid"
@@ -1807,7 +1807,7 @@ def test_validate_adapt_and_store_experiment_to_database(
             latest = db.query(ql)
 
         assert len(latest) == 1
-        latest = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(latest[0])
+        latest = apis.models.virtual_experiment.ParameterisedPackage.model_validate(latest[0])
 
         assert latest.metadata.registry.digest != "invalid"
         assert latest.base.packages[0].source.git.location.branch == "other_branch"
@@ -1938,7 +1938,7 @@ def test_missing_input(ve_sum_numbers: apis.models.virtual_experiment.Parameteri
 
     ve_sum_numbers.metadata.registry.inputs.append(apis.models.common.Option(name="input_smiles.csv"))
 
-    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({})
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({})
     payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
     with pytest.raises(apis.models.errors.InvalidInputsError) as e:
         apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
@@ -1951,7 +1951,7 @@ def test_missing_input(ve_sum_numbers: apis.models.virtual_experiment.Parameteri
 def test_extra_input(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
     namespace_presets = apis.models.virtual_experiment.NamespacePresets()
 
-    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj({
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate({
         "inputs": [{"filename": "input_smiles.csv", "content": "hello"}]
     })
     payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)

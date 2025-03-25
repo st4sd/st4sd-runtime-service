@@ -26,7 +26,7 @@ def test_query_pveps_for_base_packages(
         ve_homo_lumo_dft_gamess_us: apis.models.virtual_experiment.ParameterisedPackage,
         output_dir: str,
 ):
-    query = apis.models.query_experiment.QueryExperiment.parse_obj({
+    query = apis.models.query_experiment.QueryExperiment.model_validate({
         "common": {
             "matchPackageVersion": False
         },
@@ -51,12 +51,12 @@ def test_query_pveps_for_base_packages(
     # VV: make sure that what we'll add in the DB has the correct branch, and version
     ve_homo_lumo_dft_gamess_us.base.packages[0].source.git.location.branch = "main"
 
-    ve_other_branch = ve_homo_lumo_dft_gamess_us.copy(deep=True)
+    ve_other_branch = ve_homo_lumo_dft_gamess_us.model_copy(deep=True)
     ve_other_branch.metadata.package.name = "other branch"
     ve_other_branch.base.packages[0].source.git.location.branch = "not main"
 
     # VV: Generate a PVEP that looks very similar to the one we care for
-    ve_semi_empirical = ve_homo_lumo_dft_gamess_us.copy(deep=True)
+    ve_semi_empirical = ve_homo_lumo_dft_gamess_us.model_copy(deep=True)
     ve_semi_empirical.metadata.package.name = "semi-empirical"
     ve_semi_empirical.base.packages[0].config.path = "semi-empirical/semi-empirical.yml"
     ve_semi_empirical.base.packages[0].config.manifestPath = "semi-empirical/manifest.yml"
@@ -82,7 +82,7 @@ def test_query_pveps_for_base_packages_with_versioning(
         ve_homo_lumo_dft_gamess_us: apis.models.virtual_experiment.ParameterisedPackage,
         output_dir: str,
 ):
-    query = apis.models.query_experiment.QueryExperiment.parse_obj({
+    query = apis.models.query_experiment.QueryExperiment.model_validate({
         "common": {
             "matchPackageVersion": True
         },
@@ -108,7 +108,7 @@ def test_query_pveps_for_base_packages_with_versioning(
     ve_homo_lumo_dft_gamess_us.base.packages[0].source.git.version = "special version"
 
     # VV: Generate a PVEP that looks very similar to the one we care for but has a different version
-    ve_other_version = ve_homo_lumo_dft_gamess_us.copy(deep=True)
+    ve_other_version = ve_homo_lumo_dft_gamess_us.model_copy(deep=True)
     ve_other_version.parameterisation.presets.runtime.args.append('--makethisunique')
     ve_other_version.base.packages[0].source.git.version = "do not care about this version"
 
@@ -132,7 +132,7 @@ def test_query_pveps_for_base_packages_no_results(
         ve_homo_lumo_dft_gamess_us: apis.models.virtual_experiment.ParameterisedPackage,
         output_dir: str,
 ):
-    query = apis.models.query_experiment.QueryExperiment.parse_obj({
+    query = apis.models.query_experiment.QueryExperiment.model_validate({
         "package": {
             "definition": {
                 "source": {
@@ -181,7 +181,7 @@ def test_query_synthesized_with_package(
     multi = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(transform)
     packages_metadata = homolumogamess_ani_package_metadata
 
-    query = apis.models.query_experiment.QueryExperiment.parse_obj({
+    query = apis.models.query_experiment.QueryExperiment.model_validate({
         "package": {
             "definition": {
                 "source": {
@@ -215,7 +215,7 @@ def test_query_synthesized_with_package(
 
             with apis.db.relationships.DatabaseRelationships(g.name) as db_rels:
                 rel = apis.models.relationships.Relationship(identifier="homo-lumo-ani", transform=transform)
-                db_rels.upsert(rel.dict(exclude_none=False), ql=db_rels.construct_query(rel.identifier))
+                db_rels.upsert(rel.model_dump(exclude_none=False), ql=db_rels.construct_query(rel.identifier))
 
             query.common.mustHaveOnePackage = False
             docs = apis.kernel.experiments.api_query_experiments(
@@ -258,7 +258,7 @@ def test_query_synthesized_with_relationship(
     multi = apis.runtime.package_transform.TransformRelationshipToDerivedPackage(transform)
     packages_metadata = homolumogamess_ani_package_metadata
 
-    query = apis.models.query_experiment.QueryExperiment.parse_obj({
+    query = apis.models.query_experiment.QueryExperiment.model_validate({
         "relationship": {
             "identifier": "homo-lumo-ani",
             "transform": {
@@ -283,7 +283,7 @@ def test_query_synthesized_with_relationship(
 
             with apis.db.relationships.DatabaseRelationships(g.name) as db_rels:
                 rel = apis.models.relationships.Relationship(identifier="homo-lumo-ani", transform=transform)
-                db_rels.upsert(rel.dict(exclude_none=False), ql=db_rels.construct_query(rel.identifier))
+                db_rels.upsert(rel.model_dump(exclude_none=False), ql=db_rels.construct_query(rel.identifier))
 
             query.common.mustHaveOnePackage = False
             docs = apis.kernel.experiments.api_query_experiments(

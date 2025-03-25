@@ -234,7 +234,7 @@ class NamedPackage:
                 # VV: We do not actually need the bucket here but given that we ask for it for s3Input we should
                 # also ask for it for output for consistency
                 expecting = ['accessKeyID', 'secretAccessKey', 'endpoint', 'bucket']
-                missing = set(expecting).difference(security.dict())
+                missing = set(expecting).difference(security.model_dump())
 
                 if missing:
                     raise ValueError(f"PayloadExecutionOptions.security.s3Output.s3Ref is missing "
@@ -261,7 +261,7 @@ class NamedPackage:
                 self._runtime_args.append(f"--s3StoreToURI={s3_uri}")
             else:
                 try:
-                    what = f"{type(s3_out)} -> {s3_out.dict()}"
+                    what = f"{type(s3_out)} -> {s3_out.model_dump()}"
                 except Exception:
                     what = s3_out
                 raise NotImplementedError("PayloadExecutionOptions.s3Output must be resolved to OptionFromS3Values - "
@@ -273,7 +273,7 @@ class NamedPackage:
         if isinstance(s3_in, apis.models.common.OptionFromS3Values):
             # VV: We currently support using the S3 credentials to fetch data from a SINGLE bucket
             expecting = ['accessKeyID', 'secretAccessKey', 'endpoint', 'bucket']
-            missing = set(expecting).difference(s3_in.dict())
+            missing = set(expecting).difference(s3_in.model_dump())
             if missing:
                 raise ValueError(f"PayloadExecutionOptions.security.s3Input.s3Ref is missing "
                                  f"{', '.join(missing)}")
@@ -567,7 +567,7 @@ class NamedPackage:
             volume_name = 'volume%d' % idx
 
             # VV: Filter out empty entries
-            volume_raw = volume.type.dict()
+            volume_raw = volume.type.model_dump()
 
             # VV: Ensure that there's exactly 1 volume-type definition
             mount_name = volume.get_mount_name()
@@ -792,7 +792,7 @@ class NamedPackage:
             if source.dataset.location.dataset is None:
                 raise NotImplementedError(
                     f"We do not know how to generate a Workflow.spec.package for {type(source).__name__} "
-                    f"source.location with keys {list(source.dataset.location.dict(exclude_none=True))}")
+                    f"source.location with keys {list(source.dataset.location.model_dump(exclude_none=True))}")
 
             manifest = base.config.manifestPath
             if manifest and os.path.isabs(manifest) is False:
@@ -850,7 +850,7 @@ class NamedPackage:
         else:
             raise NotImplementedError(
                 f"We do not know how to generate a Workflow.spec.package for {type(source).__name__} source with keys "
-                f"{list(source.dict(exclude_none=True))}")
+                f"{list(source.model_dump(exclude_none=True))}")
 
         return package
 
@@ -869,7 +869,7 @@ class NamedPackage:
             mountpath = volume.get_mountpath(ROOT_VOLUME_MOUNTS)
             return os.path.join(mountpath, path)
         else:
-            raise NotImplementedError(f"Cannot construct filename of data {x.dict()}")
+            raise NotImplementedError(f"Cannot construct filename of data {x.model_dump()}")
 
     @property
     def input_file_names(self) -> List[str]:
@@ -892,10 +892,10 @@ class NamedPackage:
             for dimr in package.dependencies.imageRegistries:
                 value = dimr.security.my_contents
                 if isinstance(value, apis.models.common.OptionFromSecretKeyRef) is False:
-                    raise ValueError(f"base[{package.name}].dependencies.imageRegistries={dimr.dict()} "
+                    raise ValueError(f"base[{package.name}].dependencies.imageRegistries={dimr.model_dump()} "
                                      f"does not contain security.valueFrom.secretKeyRef")
                 if value.name is None:
-                    raise ValueError(f"base[{package.name}].dependencies.imageRegistries={dimr.dict()} "
+                    raise ValueError(f"base[{package.name}].dependencies.imageRegistries={dimr.model_dump()} "
                                      f"does not contain security.name")
                 if value.name not in secrets:
                     secrets.append(value.name)
@@ -918,7 +918,7 @@ class NamedPackage:
             return None
         elif isinstance(s3, apis.models.common.OptionFromS3Values):
             # VV: Again, this can only be fully resolved
-            s3_creds = s3.model_dump()
+            s3_creds = s3.model_dump(exclude_none=False)
 
             return {
                 "bucketInfo": {
@@ -1172,7 +1172,7 @@ def create_secret_for_git_package_source_security(
             pass
         else:
             raise apis.models.errors.ApiError(f"Not implemented git source.security {type(security)}")
-    elif security.oauth is None and len(security.dict(exclude_none=True).keys()) > 0:
+    elif security.oauth is None and len(security.model_dump(exclude_none=True).keys()) > 0:
         raise apis.models.errors.ApiError(f"Not implemented git source.security {type(security)}")
 
     # VV: this is an embedded oauth-token, convert it

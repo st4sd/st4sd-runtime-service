@@ -69,7 +69,7 @@ def test_point_internal_experiment_to_s3(pvep_on_s3: typing.Dict[str, typing.Any
     )
     assert len(pvep.base.packages) == 1
 
-    assert pvep.base.packages[0].dict(exclude_none=True) == {
+    assert pvep.base.packages[0].model_dump(exclude_none=True) == {
         "name": "main",
         'dependencies': {
             'imageRegistries': []
@@ -390,13 +390,13 @@ def test_internal_experiment_simple(
         package_source="default-s3-secret",
     )
 
-    assert pvep.base.packages[0].source.s3.security.credentials.valueFrom.dict(exclude_none=True) == {
+    assert pvep.base.packages[0].source.s3.security.credentials.valueFrom.model_dump(exclude_none=True) == {
         'keyAccessKeyID': 'S3_ACCESS_KEY_ID',
         'keySecretAccessKey': 'S3_SECRET_ACCESS_KEY',
         'secretName': 'default-s3-secret'
     }
 
-    assert pvep.base.packages[0].source.s3.location.dict(exclude_none=True) == {
+    assert pvep.base.packages[0].source.s3.location.model_dump(exclude_none=True) == {
         "bucket": "a-bucket",
         "endpoint": "https://my.endpoint",
         "region": "region",
@@ -433,7 +433,7 @@ def test_internal_experiment_simple(
 
     assert pvep.metadata.registry.platforms == ["default"]
     assert len(pvep.metadata.registry.executionOptionsDefaults.variables) == 1
-    assert pvep.metadata.registry.executionOptionsDefaults.variables[0].dict(exclude_none=True) == {
+    assert pvep.metadata.registry.executionOptionsDefaults.variables[0].model_dump(exclude_none=True) == {
         "name": "foo",
         "valueFrom": [
             {
@@ -492,13 +492,13 @@ def test_internal_experiment_simple_real(
         dest_path=pathlib.Path("unit-tests-experiments")
     )
 
-    assert pvep.base.packages[0].source.s3.security.credentials.valueFrom.dict(exclude_none=True) == {
+    assert pvep.base.packages[0].source.s3.security.credentials.valueFrom.model_dump(exclude_none=True) == {
         'keyAccessKeyID': 'S3_ACCESS_KEY_ID',
         'keySecretAccessKey': 'S3_SECRET_ACCESS_KEY',
         'secretName': 'default-s3-secret'
     }
 
-    assert sorted(pvep.base.packages[0].source.s3.location.dict(exclude_none=True)) == [
+    assert sorted(pvep.base.packages[0].source.s3.location.model_dump(exclude_none=True)) == [
         "bucket", "endpoint", "region"]
     contents = s3_storage.read(f"unit-tests-experiments/{pvep_name}/conf/dsl.yaml").decode()
     s3_storage.remove(f"unit-tests-experiments/{pvep_name}/")
@@ -508,7 +508,7 @@ def test_internal_experiment_simple_real(
 
     assert pvep.metadata.registry.platforms == ["default"]
     assert len(pvep.metadata.registry.executionOptionsDefaults.variables) == 1
-    assert pvep.metadata.registry.executionOptionsDefaults.variables[0].dict(exclude_none=True) == {
+    assert pvep.metadata.registry.executionOptionsDefaults.variables[0].model_dump(exclude_none=True) == {
         "name": "foo",
         "valueFrom": [
             {
@@ -562,7 +562,7 @@ def test_recover_dsl_from_internal_experiment(
     rc_namespace = experiment.model.frontends.dsl.Namespace(**recons_dsl)
 
     apis.kernel.experiments.update_component_defaults_in_namespace(orig_namespace)
-    assert rc_namespace.dict(by_alias=True) == orig_namespace.dict(by_alias=True)
+    assert rc_namespace.model_dump(by_alias=True) == orig_namespace.model_dump(by_alias=True)
 
 
 def test_recover_dsl_from_internal_experiment_with_input_params(
@@ -610,15 +610,15 @@ def test_recover_dsl_from_internal_experiment_with_input_params(
     rc_namespace = experiment.model.frontends.dsl.Namespace(**recons_dsl)
 
     apis.kernel.experiments.update_component_defaults_in_namespace(orig_namespace)
-    rc_sans_entrypoint = rc_namespace.dict(by_alias=True)
-    orig_sans_entrypoint = orig_namespace.dict(by_alias=True)
+    rc_sans_entrypoint = rc_namespace.model_dump(by_alias=True)
+    orig_sans_entrypoint = orig_namespace.model_dump(by_alias=True)
 
     del rc_sans_entrypoint["entrypoint"]
     del orig_sans_entrypoint["entrypoint"]
 
     assert rc_sans_entrypoint == orig_sans_entrypoint
 
-    assert rc_namespace.entrypoint.dict(by_alias=True) == {
+    assert rc_namespace.entrypoint.model_dump(by_alias=True) == {
         "entry-instance": "main",
         "execute": [
             {
@@ -664,7 +664,7 @@ def test_auto_pvep_for_simple(
     }
     pvep = pvep_and_changes.pvep
 
-    assert pvep.metadata.registry.dict(exclude={
+    assert pvep.metadata.registry.model_dump(exclude={
         "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted",
         "applicationDependencies"
     }) == expected_registry
@@ -758,7 +758,7 @@ def test_auto_update_pvep_for_simple(
          'location': ['parameterisation', 'presets', 'data', 0]}
     ]
 
-    assert pvep.metadata.registry.dict(exclude={
+    assert pvep.metadata.registry.model_dump(exclude={
         "containerImages", "createdOn", "digest", "interface", "tags", "timesExecuted",
         "applicationDependencies"
     }) == expected_registry
@@ -768,7 +768,7 @@ def test_auto_update_pvep_for_simple(
     assert pvep.parameterisation.executionOptions.data == []
     assert len(pvep.parameterisation.executionOptions.variables) == 1
 
-    assert pvep.parameterisation.executionOptions.variables[0].dict(exclude_none=True) == {
+    assert pvep.parameterisation.executionOptions.variables[0].model_dump(exclude_none=True) == {
         "name": "foo",
         "value": "keep this default value"
     }

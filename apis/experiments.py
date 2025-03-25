@@ -77,7 +77,7 @@ def do_format_parameterised_package(
 ) -> Any:
     args = parser.parse_args()
     if isinstance(package, apis.models.virtual_experiment.ParameterisedPackage):
-        what = package.dict(exclude_none=args.hideNone == "y")
+        what = package.model_dump(exclude_none=args.hideNone == "y")
     else:
         what = copy.deepcopy(package)
 
@@ -1053,7 +1053,7 @@ class ExperimentList(Resource):
             problems = []
             for doc in db.query():
                 try:
-                    obj = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(doc)
+                    obj = apis.models.virtual_experiment.ParameterisedPackage.model_validate(doc)
                 except pydantic.ValidationError as exc:
                     package_name = doc.get('metadata', {}).get('package', {}).get('name', '**unknown**')
                     digest = doc.get('metadata', {}).get('registry', {}).get('digest', '**unknown**')
@@ -1083,7 +1083,7 @@ class ExperimentList(Resource):
         try:
             experiment_inp = request.get_json()
             try:
-                ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(experiment_inp)
+                ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(experiment_inp)
             except pydantic.ValidationError as e:
                 current_app.logger.warning(f"Invalid parameterised package {e}. Traceback: {traceback.format_exc()}")
                 api.abort(400, message="Invalid parameterised package", invalidVirtualExperimentDefinition=str(e))
@@ -1095,7 +1095,7 @@ class ExperimentList(Resource):
             db = utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT)
             apis.kernel.experiments.validate_and_store_pvep_in_db(download, ve, db)
 
-            return {"result": ve.dict()}
+            return {"result": ve.model_dump()}
         except werkzeug.exceptions.HTTPException:
             raise
         except apis.models.errors.ApiError as e:
@@ -1134,7 +1134,7 @@ class ExperimentDSL(Resource):
 
                 try:
                     ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
-                        .parse_obj(docs[0])
+                        .model_validate(docs[0])
                 except pydantic.error_wrappers.ValidationError as e:
                     return {'problems': apis.models.errors.make_pydantic_errors_jsonable(e)}
 
@@ -1229,7 +1229,7 @@ class ExperimentExplain(Resource):
 
                 try:
                     ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown \
-                        .parse_obj(docs[0])
+                        .model_validate(docs[0])
                 except pydantic.error_wrappers.ValidationError as e:
                     errors = apis.models.errors.make_pydantic_errors_jsonable(e)
                     raise apis.models.errors.ApiError(f"Invalid experiment. Underlying problems {errors}")
@@ -1245,7 +1245,7 @@ class ExperimentExplain(Resource):
                 with downloader:
                     explanation = apis.runtime.package_derived.explain_choices_in_derived(ve, packages=downloader)
 
-                return {"result": explanation.dict()}
+                return {"result": explanation.model_dump()}
             else:
                 api.abort(400, "Parameterised virtual experiment package does not contain any base packages")
                 raise NotImplementedError()  # keep linter happy
@@ -1518,7 +1518,7 @@ class ExperimentStart(Resource):
                 api.abort(400, message=f"Found too many parameterised packages {len(docs)} for your query {identifier}")
 
             try:
-                ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(docs[0])
+                ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.model_validate(docs[0])
             except pydantic.ValidationError as e:
                 errors = apis.models.errors.make_pydantic_errors_jsonable(e)
                 raise apis.models.errors.InvalidModelError(
@@ -1528,7 +1528,7 @@ class ExperimentStart(Resource):
 
             experiment_start_obj = request.json
             try:
-                old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.parse_obj(experiment_start_obj)
+                old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(experiment_start_obj)
                 payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
             except pydantic.ValidationError as e:
                 current_app.logger.warning(f"Invalid start payload {e}. Traceback: {traceback.format_exc()}")
@@ -1556,7 +1556,7 @@ class ExperimentStart(Resource):
                     payload_start=experiment_start_obj,
                     policy_config=payload_config.runtimePolicy.config, dry_run=False)
                 try:
-                    plan: apis.policy.PolicyBasedExperimentRun = apis.policy.PolicyBasedExperimentRun.parse_obj(
+                    plan: apis.policy.PolicyBasedExperimentRun = apis.policy.PolicyBasedExperimentRun.model_validate(
                         plan)
                 except pydantic.error_wrappers.ValidationError as e:
                     api.abort(400, f"PolicyBasedExperimentRun has invalid schema, problems: {e.json(indent=2)}")
@@ -1651,7 +1651,7 @@ class ExperimentStart(Resource):
             ve.metadata.registry.timesExecuted += 1
 
             with utils.database_experiments_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
-                db.upsert(ve.dict(exclude_none=True), ql=db.construct_query(
+                db.upsert(ve.model_dump(exclude_none=True), ql=db.construct_query(
                     package_name=ve.metadata.package.name,
                     registry_digest=ve.metadata.registry.digest))
 
@@ -1696,7 +1696,7 @@ class GetPayloadToStart(Resource):
             elif len(docs) > 1:
                 api.abort(400, message=f"Found too many parameterised packages {len(docs)} for your query {identifier}")
 
-            ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(docs[0])
+            ve = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.model_validate(docs[0])
 
             skeleton = apis.kernel.experiments.generate_experiment_start_skeleton_payload(ve=ve)
 

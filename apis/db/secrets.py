@@ -90,7 +90,7 @@ class DatabaseSecrets(apis.db.base.Database, SecretsStorageTemplate):
             raise apis.models.errors.DBError(f"Cannot create Secret {secret.name} because it already exists")
 
     def secret_upsert(self, secret: Secret):
-        return self.upsert(secret.dict(), ql=self.construct_query(secret.name))
+        return self.upsert(secret.model_dump(), ql=self.construct_query(secret.name))
 
     def secret_delete(self, name: str):
         return self.delete(self.construct_query(name))

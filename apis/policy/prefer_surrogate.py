@@ -69,7 +69,7 @@ class PolicyPreferSurrogate(apis.policy.PolicyPrior):
             use_original = False
         else:
             use_original = True
-            pvep_target = pvep_source.dict()
+            pvep_target = pvep_source.model_dump()
             target_identifier = pvep_identifier
 
         from_relationship.clear()
@@ -136,7 +136,7 @@ class PolicyPreferSurrogate(apis.policy.PolicyPrior):
         if dry_run is False:
             plan = self.policy_based_run_commit(plan)
 
-        return plan.dict()
+        return plan.model_dump()
 
     def policy_based_run_commit(
             self,

@@ -84,7 +84,7 @@ class BasePackageSourceGit(BasePackageSource):
 
     @pydantic.field_validator('location')
     def single_location_source(cls, value: SourceGitLocation):
-        raw = value.dict(exclude_none=True)
+        raw = value.model_dump(exclude_none=True)
         raw = {x: raw[x] for x in raw if x != "url"}
         if len(raw) > 1:
             raise ValueError(f"location must not contain more than 1 of branch, tag, or commit")
@@ -223,15 +223,15 @@ class StorageMetadata(VirtualExperimentMetadata):
             )
         except experiment.model.errors.PackageUnknownFormatError as e:
             raise apis.models.errors.ApiError(
-                f"Could not find a valid virtual experiment definition at base.config={config.dict()} please inspect "
+                f"Could not find a valid virtual experiment definition at base.config={config.model_dump()} please inspect "
                 f"base.config and correct it") from e
         except experiment.model.errors.ExperimentMissingConfigurationError as e:
             raise apis.models.errors.ApiError(
-                f"Could not find a virtual experiment definition at base.config={config.dict()} please inspect "
+                f"Could not find a virtual experiment definition at base.config={config.model_dump()} please inspect "
                 f"base.config and correct it") from e
         except experiment.model.errors.ExperimentInvalidConfigurationError as e:
             raise apis.models.errors.ApiError(
-                f"Invalid virtual experiment definition at base.config={config.dict()} please fix the definition of "
+                f"Invalid virtual experiment definition at base.config={config.model_dump()} please fix the definition of "
                 f"the package, test it using etest.py, and then retry pushing it. The error was: {e}") from e
 
         ret = StorageMetadata(
@@ -349,13 +349,10 @@ class NamespacePresets(apis.models.common.Digestable):
         for many_args in configuration.get('default-arguments', []):
             args.extend([f"{key}={many_args[key]}" for key in many_args])
 
-        return NamespacePresets.parse_obj({'runtime': {
+        return NamespacePresets.model_validate({'runtime': {
             'args': args
         }})
 
-    @classmethod
-    def parse_obj(cls, *args, **kwargs) -> NamespacePresets:
-        return cast(NamespacePresets, super(NamespacePresets, cls).parse_obj(*args, **kwargs))
 
 
 class VolumePersistentVolumeClaim(apis.models.common.Digestable):
@@ -552,21 +549,21 @@ class DeprecatedExperimentStartPayload(apis.models.common.Digestable):
             str(x): str(value[x]) for x in value
         }
 
+    @pydantic.model_validator(mode="after")
     @classmethod
-    def parse_obj(cls, *args, **kwargs) -> DeprecatedExperimentStartPayload:
-        payload = kwargs.copy()
+    def val_rewrite_(cls, value: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
         #  VV: Rewrites the dlf:// URI of dlfStoreURI into a dataset:// URI
-        try:
-            dlfstoreuri: str = payload['dlfStoreURI']
-            del payload['dlfStoreURI']
+        if isinstance(value, dict) and "dlfStoreURI" in value:
+            if value.get("datasetStoreURI") is not None:
+                raise ValueError("Cannot set both datasetStoreURI and dlfStoreURI")
+
+            dlfstoreuri: str = value['dlfStoreURI']
+            del value['dlfStoreURI']
             if dlfstoreuri.startswith("dlf://"):
                 dlfstoreuri = f"dataset://{dlfstoreuri[6:]}"
-            payload['datasetStoreURI'] = dlfstoreuri
-        except KeyError:
-            pass
+            value['datasetStoreURI'] = dlfstoreuri
 
-        return cast(DeprecatedExperimentStartPayload, super(DeprecatedExperimentStartPayload, cls)
-                    .parse_obj(*args, **payload))
+        return value
 
 
 def no_colon_in_name_value(value: apis.models.common.Option):
@@ -637,7 +634,7 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                     else:
                         new_vol['type'][what]['name'] = volume['type'][what]
 
-            new_volumes.append(PayloadVolume.parse_obj(new_vol))
+            new_volumes.append(PayloadVolume.model_validate(new_vol))
         config.volumes = new_volumes
 
         all_volume_ids = []
@@ -665,14 +662,14 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                 )
             else:
                 config.security.s3Input.valueFrom = apis.models.common.OptionValueFrom(
-                    s3Ref=apis.models.common.OptionFromS3Values.parse_obj(old.s3.dict())
+                    s3Ref=apis.models.common.OptionFromS3Values.model_validate(old.s3.model_dump())
                 )
 
         if old.s3Store:
-            creds = old.s3Store.credentials.dict(exclude_none=True)
+            creds = old.s3Store.credentials.model_dump(exclude_none=True)
             config.security.s3Output.valueFrom = apis.models.common.OptionValueFrom(
                 # VV: We store JUST the credentials here, the bucketPath goes to config.s3Output.valueFrom.s3Ref.path
-                s3Ref=apis.models.common.OptionFromS3Values.parse_obj({x: creds[x] for x in creds if x != 'path'})
+                s3Ref=apis.models.common.OptionFromS3Values.model_validate({x: creds[x] for x in creds if x != 'path'})
             )
             config.s3Output = apis.models.common.Option(valueFrom=apis.models.common.OptionValueFrom(
                 s3Ref=apis.models.common.OptionFromS3Values(path=old.s3Store.bucketPath))
@@ -690,7 +687,7 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                 # VV: This is an "embedded" file - it contains the contents of the file
                 if not fc.filename:
                     raise apis.models.errors.InvalidPayloadExperimentStartError(
-                        f"payload configuration for {kind} file {fc.dict()} is invalid because .filename is empty")
+                        f"payload configuration for {kind} file {fc.model_dump()} is invalid because .filename is empty")
                 ret = apis.models.common.Option(name=fc.filename, value=fc.content)
             else:
                 # VV: This file is retrieved from old.s3 (either dataset, or S3) - we will reuse the credentials from
@@ -708,12 +705,12 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
 
                     if filename_source and not filename_target:
                         raise apis.models.errors.InvalidPayloadExperimentStartError(
-                            f"payload configuration for {kind} file {fc.dict()} is invalid. "
+                            f"payload configuration for {kind} file {fc.model_dump()} is invalid. "
                             f".sourceFilename is set but .targetFilename is empty")
 
                 if not name_of_file_in_experiment:
                     raise apis.models.errors.InvalidPayloadExperimentStartError(
-                        f"payload configuration for {kind} file {fc.dict()} is invalid. Could not "
+                        f"payload configuration for {kind} file {fc.model_dump()} is invalid. Could not "
                         f"determine the name of the {kind} file in the experiment scope")
 
                 ret = apis.models.common.Option(
@@ -725,7 +722,7 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                     volume_identifiers = [x.identifier for x in config.volumes]
                     if fc.volume not in volume_identifiers:
                         raise apis.models.errors.InvalidPayloadExperimentStartError(
-                            f"There is no volume {fc.volume} definition for {kind} file {fc.dict()}"
+                            f"There is no volume {fc.volume} definition for {kind} file {fc.model_dump()}"
                         )
                     ret.valueFrom.volumeRef = apis.models.common.OptionFromVolumeRef(
                         name = fc.volume, path=filename_source, rename=filename_target
@@ -734,7 +731,7 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                     # VV: The contents of this file are in some S3 bucket
                     if config.security.s3Input.valueFrom is None:
                         raise apis.models.errors.InvalidPayloadExperimentStartError(
-                            f"payload configuration for {kind} file {fc.dict()} is invalid because there is "
+                            f"payload configuration for {kind} file {fc.model_dump()} is invalid because there is "
                             f"no S3/Dataset security configuration")
                     else:
                         if config.security.s3Input.valueFrom.s3Ref:
@@ -759,10 +756,6 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
         self.s3Output.valueFrom = apis.models.common.OptionValueFrom(s3Ref=s3_ref)
         # VV: now set the security configuration - this goes in a different place
         self.security.s3Output.valueFrom = apis.models.common.OptionValueFrom(s3Ref=s3_security)
-
-    @classmethod
-    def parse_obj(cls, *args, **kwargs) -> PayloadExecutionOptions:
-        return cast(PayloadExecutionOptions, super(PayloadExecutionOptions, cls).parse_obj(*args, **kwargs))
 
 
 class ParameterisationPresets(apis.models.common.Digestable):
@@ -865,7 +858,7 @@ class ExecutionOptionDefaults(apis.models.common.Digestable):
 
 
 def must_only_contain_name(value: apis.models.common.Option) -> apis.models.common.Option:
-    raw = value.dict()
+    raw = value.model_dump()
     if list(raw) != ["name"]:
         raise ValueError("Must contain just the key \"name\"")
     return value
@@ -1469,7 +1462,7 @@ class VirtualExperimentBase(apis.models.common.Digestable):
 
             if bo.valueFrom.graph is None:
                 raise ValueError(f"Output {bo.name} must have valueFrom.graph")
-            if len(bo.valueFrom.dict(exclude_none=True)) != 1:
+            if len(bo.valueFrom.model_dump(exclude_none=True)) != 1:
                 raise ValueError(f"Output {bo.name} must only have valueFrom.graph")
             if not (bo.valueFrom.graph.binding.name or bo.valueFrom.graph.binding.reference
                     or bo.valueFrom.graph.binding.text):
@@ -1536,9 +1529,6 @@ class ParameterisedPackage(apis.models.common.Digestable):
         """Generates a digest of the virtual experiment entry"""
         self.metadata.registry.digest = self.to_digestable().to_digest()
 
-    @classmethod
-    def parse_obj(cls, *args, **kwargs) -> ParameterisedPackage:
-        return cast(ParameterisedPackage, super(ParameterisedPackage, cls).parse_obj(*args, **kwargs))
 
     def test(self):
         """Tests whether the contents of the parameterised package make sense
@@ -1749,7 +1739,7 @@ def merge_parameterisation(
     """
 
     # VV: Start with the contents of @override and copy in any non-conflicting information from @base
-    merged = override.copy(deep=True)
+    merged = override.model_copy(deep=True)
 
     variable_names = {x.name for x in merged.presets.variables}.union(
         {x.name for x in merged.executionOptions.variables})
@@ -1758,18 +1748,18 @@ def merge_parameterisation(
     # VV: Copy any non-conflicting variables from @base into merged
     for x in base.presets.variables:
         if x.name not in variable_names:
-            merged.presets.variables.append(x.copy(deep=True))
+            merged.presets.variables.append(x.model_copy(deep=True))
     for x in base.executionOptions.variables:
         if x.name not in variable_names:
-            merged.executionOptions.variables.append(x.copy(deep=True))
+            merged.executionOptions.variables.append(x.model_copy(deep=True))
 
     # VV: Copy any non-conflicting information about data files from @base into merged
     for x in base.presets.data:
         if x.name not in data_files:
-            merged.presets.data.append(x.copy(deep=True))
+            merged.presets.data.append(x.model_copy(deep=True))
     for x in base.executionOptions.data:
         if x.name not in data_files:
-            merged.executionOptions.data.append(x.copy(deep=True))
+            merged.executionOptions.data.append(x.model_copy(deep=True))
 
     # VV: If @override does not define any information about platforms copy the information from @base as is
     if not merged.executionOptions.platform and merged.presets.platform is None:

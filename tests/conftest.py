@@ -481,7 +481,7 @@ def ve_toxicity_pred() -> apis.models.virtual_experiment.ParameterisedPackage:
                         "runtime": {"args": ["--registerWorkflow=yes"], "resources": {}},
                         "variables": []}}}
 
-    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(desc)
+    return apis.models.virtual_experiment.ParameterisedPackage.model_validate(desc)
 
 
 @pytest.fixture
@@ -516,7 +516,7 @@ def ve_toxicity_pred_one_executionoption_platform() -> apis.models.virtual_exper
                         "runtime": {"args": ["--registerWorkflow=yes"], "resources": {}},
                         "variables": []}}}
 
-    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(desc)
+    return apis.models.virtual_experiment.ParameterisedPackage.model_validate(desc)
 
 
 @pytest.fixture
@@ -550,7 +550,7 @@ def ve_toxicity_pred_preset_platform() -> apis.models.virtual_experiment.Paramet
                         "runtime": {"args": ["--registerWorkflow=yes"], "resources": {}},
                         "variables": []}}}
 
-    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(desc)
+    return apis.models.virtual_experiment.ParameterisedPackage.model_validate(desc)
 
 
 @pytest.fixture
@@ -905,7 +905,7 @@ def ve_sum_numbers():
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(sum_numbers_def)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(sum_numbers_def)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -947,7 +947,7 @@ def ve_sum_numbers_executionoptions_platform_no_values():
             }
         }
     }
-    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(sum_numbers_def)
+    return apis.models.virtual_experiment.ParameterisedPackage.model_validate(sum_numbers_def)
 
 @pytest.fixture(scope="function")
 def sum_numbers_ve_dataset():
@@ -985,7 +985,7 @@ def sum_numbers_ve_dataset():
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(sum_numbers_def)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(sum_numbers_def)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -1254,7 +1254,7 @@ def derived_ve():
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -1933,7 +1933,7 @@ def rel_optimizer_band_gap(
                                                   "name": "stage0.SetFunctional/input_molecule.txt:ref"}}],
                          "graphResults": [{"inputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"},
                                            "outputGraphResult": {"name": "stage0.XYZToGAMESS/molecule.inp:copy"}}]}}}
-    rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.parse_obj(relationship)
+    rel: apis.models.relationships.Relationship = apis.models.relationships.Relationship.model_validate(relationship)
 
     rel.transform.inputGraph.package = ve_modular_optimizer.base.packages[0]
     rel.transform.outputGraph.package = ve_modular_band_gap_gamess.base.packages[0]
@@ -2184,7 +2184,7 @@ def ve_dsl2_with_key_output() -> apis.models.virtual_experiment.ParameterisedPac
         }}
     }
 
-    return apis.models.virtual_experiment.ParameterisedPackage.parse_obj(desc)
+    return apis.models.virtual_experiment.ParameterisedPackage.model_validate(desc)
 
 @pytest.fixture()
 def rel_simple_relationship() -> Dict[str, Any]:
@@ -2512,7 +2512,7 @@ def derived_ve_gamess_homo_dft_ani():
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -2837,7 +2837,7 @@ def ve_homo_lumo_dft_gamess_us() -> apis.models.virtual_experiment.Parameterised
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -2873,7 +2873,7 @@ def ve_psi4() -> apis.models.virtual_experiment.ParameterisedPackage:
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -2909,7 +2909,7 @@ def ve_neural_potential() -> apis.models.virtual_experiment.ParameterisedPackage
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -2950,7 +2950,7 @@ def ve_modular_optimizer() -> apis.models.virtual_experiment.ParameterisedPackag
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -3040,7 +3040,7 @@ def ve_modular_ani() -> apis.models.virtual_experiment.ParameterisedPackage:
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -3136,7 +3136,7 @@ def ve_modular_band_gap_gamess() -> apis.models.virtual_experiment.Parameterised
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None
@@ -3315,7 +3315,7 @@ def ve_configuration_generator_ani() -> apis.models.virtual_experiment.Parameter
             }
         }
     }
-    ve = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(package)
+    ve = apis.models.virtual_experiment.ParameterisedPackage.model_validate(package)
     ve.update_digest()
 
     assert ve.metadata.registry.digest is not None

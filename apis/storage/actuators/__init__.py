@@ -80,7 +80,7 @@ def storage_actuator_for_package(
         # VV: Convert the dataset into a s3 source and handle that instead
         credentials = apis.k8s.extract_s3_credentials_from_dataset(package.source.dataset.security.dataset)
 
-        mock_package = package.copy(deep=True)
+        mock_package = package.model_copy(deep=True)
 
         mock_package.source.dataset = None
         mock_package.source.s3 = apis.models.virtual_experiment.BasePackageSourceS3(
@@ -101,7 +101,7 @@ def storage_actuator_for_package(
 
         return storage_actuator_for_package(package=mock_package, db_secrets=db_secrets)
     else:
-        source = [x for x in package.source.dict(exclude_none=True)]
+        source = [x for x in package.source.model_dump(exclude_none=True)]
 
         raise apis.runtime.errors.RuntimeError(
             f"Cannot create actuator for package {package.name} with source fields {source}")

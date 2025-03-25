@@ -38,7 +38,7 @@ def do_format_relationship(
 ) -> Any:
     args = parser.parse_args()
     if isinstance(relationship, apis.models.relationships.Relationship):
-        what = relationship.dict(exclude_none=args.hideNone == "y")
+        what = relationship.model_dump(exclude_none=args.hideNone == "y")
     else:
         what = relationship
 
@@ -77,7 +77,7 @@ class Relationships(Resource):
         with utils.database_relationships_open(apis.models.constants.LOCAL_DEPLOYMENT) as db:
             for doc in db.query():
                 try:
-                    obj = apis.models.relationships.Relationship.parse_obj(doc)
+                    obj = apis.models.relationships.Relationship.model_validate(doc)
                 except pydantic.error_wrappers.ValidationError as e:
                     identifier = doc.get("identifier", "**unknown**")
                     problems.append({
@@ -104,7 +104,7 @@ class Relationships(Resource):
                     local_deployment=apis.models.constants.LOCAL_DEPLOYMENT)),
             )
             return {
-                "entry": rel.dict()
+                "entry": rel.model_dump()
             }
         except werkzeug.exceptions.HTTPException:
             raise
@@ -160,7 +160,7 @@ class TransformDSLPreview(Resource):
 
             try:
                 explanation = apis.runtime.package_derived.explain_choices_in_derived(
-                    ret.package, packages=downloader).dict()
+                    ret.package, packages=downloader).model_dump()
             except Exception as e:
                 current_app.logger.warning(f"Run into {e} while explaining synthesize {identifier}. "
                                            f"Traceback: {traceback.format_exc()}")
@@ -168,7 +168,7 @@ class TransformDSLPreview(Resource):
 
             return {
                 "dsl": ret.dsl,
-                "experiment": ret.package.dict(),
+                "experiment": ret.package.model_dump(),
                 "package-inheritance": explanation,
                 "problems": []
             }
@@ -198,7 +198,7 @@ class TransformSynthesize(Resource):
         """Synthesizes a new experiment and stores it in the registry using the <identifier> relationship"""
         try:
             doc = request.get_json()
-            synthesize = apis.models.relationships.PayloadSynthesize.parse_obj(doc)
+            synthesize = apis.models.relationships.PayloadSynthesize.model_validate(doc)
         except pydantic.error_wrappers.ValidationError as e:
             api.abort(400, f"Invalid synthesize payload, problems are {e.json()}",
                       problems=apis.models.errors.make_pydantic_errors_jsonable(e))
@@ -221,7 +221,7 @@ class TransformSynthesize(Resource):
             problems = []
             try:
                 explanation = apis.runtime.package_derived.explain_choices_in_derived(
-                    ret.package, packages=downloader).dict()
+                    ret.package, packages=downloader).model_dump()
             except Exception as e:
                 current_app.logger.warning(f"Run into {e} while explaining synthesize {identifier}. "
                                            f"Traceback: {traceback.format_exc()}")
@@ -229,7 +229,7 @@ class TransformSynthesize(Resource):
                 explanation = {}
 
             return {
-                "result": ret.package.dict(),
+                "result": ret.package.model_dump(),
                 "package-inheritance": explanation,
                 "problems": problems,
             }
@@ -270,7 +270,7 @@ class Relationship(Resource):
             if len(docs) == 0:
                 api.abort(404, "Unknown relationship", unknownRelationship=identifier)
             try:
-                rel = apis.models.relationships.Relationship.parse_obj(docs[0]).dict()
+                rel = apis.models.relationships.Relationship.model_validate(docs[0]).model_dump()
                 problems = []
             except pydantic.error_wrappers.ValidationError as e:
                 problems = apis.models.errors.make_pydantic_errors_jsonable(e)

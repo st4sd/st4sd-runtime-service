@@ -124,7 +124,7 @@ class PackagesDownloader(PackageMetadataCollection):
         secret_key = ...
         is_default_secret = False
 
-        if security is None or len(security.dict(exclude_none=True)) == 0:
+        if security is None or len(security.model_dump(exclude_none=True)) == 0:
             # VV: There's no Secret associated with this specific base package, check if there's a default one
             # for all base packages that this API instance can pull
             config = utils.parse_configuration(
@@ -182,11 +182,11 @@ class PackagesDownloader(PackageMetadataCollection):
         except apis.runtime.errors.CannotDownloadGitError as e:
             if secret_name is not ...:
                 raise apis.runtime.errors.CannotDownloadGitError(
-                    f"Cannot git-clone with location {package.source.git.location.dict()} using the oauth credentials "
+                    f"Cannot git-clone with location {package.source.git.location.model_dump()} using the oauth credentials "
                     f"in Secret {secret_name}. Double check the location and then verify that the oauth credentials "
                     f"can clone the repository. Underlying error: {e.message}")
             raise apis.runtime.errors.CannotDownloadGitError(
-                f"Cannot git-clone with location {package.source.git.location.dict()} without using any oauth "
+                f"Cannot git-clone with location {package.source.git.location.model_dump()} without using any oauth "
                 f"credentials. Double check that the location is correct and set to public. Underlying error: "
                 f"{e.message}")
 
@@ -195,7 +195,7 @@ class PackagesDownloader(PackageMetadataCollection):
         credentials = apis.k8s.extract_s3_credentials_from_dataset(package.source.dataset.security.dataset)
 
         # VV: instead of handling a Dataset, convert the package to a S3 package and use that instead
-        mock_package = package.copy(deep=True)
+        mock_package = package.model_copy(deep=True)
         mock_package.source.dataset = None
         mock_package.source.s3 = apis.models.virtual_experiment.BasePackageSourceS3(
             security=apis.models.virtual_experiment.BasePackageSourceS3Security(
@@ -257,7 +257,7 @@ class PackagesDownloader(PackageMetadataCollection):
         else:
             # Should never happen: this function is called after
             # the experiment has already been validated
-            source = list(package.source.dict(exclude_none=True))
+            source = list(package.source.model_dump(exclude_none=True))
             raise apis.models.errors.ApiError(f"Package type was not one of git, s3, dataset. Fields were {source}")
 
         download_path = os.path.join(self._root_directory(), package.name)

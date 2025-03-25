@@ -346,4 +346,4 @@ def parse_configuration(
     configuration = setup_config(local_deployment=local_deployment, validate=validate,
                                  from_config_map=from_config_map)
 
-    return apis.models.virtual_experiment.Configuration.parse_obj(configuration)
+    return apis.models.virtual_experiment.Configuration.model_validate(configuration)

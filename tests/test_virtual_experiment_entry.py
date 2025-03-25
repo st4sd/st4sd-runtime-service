@@ -44,10 +44,10 @@ def test_parse_simplest_entry(ve_sum_numbers: apis.models.virtual_experiment.Par
     assert ve.metadata.package.maintainer == "st4sd@st4sd.st4sd"
 
     print("The definition of sum numbers is")
-    print(json.dumps(ve.dict(exclude_none=True), sort_keys=True, indent=4, separators=(',', ': ')))
+    print(json.dumps(ve.model_dump(exclude_none=True), sort_keys=True, indent=4, separators=(',', ': ')))
 
     print("The digest of sumnumbers")
-    print(json.dumps(ve.to_digestable().dict(), sort_keys=True, indent=4, separators=(',', ': ')))
+    print(json.dumps(ve.to_digestable().model_dump(), sort_keys=True, indent=4, separators=(',', ': ')))
 
     assert ve.metadata.registry.digest == "sha256x16092ca4bb13955b1397bf38cfba45ef11c9933bf796454a81de4f86"
 
@@ -150,8 +150,8 @@ def test_merge_metadata_registry_ok():
     unique_two = merged.executionOptionsDefaults.get_variable('unique-two')
     common = merged.executionOptionsDefaults.get_variable('common')
 
-    assert unique_one.dict() == {'name': 'unique-one', 'valueFrom': [{'platform': 'one', 'value': 'hello-one'}]}
-    assert unique_two.dict() == {'name': 'unique-two', 'valueFrom': [{'platform': 'two', 'value': 'hello-two'}]}
+    assert unique_one.model_dump() == {'name': 'unique-one', 'valueFrom': [{'platform': 'one', 'value': 'hello-one'}]}
+    assert unique_two.model_dump() == {'name': 'unique-two', 'valueFrom': [{'platform': 'two', 'value': 'hello-two'}]}
 
     assert len(common.valueFrom) == 2
     assert common.get_platform_value('one') == 'common-one'
@@ -328,7 +328,7 @@ def test_executionOptionDefaults_variables_without_parameterisation(
 
     meta.inherit_defaults(ve_sum_numbers.parameterisation)
 
-    pprint.pprint(meta.dict())
+    pprint.pprint(meta.model_dump())
     add_to_sum = meta.executionOptionsDefaults.get_variable('addToSum')
     num_points = meta.executionOptionsDefaults.get_variable('numberOfPoints')
 
@@ -367,7 +367,7 @@ def test_executionOptionDefaults_variables_with_parameterisation(
            ['addToSum', 'numberOfPoints']
 
     meta.inherit_defaults(ve_sum_numbers.parameterisation)
-    pprint.pprint(meta.dict())
+    pprint.pprint(meta.model_dump())
     add_to_sum = meta.executionOptionsDefaults.get_variable('addToSum')
     num_points = meta.executionOptionsDefaults.get_variable('numberOfPoints')
 
@@ -509,7 +509,7 @@ def test_check_metadata_registry_platforms(flowir_fixture_name: str,
         with apis.db.exp_packages.DatabaseExperiments(f.name) as db:
             apis.kernel.experiments.validate_and_store_pvep_in_db(collection, wf_ve, db)
             res = db.query_identifier(wf_ve.metadata.package.name)
-            retrieved_pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(res[0])
+            retrieved_pvep = apis.models.virtual_experiment.ParameterisedPackage.model_validate(res[0])
             assert sorted(retrieved_pvep.metadata.registry.platforms) == sorted(expected_platforms)
 
             assert "internal-experiment" not in retrieved_pvep.metadata.package.keywords
@@ -557,7 +557,7 @@ def test_check_metadata_output(
             ]
 
             res = db.query_identifier(ve_dsl2_with_key_output.metadata.package.name)
-            retrieved_pvep = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(res[0])
+            retrieved_pvep = apis.models.virtual_experiment.ParameterisedPackage.model_validate(res[0])
 
             assert "internal-experiment" not in retrieved_pvep.metadata.package.keywords
 
@@ -577,7 +577,7 @@ def test_experiment_start_payload_skeleton(
     db_experiments = apis.db.exp_packages.DatabaseExperiments(path_db_experiments)
     db_relationships = apis.db.relationships.DatabaseRelationships(path_db_relationships)
 
-    ve_modular_band_gap_gamess = ve_modular_band_gap_gamess.copy(deep=True)
+    ve_modular_band_gap_gamess = ve_modular_band_gap_gamess.model_copy(deep=True)
 
     for variable in ve_modular_band_gap_gamess.parameterisation.executionOptions.variables:
         if variable.name == "number-processors":

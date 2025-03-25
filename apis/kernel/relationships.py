@@ -77,7 +77,7 @@ def get_default_platform_of_package(
         docs = db_experiments.query_identifier(identifier)
 
     try:
-        ve_target = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+        ve_target = apis.models.virtual_experiment.ParameterisedPackage.model_validate(docs[0])
         return (ve_target.parameterisation.get_available_platforms() or ['default'])[0]
     except KeyError:
         raise apis.models.errors.ApiError(f"Unknown package {identifier}")
@@ -98,7 +98,7 @@ def get_relationship(
     if len(docs) == 0:
         raise apis.models.errors.DBError(identifier)
     try:
-        rel = apis.models.relationships.Relationship.parse_obj(docs[0])
+        rel = apis.models.relationships.Relationship.model_validate(docs[0])
     except pydantic.error_wrappers.ValidationError as e:
         raise apis.models.errors.InvalidModelError.from_pydantic(f"Invalid relationship {identifier}", e)
 
@@ -192,7 +192,7 @@ def synthesize_from_transformation(
         docs = db_experiments.query_identifier(rel.transform.outputGraph.identifier)
         if len(docs) == 1:
             try:
-                target = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(docs[0])
+                target = apis.models.virtual_experiment.ParameterisedPackage.model_validate(docs[0])
                 target_parameterisation = target.parameterisation
             except pydantic.error_wrappers.ValidationError as e:
                 raise apis.models.errors.InvalidModelError.from_pydantic(
@@ -360,7 +360,7 @@ def push_relationship(
     )
 
     with db_relationships:
-        db_relationships.upsert(rel.dict(exclude_none=False), ql=db_relationships.construct_query(rel.identifier))
+        db_relationships.upsert(rel.model_dump(exclude_none=False), ql=db_relationships.construct_query(rel.identifier))
 
     return rel
 
@@ -466,7 +466,7 @@ def api_push_relationship(
     """
 
     try:
-        rel = apis.models.relationships.Relationship.parse_obj(rel)
+        rel = apis.models.relationships.Relationship.model_validate(rel)
     except pydantic.error_wrappers.ValidationError as e:
         raise apis.models.errors.InvalidModelError.from_pydantic(f"Relationship is invalid", e)
 

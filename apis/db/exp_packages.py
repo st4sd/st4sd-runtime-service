@@ -139,7 +139,7 @@ class DatabaseExperiments(apis.db.base.Database):
                 match_test = package
             else:
                 # VV: Throw away most things we don't care for
-                match_test = package.dict(exclude_unset=True, exclude_defaults=True, by_alias=True, exclude_none=True)
+                match_test = package.model_dump(exclude_unset=True, exclude_defaults=True, by_alias=True, exclude_none=True)
 
             def matches(packages: List[Dict[str, Any]], pkg_filter: Dict[str, Any] = match_test) -> bool:
                 if have_just_one_package and len(packages) != 1:
@@ -199,7 +199,7 @@ class DatabaseExperiments(apis.db.base.Database):
         if len(matches) != 1:
             raise ValueError(f"Expected to find exactly 1 match for {identifier} but found {len(matches)} instead")
 
-        pp = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(matches[0])
+        pp = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.model_validate(matches[0])
 
         if 'latest' in pp.metadata.registry.tags and 'latest' not in new_tags:
             raise apis.models.errors.CannotRemoveLatestTagError(identifier)
@@ -213,16 +213,16 @@ class DatabaseExperiments(apis.db.base.Database):
                 self._log.warning(f"Found {len(matches)} entries for identifier {qi.identifier} - will update all")
 
             for m in matches:
-                mpp = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.parse_obj(m)
+                mpp = apis.models.virtual_experiment.ParameterisedPackageDropUnknown.model_validate(m)
                 if mpp.metadata.registry.digest == pp.metadata.registry.digest:
                     continue
                 mpp.metadata.registry.tags.remove(t)
-                self.upsert(mpp.dict(exclude_none=True), self.construct_query_for_identifier(qi.identifier))
+                self.upsert(mpp.model_dump(exclude_none=True), self.construct_query_for_identifier(qi.identifier))
 
         pp.metadata.package.tags = list(new_tags)
         pp.metadata.registry.tags = list(new_tags)
 
-        self.upsert(pp.dict(exclude_none=True), self.construct_query_for_identifier(pi.identifier))
+        self.upsert(pp.model_dump(exclude_none=True), self.construct_query_for_identifier(pi.identifier))
 
     def push_new_entry(self, ve: apis.models.virtual_experiment.ParameterisedPackage, update_digest=True):
         # VV: Need to find if there's a document which the registry currently thinks it's the most recent with user tag
@@ -259,7 +259,7 @@ class DatabaseExperiments(apis.db.base.Database):
             if ve.metadata.registry.digest is None:
                 ve.update_digest()
 
-            to_upsert.append(ve.dict(exclude_none=True))
+            to_upsert.append(ve.model_dump(exclude_none=True))
 
             for doc in to_upsert:
                 ql = self.construct_query(

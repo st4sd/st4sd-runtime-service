@@ -64,7 +64,7 @@ class PolicyRandomCanarySurrogate(apis.policy.PolicyPrior):
           A PolicyBasedExperimentRun
         """
         try:
-            config: PolicyConfig = PolicyConfig.parse_obj(policy_config)
+            config: PolicyConfig = PolicyConfig.model_validate(policy_config)
         except pydantic.error_wrappers.ValidationError as e:
             raise apis.models.errors.ApiError(f"Invalid PolicyConfig payload, problems: {e.json(indent=2)}")
 
@@ -73,7 +73,7 @@ class PolicyRandomCanarySurrogate(apis.policy.PolicyPrior):
                 matching = self.kernel_query_matching_derived(pvep_identifier)
             else:
                 pvep_source = self._api.api_experiment_get(pvep_identifier)
-                pvep_source = apis.models.virtual_experiment.ParameterisedPackage.parse_obj(pvep_source)
+                pvep_source = apis.models.virtual_experiment.ParameterisedPackage.model_validate(pvep_source)
                 matching = apis.policy.MatchingDerived(
                     pvep_identifier=pvep_identifier, pvep_source=pvep_source, matching=[])
         except pydantic.error_wrappers.ValidationError as e:
@@ -93,9 +93,9 @@ class PolicyRandomCanarySurrogate(apis.policy.PolicyPrior):
             # VV: place the pvep_source Last so that we can use the last SimpleExperimentRun uid
             # as the PolicyBasedExperimentRun uid too. This way the returned SimpleExperimentRun uid is always
             # that of the pvep_source (requested pvep)
-            from_relationship = [most_recent, pvep_source.dict()]
+            from_relationship = [most_recent, pvep_source.model_dump()]
         else:
-            from_relationship = [pvep_source.dict()]
+            from_relationship = [pvep_source.model_dump()]
 
         full_source_identifier = matching.pvep_source.metadata.get_unique_identifier_str()
 
@@ -164,7 +164,7 @@ class PolicyRandomCanarySurrogate(apis.policy.PolicyPrior):
         if dry_run is False:
             plan = self.policy_based_run_commit(plan)
 
-        return plan.dict()
+        return plan.model_dump()
 
     def policy_based_run_commit(
             self,
