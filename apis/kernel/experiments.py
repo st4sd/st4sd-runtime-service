@@ -293,7 +293,24 @@ def api_get_experiment_dsl(
                 if isinstance(package.configuration, experiment.model.conf.DSLExperimentConfiguration):
                     conf: experiment.model.conf.DSLExperimentConfiguration = package.configuration
                     namespace = conf.dsl_namespace
-                    experiment.model.frontends.dsl.auto_generate_entrypoint(namespace)
+
+                    # VV: Ensure the namespace has all the special entrypoint arguments
+                    # Special arguments are those which point to input and data files.
+                    # Their value must be [input/|data/]$theFileName
+
+                    if namespace.entrypoint and namespace.entrypoint.execute:
+                        try:
+                            initial_template = namespace.get_template(namespace.entrypoint.entryInstance)
+                        except Exception as e:
+                            pass
+                        else:
+                            entrypoint_args = namespace.entrypoint.execute[0].args or {}
+                            for param in initial_template.signature.parameters:
+                                if param.name.startswith("input.") or param.name.startswith("data."):
+                                    entrypoint_args[param.name] = param.name.replace(".", "/", 1)
+
+                            namespace.entrypoint.execute[0].args = entrypoint_args
+
 
                     # VV: The canvas expects to find all fields in the DSL 2.0
                     # We don't want to store the DSL 2.0 with default values in it because they should be
