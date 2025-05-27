@@ -286,7 +286,7 @@ def test_decode_payload_volume(ve_sum_numbers: apis.models.virtual_experiment.Pa
     assert volume_mounts[0].volume_name == 'volume0'
     assert volume_mounts[0].config == {
         'name': 'volume0',
-        'mountPath': os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, 'pvc'),
+        'mountPath': os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, 'pvc-pvc'),
         'readOnly': False,
         'subPath': 'my custom subpath'
     }
@@ -294,15 +294,15 @@ def test_decode_payload_volume(ve_sum_numbers: apis.models.virtual_experiment.Pa
     assert volume_mounts[1].volume_name == "volume1"
     assert volume_mounts[1].config == {
         'name': 'volume1',
-        'mountPath': os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, 'secret'),
+        'mountPath': os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, 'sc-secret'),
         'readOnly': True,
     }
 
     args = package.runtime_args
 
-    args.index(f'--applicationDependencySource=dep-pvc:{os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, "pvc")}')
+    args.index(f'--applicationDependencySource=dep-pvc:{os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, "pvc-pvc")}')
     args.index(f'--applicationDependencySource=dep-secret:'
-               f'{os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, "secret")}')
+               f'{os.path.join(apis.runtime.package.ROOT_VOLUME_MOUNTS, "sc-secret")}')
 
 
 def test_environment_variables(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
@@ -2035,7 +2035,7 @@ def test_pvc_input(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedP
     workflow = pkg.construct_k8s_workflow()
 
     assert workflow["spec"]["inputs"] == [
-        "/tmp/st4sd-volumes/the-pvc-name/bar.csv:input_smiles.csv"
+        "/tmp/st4sd-volumes/pvc-the-pvc-name/bar.csv:input_smiles.csv"
     ]
 
 
@@ -2062,5 +2062,78 @@ def test_pvc_data(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPa
     workflow = pkg.construct_k8s_workflow()
 
     assert workflow["spec"]["data"] == [
-        "/tmp/st4sd-volumes/the-pvc-name/bar.csv:input_smiles.csv"
+        "/tmp/st4sd-volumes/pvc-the-pvc-name/bar.csv:input_smiles.csv"
     ]
+
+
+def test_pvc_multiple_inputs_same_volume(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.extend(
+        (
+            apis.models.common.Option(name="input_smiles.csv"),
+            apis.models.common.Option(name="other_input.csv")
+        )
+    )
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(
+        {
+            "inputs": [
+                {"sourceFilename":"bar.csv", "volume": "foo", "targetFilename": "input_smiles.csv"},
+                {"sourceFilename": "bar.csv", "volume": "bar", "targetFilename": "other_input.csv"}
+            ],
+            "volumes": [
+                {"identifier": "foo", "type":{"persistentVolumeClaim": "the-pvc-name"}},
+                {"identifier": "bar", "type": {"persistentVolumeClaim": "the-pvc-name"}}
+            ]
+        }
+    )
+    payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+
+    apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+
+    pkg = apis.runtime.package.NamedPackage(ve_sum_numbers, namespace_presets, payload_config)
+    workflow = pkg.construct_k8s_workflow()
+
+    print(yaml.safe_dump(workflow))
+
+    assert sorted(workflow["spec"]["inputs"]) == sorted([
+        "/tmp/st4sd-volumes/pvc-the-pvc-name/bar.csv:input_smiles.csv",
+        '/tmp/st4sd-volumes/pvc-the-pvc-name/bar.csv:other_input.csv'
+    ])
+
+    assert workflow["spec"]["volumeMounts"] == [
+        {
+            'mountPath': '/tmp/st4sd-volumes/pvc-the-pvc-name',
+            'name': 'volume0',
+            'readOnly': True
+        }
+    ]
+
+
+def test_pvc_multiple_inputs_same_volumemount(ve_sum_numbers: apis.models.virtual_experiment.ParameterisedPackage):
+    namespace_presets = apis.models.virtual_experiment.NamespacePresets()
+
+    ve_sum_numbers.metadata.registry.inputs.extend(
+        (
+            apis.models.common.Option(name="input_smiles.csv"),
+            apis.models.common.Option(name="other_input.csv")
+        )
+    )
+
+    old = apis.models.virtual_experiment.DeprecatedExperimentStartPayload.model_validate(
+        {
+            "inputs": [
+                {"sourceFilename":"bar.csv", "volume": "foo", "targetFilename": "input_smiles.csv"},
+                {"sourceFilename": "bar.csv", "volume": "bar", "targetFilename": "other_input.csv"}
+            ],
+            "volumes": [
+                {"identifier": "foo", "type":{"persistentVolumeClaim": "the-pvc-name"}},
+                {"identifier": "bar", "type": {"persistentVolumeClaim": "the-pvc-name"},  "subPath": "hello"}
+            ]
+        }
+    )
+    with pytest.raises( apis.models.errors.InvalidPayloadExperimentStartError) as e:
+        payload_config = apis.models.virtual_experiment.PayloadExecutionOptions.from_old_payload(old)
+
+    assert e.value.message == "The following volumes are mounted multiple times: pvc-the-pvc-name"

@@ -325,7 +325,7 @@ class NamespacePresets(apis.models.common.Digestable):
     @classmethod
     def from_configuration(cls, configuration) -> NamespacePresets:
         """Parses what you would find in the data/config.json field inside the st4sd-runtime-service ConfigMap
-        The current schema is (more in utils.setup_config)::
+        The current schema is (more in apis.utils.setup_config)::
 
             {
                 "image": "container image:str for st4sd-runtime-core"
@@ -403,10 +403,21 @@ class PayloadVolume(apis.models.common.Digestable):
         name_config = volume_raw.get('configMap', {}).get('name')
         name_dataset = volume_raw.get('dataset', {}).get('name')
         name_secret = volume_raw.get('secret', {}).get('name')
+
+        if name_pvc:
+            name = "-".join(("pvc", name_pvc))
+        elif name_config:
+            name = "-".join(("cm", name_config))
+        elif name_dataset:
+            # VV: A dataset has a matching PVC name
+            name = "-".join(("pvc", name_dataset))
+        elif name_secret:
+            name = "-".join(("sc", name_secret))
+
         if sum([1 for x in [name_pvc, name_config, name_dataset, name_secret] if x]) != 1:
             raise ValueError("Volume %s must use exactly 1 of the fields "
                              "persistentVolumeClaim, configMap, dataset, secret" % volume_raw)
-        return name_pvc or name_config or name_dataset or name_secret
+        return name
 
     def get_mountpath(self, root_volume_mounts: str) -> str:
         underlying_name = self.get_mount_name()
@@ -502,7 +513,6 @@ class OldVolume(apis.models.common.Digestable):
     type: OldVolumeType
     applicationDependency: Optional[str] = None
     subPath: Optional[str] = None
-    mountPath: Optional[str] = None
     readOnly: bool = True
     identifier: Optional[str] = None
 
@@ -613,7 +623,17 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
             apis.models.common.Option(name=name, value=vars[name]) for name in vars
         ]
 
-        old_volumes = old.volumes
+        # VV: The users may submit the same volume with a different identifier for convenience.
+        # Here we just deduplicate those entries and remap the input and data files accordingly
+        volume_rename = {}
+        for i, vol in enumerate(old.volumes):
+            for other in old.volumes[i+1:]:
+                if vol.model_dump(exclude={"identifier"}) == other.model_dump(exclude={"identifier"}):
+                    if other.identifier not in volume_rename:
+                        volume_rename[other.identifier] = vol.identifier
+
+        old_volumes = [v for v in old.volumes if v.identifier not in volume_rename]
+
         new_volumes = []
         for ov in old_volumes:
             volume = ov.model_dump(exclude_none=True)
@@ -637,6 +657,15 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
             new_volumes.append(PayloadVolume.model_validate(new_vol))
         config.volumes = new_volumes
 
+        mount_names = [v.get_mount_name() for v in new_volumes]
+        mount_names = {n: sum([1 for x in mount_names if x==n]) for n in mount_names}
+        duplicate_mount_names = [k for k, number in mount_names.items() if number != 1]
+
+        if duplicate_mount_names:
+            raise apis.models.errors.InvalidPayloadExperimentStartError(
+                f"The following volumes are mounted multiple times: "
+                f'{", ".join(sorted(duplicate_mount_names))}'
+            )
         all_volume_ids = []
         volume_dups = set()
         for x in new_volumes:
@@ -718,14 +747,19 @@ class PayloadExecutionOptions(apis.models.common.Digestable):
                     valueFrom=apis.models.common.OptionValueFrom())
 
                 if fc.volume:
+                    # VV: The volume identifier may have been rewritten
+                    volume_identifier = volume_rename.get(fc.volume, fc.volume)
+
                     # VV: The contents of this file are in a Volume (pvc, dataset, secret)
-                    volume_identifiers = [x.identifier for x in config.volumes]
-                    if fc.volume not in volume_identifiers:
+                    # Take into account that some volumes may have been renamed due to duplicate volume entries
+                    volume_identifiers = [volume_rename.get(x.identifier, x.identifier) for x in config.volumes]
+
+                    if volume_identifier not in volume_identifiers:
                         raise apis.models.errors.InvalidPayloadExperimentStartError(
-                            f"There is no volume {fc.volume} definition for {kind} file {fc.model_dump()}"
+                            f"There is no volume {volume_identifier} definition for {kind} file {fc.model_dump()}"
                         )
                     ret.valueFrom.volumeRef = apis.models.common.OptionFromVolumeRef(
-                        name = fc.volume, path=filename_source, rename=filename_target
+                        name = volume_identifier, path=filename_source, rename=filename_target
                     )
                 else:
                     # VV: The contents of this file are in some S3 bucket

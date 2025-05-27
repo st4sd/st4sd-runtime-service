@@ -570,7 +570,6 @@ class NamedPackage:
             volume_raw = volume.type.model_dump()
 
             # VV: Ensure that there's exactly 1 volume-type definition
-            mount_name = volume.get_mount_name()
             mountpath = volume.get_mountpath(ROOT_VOLUME_MOUNTS)
 
             app_dep = volume.applicationDependency
@@ -583,23 +582,23 @@ class NamedPackage:
             volume_mount_entry = {}
 
             if volume.type.persistentVolumeClaim:
-                volume_uid = ':'.join(('persistentVolumeClaim', mount_name))
-                if mount_name == self.pvc_working_volume:
+                volume_uid = ':'.join(('persistentVolumeClaim', volume.type.persistentVolumeClaim.claimName))
+                if volume.type.persistentVolumeClaim.claimName == self.pvc_working_volume:
                     raise ValueError("Volume \"%s\" attempts to mount working-volume as a PVC, this is not permitted" %
-                                     mount_name)
-                volume_entry['persistentVolumeClaim'] = {'claimName': mount_name}
+                                     volume.type.persistentVolumeClaim.claimName)
+                volume_entry['persistentVolumeClaim'] = {'claimName': volume.type.persistentVolumeClaim.claimName}
                 volume_mount_entry = volume_raw['persistentVolumeClaim']
             elif volume.type.configMap:
-                volume_uid = ':'.join(('configMap', mount_name))
-                volume_entry['configMap'] = {'name': mount_name}
+                volume_uid = ':'.join(('configMap', volume.type.configMap.name))
+                volume_entry['configMap'] = {'name': volume.type.configMap.name}
                 volume_mount_entry = volume_raw['configMap']
             elif volume.type.dataset:
-                volume_uid = ':'.join(('persistentVolumeClaim', mount_name))
-                volume_entry['persistentVolumeClaim'] = {'claimName': mount_name}
+                volume_uid = ':'.join(('persistentVolumeClaim', volume.type.dataset.name))
+                volume_entry['persistentVolumeClaim'] = {'claimName': volume.type.dataset.name}
                 volume_mount_entry = volume_raw['dataset']
             elif volume.type.secret:
-                volume_uid = ':'.join(('secret', mount_name))
-                volume_entry['secret'] = {'secretName': mount_name}
+                volume_uid = ':'.join(('secret', volume.type.secret.name))
+                volume_entry['secret'] = {'secretName': volume.type.secret.name}
                 volume_mount_entry = volume_raw['secret']
             else:
                 raise ValueError("InputVolume \"%s\" defines an unknown volume type" % volume)
