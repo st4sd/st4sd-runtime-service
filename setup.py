@@ -76,7 +76,7 @@ setup(
 
     # VV: Add `st4sd-runtime-core` here in the future
     install_requires=[
-        'pytest', 'flask<=2.1.2', 'flask_restx', 'werkzeug<=2.1.2', 'flask-cors', 'tinydb',
+        'pytest', 'flask', 'flask_restx', 'werkzeug', 'flask-cors', 'tinydb',
         'kubernetes', 'stream_zip', 'six', 'pydantic>=2.0.0', "boto3>=1.36.0"
     ],
 
