@@ -21,7 +21,7 @@ here = path.abspath(path.dirname(__file__))
 long_description = ""
 
 setup(
-    name='st4sd-runtime-service',
+    name='st4sd_runtime_service',
 
     # Versions should comply with PEP440.  For a discussion on single-sourcing
     # the version across setup.py and the project code, see
@@ -59,6 +59,8 @@ setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
 
     # What does your project relate to?

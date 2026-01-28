@@ -299,7 +299,7 @@ def test_internal_experiment_with_edges_and_extracting_dsl_for_viewing(
             'executable': 'python',
             'expandArguments': 'none',
             'interpreter': None,
-            'resolvePath': True},
+            'resolvePath': False},
         'resourceManager': {
             'config': {
                 'backend': 'local', 'walltime': 60.0},

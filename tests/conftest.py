@@ -391,7 +391,7 @@ def output_dir() -> str:
     yield path
 
     try:
-        shutil.rmtree(output_dir, ignore_errors=True)
+        shutil.rmtree(path, ignore_errors=True)
     except FileNotFoundError:
         pass
 
